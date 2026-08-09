@@ -688,35 +688,23 @@ class FlamingoApplication(QObject):
         # That default is not cosmetic: napari's GL canvas is already
         # reparented once (chamber_visualization_manager.py swaps in the
         # private _qt_viewer) and every dock/float cycle reparents it again.
-        docked = False
-        if self.main_window is not None and hasattr(self.main_window, "add_panel_dock"):
-            try:
-                dock = self.main_window.add_panel_dock(
-                    "sample_view",
-                    "Sample View",
-                    self.sample_view,
-                    # Float-only. Docking reparents the widget into the main
-                    # window and napari's vispy canvas does not survive it:
-                    # "Dock Right" on 2026-08-09 raised GL_INVALID_VALUE on the
-                    # next paint and closed the application. The panel still
-                    # gets a dock so it appears in View > Panels and keeps its
-                    # remembered geometry — it just cannot be docked.
-                    dockable=False,
-                )
-                dock.show()
-                dock.raise_()
-                docked = True
-            except Exception as exc:  # noqa: BLE001
-                # A layout convenience must never be why Sample View won't open.
-                self.logger.warning(
-                    "Could not dock Sample View (%r); showing as a window", exc
-                )
-
-        if not docked:
-            self.sample_view.show()
-            self.sample_view.raise_()
-            self.sample_view.activateWindow()
-        self.logger.debug("Sample View shown and raised (docked=%s)", docked)
+        # An ordinary independent window, deliberately NOT hosted by the main
+        # window in any form.
+        #
+        # It was briefly put in a floating QDockWidget, which was wrong twice
+        # over. It cannot be docked or tabbed at all: either reparents napari's
+        # vispy canvas, which raises GL_INVALID_VALUE on the next paint and
+        # closes the application (2026-08-09). And a floating dock is a Qt.Tool
+        # window, which by design stays ABOVE its parent — so Sample View
+        # stopped being something you could put behind the main window and
+        # covered whatever was shown there.
+        #
+        # A plain top-level window can be raised, lowered, and dragged to a
+        # second monitor, which is what a 3D view actually needs.
+        self.sample_view.show()
+        self.sample_view.raise_()
+        self.sample_view.activateWindow()
+        self.logger.debug("Sample View shown and raised")
 
         # Update menu states now that Sample View is open
         if self.main_window and self.connection_service:

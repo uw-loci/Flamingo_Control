@@ -18,11 +18,12 @@ from PyQt5.QtGui import QCloseEvent, QIcon, QShowEvent
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
-    QDockWidget,
     QMainWindow,
     QMessageBox,
     QScrollArea,
+    QTabBar,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -105,11 +106,9 @@ class MainWindow(QMainWindow):
         self.camera_live_viewer = camera_live_viewer
         self.image_controls_window = image_controls_window
 
-        # panel_id -> QDockWidget. Populated on demand by add_panel_dock(); a
-        # panel that is never opened never becomes a dock.
-        self._panel_docks: dict = {}
-        self._panel_geometry: dict = {}
-        self._panel_dockable: dict = {}
+        # panel_id -> the scroll area holding that tool's tab. Populated on
+        # demand; a tool that is never opened never gets a tab.
+        self._panel_tabs: dict = {}
         self._panels_menu = None
 
         self._setup_ui()
@@ -172,253 +171,126 @@ class MainWindow(QMainWindow):
         self._set_default_size()
 
     # ------------------------------------------------------------------
-    # Dockable panels
+    # Tool panels
     # ------------------------------------------------------------------
-    # The tabs stay the central widget. Panels the user watches *alongside*
-    # them — Sample View, Stitching, LED Overview — become docks so they can be
-    # placed side by side instead of stacked as separate windows.
+    # Tools that used to open as separate windows join the EXISTING tab bar
+    # instead. Tabs already own the full window area, so a tool gets the whole
+    # width rather than competing with Connection/Workflow/Stage Control for
+    # it, and nothing can end up on top of anything else.
     #
-    # Two deliberate limits:
+    # This replaced a QDockWidget arrangement that failed on both counts: a
+    # docked panel squeezed the other tabs into an unusable sliver, and the
+    # floating Sample View — a Qt.Tool window, which by design sits above its
+    # parent — then covered the docked panel anyway.
     #
-    # * Panels default to FLOATING, which is byte-for-byte their current
-    #   behaviour as separate top-level windows. Docking is opt-in, so this
-    #   changes nothing until the user drags a panel into place. That matters
-    #   most for Sample View: napari's canvas is already reparented once (we
-    #   swap in the private _qt_viewer, see chamber_visualization_manager.py),
-    #   and every dock/float cycle reparents that GL canvas again. Keeping the
-    #   default floating means the risky path is chosen, never inherited.
-    # * Only a handful of panels are dockable. Turning ~20 panels into docks
-    #   produces a layout nobody can manage (napari#4579).
-    def add_panel_dock(
-        self,
-        panel_id: str,
-        title: str,
-        widget: QWidget,
-        area: int = Qt.RightDockWidgetArea,
-        floating: bool = True,
-        dockable: bool = True,
-    ) -> QDockWidget:
-        """Host ``widget`` in a dock, or re-show the dock it already has.
+    # Sample View is NOT among these. Moving napari's vispy canvas to any new
+    # parent raises GL_INVALID_VALUE on the next paint and closes the
+    # application, so it stays an independent top-level window.
+    def add_panel_tab(self, panel_id: str, title: str, widget: QWidget) -> int:
+        """Show a tool as a tab, or switch to the tab it already has.
 
-        ``panel_id`` becomes the dock's objectName and must be stable forever:
-        restoreState() matches docks by objectName and silently drops any it
-        cannot find, so renaming one is indistinguishable from a corrupt layout.
-
-        ``dockable=False`` gives a panel that can only ever float. Use it for
-        anything holding an OpenGL canvas. Docking reparents the widget into the
-        main window, and napari's vispy canvas does not survive that: on
-        2026-08-09 docking Sample View raised ``OpenGL got errors (Check before
-        draw): GL_INVALID_VALUE`` on the next paint and took the application
-        down with it. Such a panel still gets a dock — so it appears in
-        View > Panels and keeps its remembered geometry — it simply cannot be
-        dropped into a dock area.
+        Returns the tab index. Panel tabs carry a close button; the built-in
+        tabs do not, because closing Connection or Workflow is not a thing
+        anyone means to do.
         """
-        existing = self._panel_docks.get(panel_id)
+        existing = self._panel_tabs.get(panel_id)
         if existing is not None:
-            existing.show()
-            existing.raise_()
-            return existing
+            index = self.tabs.indexOf(existing)
+            if index >= 0:
+                self.tabs.setCurrentIndex(index)
+                return index
+            # The tab was closed; fall through and add it again.
+            self._panel_tabs.pop(panel_id, None)
 
-        dock = QDockWidget(title, self)
-        dock.setObjectName(f"dock_{panel_id}")
-        dock.setWidget(widget)
-        self._panel_dockable[panel_id] = dockable
-        if dockable:
-            dock.setAllowedAreas(
-                Qt.LeftDockWidgetArea
-                | Qt.RightDockWidgetArea
-                | Qt.BottomDockWidgetArea
-                | Qt.TopDockWidgetArea
-            )
-        else:
-            # NoDockWidgetArea makes every drop target refuse it, and dropping
-            # Movable from the feature set stops the drag beginning at all.
-            # Both, because either alone still leaves a way to crash the app.
-            dock.setAllowedAreas(Qt.NoDockWidgetArea)
-            dock.setFeatures(
-                QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetFloatable
-            )
-        self.addDockWidget(area, dock)
-        dock.setFloating(True if not dockable else floating)
-        self._panel_docks[panel_id] = dock
+        container = self._wrap_in_scroll_area(widget)
+        index = self.tabs.addTab(container, title)
+        self._panel_tabs[panel_id] = container
 
-        # Hiding a floating dock destroys its native window, and Qt gives the
-        # next show() a default size and position — so a panel the user had
-        # sized and placed comes back wrong every time they toggle it off and
-        # on. Remember the geometry across both the toggle and the session.
-        dock.visibilityChanged.connect(
-            lambda visible, pid=panel_id: self._on_panel_visibility(pid, visible)
+        close = QToolButton(self.tabs)
+        close.setText("\u00d7")
+        close.setAutoRaise(True)
+        close.setToolTip(f"Close {title}")
+        close.clicked.connect(
+            lambda _checked=False, pid=panel_id: self.close_panel_tab(pid)
         )
-        self._restore_panel_geometry(panel_id)
+        self.tabs.tabBar().setTabButton(index, QTabBar.RightSide, close)
 
+        self.tabs.setCurrentIndex(index)
         self._refresh_panels_menu()
-        return dock
+        return index
+
+    def close_panel_tab(self, panel_id: str) -> bool:
+        """Remove a tool's tab. The tool itself is kept, not destroyed.
+
+        Reopening it from the menu should come back to the state it was left
+        in — a half-filled bounding box is worth more than a fresh dialog.
+        """
+        container = self._panel_tabs.pop(panel_id, None)
+        if container is None:
+            return False
+        index = self.tabs.indexOf(container)
+        if index >= 0:
+            self.tabs.removeTab(index)
+        # Detach the tool from the scroll area so reopening can re-wrap it.
+        inner = container.takeWidget() if hasattr(container, "takeWidget") else None
+        if inner is not None:
+            inner.setParent(None)
+        container.deleteLater()
+        self._refresh_panels_menu()
+        return True
 
     def _show_as_panel(self, panel_id: str, title: str, widget: QWidget) -> None:
-        """Show a tool as a dockable panel, or as its own window if that fails.
+        """Show a tool as a tab, or as its own window if that fails.
 
-        Everything reached from the Extensions menu is a QDialog that has always
-        opened as an independent window. Hosting it in a floating dock keeps
-        that behaviour — same separate window — while adding it to View > Panels
-        so it can be docked beside the tabs. If anything about that goes wrong,
-        the tool still opens the way it always did: a layout convenience must
-        never be the reason a tool won't open.
+        Everything reached from the Extensions menu is a QDialog that has
+        always opened as an independent window, so falling back to that loses
+        nothing. A layout convenience must never be the reason a tool will not
+        open.
         """
         try:
-            dock = self.add_panel_dock(panel_id, title, widget)
-            dock.show()
-            dock.raise_()
-            dock.activateWindow()
+            self.add_panel_tab(panel_id, title, widget)
             return
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning(
-                "Could not dock %s (%r); showing as a window", panel_id, exc
+                "Could not tab %s (%r); showing as a window", panel_id, exc
             )
         widget.show()
         widget.raise_()
         widget.activateWindow()
 
-    def _on_panel_visibility(self, panel_id: str, visible: bool) -> None:
-        """Save a panel's geometry as it hides, restore it as it shows."""
-        dock = self._panel_docks.get(panel_id)
-        if dock is None:
-            return
-        if visible:
-            self._restore_panel_geometry(panel_id)
-        elif dock.isFloating():
-            self._panel_geometry[panel_id] = dock.saveGeometry()
-            if self._geometry_manager is not None:
-                try:
-                    self._geometry_manager.save_geometry(f"panel_{panel_id}", dock)
-                except Exception as exc:  # noqa: BLE001
-                    logging.getLogger(__name__).debug(
-                        "Could not persist %s geometry: %r", panel_id, exc
-                    )
-
-    def _restore_panel_geometry(self, panel_id: str) -> None:
-        """Put a panel back where it was, this session or a previous one."""
-        dock = self._panel_docks.get(panel_id)
-        if dock is None or not dock.isFloating():
-            return
-        saved = self._panel_geometry.get(panel_id)
-        if saved is not None:
-            dock.restoreGeometry(saved)
-            return
-        if self._geometry_manager is not None:
-            try:
-                self._geometry_manager.restore_geometry(f"panel_{panel_id}", dock)
-            except Exception as exc:  # noqa: BLE001
-                logging.getLogger(__name__).debug(
-                    "Could not restore %s geometry: %r", panel_id, exc
-                )
-
-    def dock_panel(self, panel_id: str, area: int) -> bool:
-        """Dock a panel into ``area``, or float it when ``area`` is None.
-
-        Exposed as menu actions because dragging a floating panel onto the main
-        window is the only other way to dock it, and nothing on screen says so.
-        A feature nobody can find is not a feature.
-        """
-        dock = self._panel_docks.get(panel_id)
-        if dock is None:
-            return False
-        if area is not None and not self._panel_dockable.get(panel_id, True):
-            logging.getLogger(__name__).info(
-                "%s cannot be docked (OpenGL canvas); leaving it floating",
-                panel_id,
-            )
-            return False
-        if area is None:
-            dock.setFloating(True)
-            self._restore_panel_geometry(panel_id)
-        else:
-            if dock.isFloating():
-                self._panel_geometry[panel_id] = dock.saveGeometry()
-            dock.setFloating(False)
-            self.addDockWidget(area, dock)
-        dock.show()
-        dock.raise_()
-        return True
-
-    def tabify_panels(self, first_id: str, second_id: str) -> bool:
-        """Stack two docks as tabs. Returns False if either is missing.
-
-        Never tabify a panel carrying a value the user monitors during an
-        acquisition — stage position, progress — because a tab hides it behind
-        another panel exactly when it is being watched.
-        """
-        a = self._panel_docks.get(first_id)
-        b = self._panel_docks.get(second_id)
-        if a is None or b is None:
-            return False
-        self.tabifyDockWidget(a, b)
-        a.raise_()
-        return True
-
-    def reset_panel_layout(self) -> None:
-        """Return every dock to floating and visible.
-
-        The escape hatch for a layout restored from an older build: a dock
-        whose objectName has changed, or one dragged onto a monitor that is no
-        longer attached, is otherwise unreachable.
-        """
-        for dock in self._panel_docks.values():
-            dock.setFloating(True)
-            dock.show()
-        logging.getLogger(__name__).info("Panel layout reset to floating")
-
     def _refresh_panels_menu(self) -> None:
-        """Rebuild the Panels submenu to match the docks that exist."""
+        """Rebuild the Panels submenu to match the tools currently tabbed."""
         menu = getattr(self, "_panels_menu", None)
         if menu is None:
             return
         menu.clear()
-        if not self._panel_docks:
-            placeholder = QAction("(open a panel to dock it)", self)
+        if not self._panel_tabs:
+            placeholder = QAction("(no tools open)", self)
             placeholder.setEnabled(False)
             menu.addAction(placeholder)
-            menu.addSeparator()
-        for panel_id, dock in sorted(self._panel_docks.items()):
-            # One submenu per panel: show/hide, plus explicit placement. The
-            # placement entries exist because a floating dock looks exactly
-            # like an ordinary window — nothing tells the user it can be
-            # dragged into the main window at all.
-            sub = menu.addMenu(dock.windowTitle())
-            toggle = dock.toggleViewAction()
-            toggle.setText("&Show Panel")
-            toggle.setStatusTip(f"Show or hide the {dock.windowTitle()} panel")
-            sub.addAction(toggle)
-            sub.addSeparator()
-            if not self._panel_dockable.get(panel_id, True):
-                # Offering an action that crashes the application is worse than
-                # offering nothing. Say why, so the absence reads as a decision.
-                note = QAction("Always a separate window (3D view)", self)
-                note.setEnabled(False)
-                note.setStatusTip(
-                    "This panel holds an OpenGL 3D canvas, which cannot be "
-                    "moved into the main window without losing its graphics "
-                    "context"
-                )
-                sub.addAction(note)
+            return
+        for panel_id, container in sorted(self._panel_tabs.items()):
+            index = self.tabs.indexOf(container)
+            if index < 0:
                 continue
-            for label, area in (
-                ("Dock &Left", Qt.LeftDockWidgetArea),
-                ("Dock &Right", Qt.RightDockWidgetArea),
-                ("Dock &Bottom", Qt.BottomDockWidgetArea),
-                ("&Float (separate window)", None),
-            ):
-                act = QAction(label, self)
-                act.setStatusTip(f"{label.replace('&', '')} — {dock.windowTitle()}")
-                act.triggered.connect(
-                    lambda _checked=False, p=panel_id, a=area: self.dock_panel(p, a)
-                )
-                sub.addAction(act)
-        if self._panel_docks:
-            menu.addSeparator()
-        reset = QAction("&Reset Panel Layout", self)
-        reset.setStatusTip("Return all panels to separate floating windows")
-        reset.triggered.connect(self.reset_panel_layout)
-        menu.addAction(reset)
+            title = self.tabs.tabText(index)
+            act = QAction(f"Go to {title}", self)
+            act.setStatusTip(f"Switch to the {title} tab")
+            act.triggered.connect(
+                lambda _checked=False, pid=panel_id: self.add_panel_tab_focus(pid)
+            )
+            menu.addAction(act)
+
+    def add_panel_tab_focus(self, panel_id: str) -> bool:
+        """Switch to an already-open tool's tab."""
+        container = self._panel_tabs.get(panel_id)
+        if container is None:
+            return False
+        index = self.tabs.indexOf(container)
+        if index < 0:
+            return False
+        self.tabs.setCurrentIndex(index)
+        return True
 
     def _wrap_in_scroll_area(self, widget: QWidget) -> QScrollArea:
         """Wrap a widget in a scroll area for overflow handling.
