@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         # panel that is never opened never becomes a dock.
         self._panel_docks: dict = {}
         self._panel_geometry: dict = {}
+        self._panel_dockable: dict = {}
         self._panels_menu = None
 
         self._setup_ui()
@@ -195,12 +196,22 @@ class MainWindow(QMainWindow):
         widget: QWidget,
         area: int = Qt.RightDockWidgetArea,
         floating: bool = True,
+        dockable: bool = True,
     ) -> QDockWidget:
         """Host ``widget`` in a dock, or re-show the dock it already has.
 
         ``panel_id`` becomes the dock's objectName and must be stable forever:
         restoreState() matches docks by objectName and silently drops any it
         cannot find, so renaming one is indistinguishable from a corrupt layout.
+
+        ``dockable=False`` gives a panel that can only ever float. Use it for
+        anything holding an OpenGL canvas. Docking reparents the widget into the
+        main window, and napari's vispy canvas does not survive that: on
+        2026-08-09 docking Sample View raised ``OpenGL got errors (Check before
+        draw): GL_INVALID_VALUE`` on the next paint and took the application
+        down with it. Such a panel still gets a dock — so it appears in
+        View > Panels and keeps its remembered geometry — it simply cannot be
+        dropped into a dock area.
         """
         existing = self._panel_docks.get(panel_id)
         if existing is not None:
@@ -211,14 +222,24 @@ class MainWindow(QMainWindow):
         dock = QDockWidget(title, self)
         dock.setObjectName(f"dock_{panel_id}")
         dock.setWidget(widget)
-        dock.setAllowedAreas(
-            Qt.LeftDockWidgetArea
-            | Qt.RightDockWidgetArea
-            | Qt.BottomDockWidgetArea
-            | Qt.TopDockWidgetArea
-        )
+        self._panel_dockable[panel_id] = dockable
+        if dockable:
+            dock.setAllowedAreas(
+                Qt.LeftDockWidgetArea
+                | Qt.RightDockWidgetArea
+                | Qt.BottomDockWidgetArea
+                | Qt.TopDockWidgetArea
+            )
+        else:
+            # NoDockWidgetArea makes every drop target refuse it, and dropping
+            # Movable from the feature set stops the drag beginning at all.
+            # Both, because either alone still leaves a way to crash the app.
+            dock.setAllowedAreas(Qt.NoDockWidgetArea)
+            dock.setFeatures(
+                QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetFloatable
+            )
         self.addDockWidget(area, dock)
-        dock.setFloating(floating)
+        dock.setFloating(True if not dockable else floating)
         self._panel_docks[panel_id] = dock
 
         # Hiding a floating dock destroys its native window, and Qt gives the
@@ -301,6 +322,12 @@ class MainWindow(QMainWindow):
         dock = self._panel_docks.get(panel_id)
         if dock is None:
             return False
+        if area is not None and not self._panel_dockable.get(panel_id, True):
+            logging.getLogger(__name__).info(
+                "%s cannot be docked (OpenGL canvas); leaving it floating",
+                panel_id,
+            )
+            return False
         if area is None:
             dock.setFloating(True)
             self._restore_panel_geometry(panel_id)
@@ -362,6 +389,18 @@ class MainWindow(QMainWindow):
             toggle.setStatusTip(f"Show or hide the {dock.windowTitle()} panel")
             sub.addAction(toggle)
             sub.addSeparator()
+            if not self._panel_dockable.get(panel_id, True):
+                # Offering an action that crashes the application is worse than
+                # offering nothing. Say why, so the absence reads as a decision.
+                note = QAction("Always a separate window (3D view)", self)
+                note.setEnabled(False)
+                note.setStatusTip(
+                    "This panel holds an OpenGL 3D canvas, which cannot be "
+                    "moved into the main window without losing its graphics "
+                    "context"
+                )
+                sub.addAction(note)
+                continue
             for label, area in (
                 ("Dock &Left", Qt.LeftDockWidgetArea),
                 ("Dock &Right", Qt.RightDockWidgetArea),

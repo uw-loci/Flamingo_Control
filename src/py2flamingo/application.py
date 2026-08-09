@@ -692,7 +692,16 @@ class FlamingoApplication(QObject):
         if self.main_window is not None and hasattr(self.main_window, "add_panel_dock"):
             try:
                 dock = self.main_window.add_panel_dock(
-                    "sample_view", "Sample View", self.sample_view
+                    "sample_view",
+                    "Sample View",
+                    self.sample_view,
+                    # Float-only. Docking reparents the widget into the main
+                    # window and napari's vispy canvas does not survive it:
+                    # "Dock Right" on 2026-08-09 raised GL_INVALID_VALUE on the
+                    # next paint and closed the application. The panel still
+                    # gets a dock so it appears in View > Panels and keeps its
+                    # remembered geometry — it just cannot be docked.
+                    dockable=False,
                 )
                 dock.show()
                 dock.raise_()

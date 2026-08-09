@@ -320,3 +320,85 @@ class TestTheOtherToolsAreActuallyWired(_Base):
         w = QWidget()
         self._win._show_as_panel("fallback", "Fallback", w)
         assert w.isVisible()
+
+
+class TestAnOpenGLPanelCanNeverBeDocked(_Base):
+    """Docking Sample View closed the application.
+
+    2026-08-09, on the rig: "Dock Right" reparented napari's vispy canvas into
+    the main window, and the next paint raised
+
+        RuntimeError: OpenGL got errors (Check before draw): GL_INVALID_VALUE
+
+    after which the app froze and exited. A GL context does not survive being
+    moved to a new native window, so this is not a bug to fix downstream — the
+    action simply must not be reachable.
+
+    Floating still works, which is what Sample View has always been.
+    """
+
+    def test_a_gl_panel_refuses_every_dock_area(self):
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QWidget
+
+        self._win.add_panel_dock("gl", "GL Panel", QWidget(), dockable=False)
+        dock = self._win._panel_docks["gl"]
+        assert dock.allowedAreas() == Qt.NoDockWidgetArea
+
+    def test_a_gl_panel_cannot_even_begin_a_drag(self):
+        """Belt and braces — allowedAreas alone still lets the drag start."""
+        from PyQt5.QtWidgets import QDockWidget, QWidget
+
+        self._win.add_panel_dock("gl2", "GL Two", QWidget(), dockable=False)
+        dock = self._win._panel_docks["gl2"]
+        assert not (dock.features() & QDockWidget.DockWidgetMovable)
+
+    def test_dock_panel_refuses_a_gl_panel_and_leaves_it_floating(self):
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QWidget
+
+        self._win.add_panel_dock("gl3", "GL Three", QWidget(), dockable=False)
+        assert not self._win.dock_panel("gl3", Qt.RightDockWidgetArea)
+        assert self._win._panel_docks["gl3"].isFloating()
+
+    def test_a_gl_panel_starts_floating_whatever_was_requested(self):
+        from PyQt5.QtWidgets import QWidget
+
+        self._win.add_panel_dock(
+            "gl4", "GL Four", QWidget(), floating=False, dockable=False
+        )
+        assert self._win._panel_docks["gl4"].isFloating()
+
+    def test_the_menu_offers_no_dock_action_for_a_gl_panel(self):
+        from PyQt5.QtWidgets import QWidget
+
+        self._win.add_panel_dock("gl5", "GL Five", QWidget(), dockable=False)
+        sub = None
+        for action in self._win._panels_menu.actions():
+            if action.menu() and action.text() == "GL Five":
+                sub = action.menu()
+        assert sub is not None
+        labels = [a.text() for a in sub.actions() if a.text()]
+        assert not any(
+            "Dock" in t for t in labels
+        ), f"a dock action that crashes the app must not be offered: {labels}"
+        assert any(
+            "separate window" in t for t in labels
+        ), "the absence must be explained, or it reads as a missing feature"
+
+    def test_an_ordinary_panel_is_unaffected(self):
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QWidget
+
+        self._win.add_panel_dock("normal", "Normal", QWidget())
+        assert self._win.dock_panel("normal", Qt.RightDockWidgetArea)
+        assert not self._win._panel_docks["normal"].isFloating()
+
+    def test_sample_view_is_registered_as_float_only(self):
+        """The call site must actually pass dockable=False."""
+        import inspect
+
+        from py2flamingo.application import FlamingoApplication
+
+        src = inspect.getsource(FlamingoApplication._open_sample_view)
+        assert "dockable=False" in src
