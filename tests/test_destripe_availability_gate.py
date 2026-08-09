@@ -107,3 +107,60 @@ class TestTheBackendIsActuallyImportable:
             f"flamingo-stitcher {raw} predates the vendored stripe filter; "
             f"bump the pin in requirements.txt"
         )
+
+
+class TestTheStitcherPinTracksTheReleaseTag:
+    """The pin has to move with the tag or the "shared code" claim is false.
+
+    It sat at v0.4.2 for six releases. Then, on the very commit that added
+    "BUMP THIS WITH EVERY STITCHER RELEASE" to requirements.txt, v0.10.2 was
+    tagged and the pin was left at v0.10.1 — so the comment was already stale
+    when it was written. A note to a human is not a mechanism.
+    """
+
+    def _pinned_version(self):
+        import re
+        from pathlib import Path
+
+        req = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(
+            encoding="utf-8"
+        )
+        m = re.search(r"flamingo-stitcher\.git@v([0-9]+(?:\.[0-9]+)*)", req)
+        assert m, "the flamingo-stitcher pin is missing or no longer tag-based"
+        return tuple(int(p) for p in m.group(1).split("."))
+
+    def test_the_pin_is_a_released_tag(self):
+        assert self._pinned_version() >= (0, 9, 5), (
+            "the vendored destripe filter arrived in v0.9.5; anything older "
+            "silently disables Destriping"
+        )
+
+    def test_the_pin_is_not_older_than_the_installed_stitcher(self):
+        """Catches the exact miss: a new tag released, the pin left behind.
+
+        Judged against the imported module's __version__, which is what will
+        actually run. An editable dev install may legitimately be ahead — that
+        is skipped rather than failed, since only the rig's pin matters.
+        """
+        import pytest
+
+        pytest.importorskip("flamingo_stitcher")
+        import flamingo_stitcher
+
+        raw = str(getattr(flamingo_stitcher, "__version__", ""))
+        if not raw:
+            pytest.skip("flamingo_stitcher exposes no __version__")
+        installed = []
+        for chunk in raw.split("."):
+            digits = "".join(c for c in chunk if c.isdigit())
+            if not digits:
+                break
+            installed.append(int(digits))
+        installed = tuple(installed)
+
+        pinned = self._pinned_version()
+        assert pinned >= installed, (
+            f"requirements.txt pins v{'.'.join(map(str, pinned))} but the "
+            f"stitcher is at {raw}. Bump the pin — in-app stitching runs the "
+            f"pin, not the tag."
+        )
