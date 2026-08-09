@@ -236,3 +236,65 @@ class TestOverlapIsUnmissableInTheUI:
     def test_the_resting_message_still_states_the_consequence(self):
         self._dlg.tile_overlap.setValue(10.0)
         assert "every acquisition" in self._dlg._overlap_warning_label.text()
+
+
+class TestFocusStackingIsNotAnAcquisitionChoice:
+    """ "Use focus stacking" was a checkbox that could only do harm.
+
+    Every projection is computed from the same Z sweep by
+    _calculate_projections, "focus_stack" (Extended Depth of Focus) included,
+    and all of them reach the results window. The checkbox did not change what
+    was captured — it only overwrote images["best_focus"] with a focus
+    composite. Checking it therefore made two result options byte-identical and
+    threw away the single sharpest plane, which is the one thing "Best Focus"
+    is supposed to mean.
+
+    A choice that must be made before a 4-hour acquisition, cannot be undone
+    afterwards, and whose only effect is to destroy information, is worse than
+    no choice at all.
+    """
+
+    def _dialog_source(self):
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parents[1]
+            / "src/py2flamingo/views/dialogs/led_2d_overview_dialog.py"
+        ).read_text(encoding="utf-8")
+
+    def _workflow_source(self):
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parents[1]
+            / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+        ).read_text(encoding="utf-8")
+
+    def test_the_checkbox_is_gone(self):
+        assert "focus_stacking_checkbox" not in self._dialog_source()
+
+    def test_best_focus_is_always_the_single_sharpest_plane(self):
+        src = self._workflow_source()
+        assert "if self._config.use_focus_stacking:" not in src
+        assert "max(frames, key=lambda f: f[2])" in src
+
+    def test_extended_depth_of_focus_is_still_offered_in_the_results(self):
+        """Removing the checkbox must not remove the capability."""
+        from py2flamingo.models.data.overview_results import VISUALIZATION_TYPES
+
+        keys = [k for k, _label in VISUALIZATION_TYPES]
+        assert "focus_stack" in keys
+        assert "best_focus" in keys
+
+    def test_the_projection_is_computed_regardless(self):
+        src = self._workflow_source()
+        assert 'projections["focus_stack"]' in src
+
+    def test_old_sessions_still_load(self):
+        """The config field stays so a saved session does not fail to open."""
+        import pytest
+
+        pytest.importorskip("PyQt5")
+        from py2flamingo.views.dialogs.led_2d_overview_dialog import ScanConfiguration
+
+        assert "use_focus_stacking" in ScanConfiguration.__dataclass_fields__

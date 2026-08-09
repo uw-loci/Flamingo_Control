@@ -75,7 +75,9 @@ class ScanConfiguration:
     led_name: str
     led_intensity: float
     z_step_size: float = 0.050  # mm (50 um default)
-    use_focus_stacking: bool = False  # If True, use full focus stacking (TODO)
+    # Retained so sessions saved before the checkbox was removed still load.
+    # Ignored: every projection is computed from the Z sweep regardless.
+    use_focus_stacking: bool = False
     fast_mode: bool = (
         True  # If True, use continuous scanning (no Z-stacks, much faster)
     )
@@ -451,14 +453,12 @@ class LED2DOverviewDialog(PersistentDialog):
         # overlap, leaving the stitcher nothing to register on.
         layout.addWidget(self._create_tile_overlap_row(), 2, 0, 1, 4)
 
-        # Focus stacking checkbox
-        self.focus_stacking_checkbox = QCheckBox("Use focus stacking (slower)")
-        self.focus_stacking_checkbox.setToolTip(
-            "If checked, combines best-focused regions from all Z planes.\n"
-            "If unchecked, uses single best-focused frame per tile."
-        )
-        self.focus_stacking_checkbox.setChecked(False)
-        layout.addWidget(self.focus_stacking_checkbox, 3, 0, 1, 3)
+        # (No focus-stacking checkbox. Every projection, "Extended Depth of
+        # Focus" included, is computed from the same Z sweep and offered in the
+        # results window — see _calculate_projections. The checkbox only
+        # overwrote "Best Focus" with a focus composite, which made two result
+        # options identical and threw away the single sharpest frame, the one
+        # thing "Best Focus" is supposed to mean.)
 
         # Single-rotation (quick test) checkbox
         self.single_rotation_checkbox = QCheckBox(
@@ -1469,7 +1469,6 @@ class LED2DOverviewDialog(PersistentDialog):
             led_name=self._current_led_name if self._current_led_name else "none",
             led_intensity=self._current_led_intensity,
             z_step_size=self.z_step_size.value(),
-            use_focus_stacking=self.focus_stacking_checkbox.isChecked(),
             single_rotation=self.single_rotation_checkbox.isChecked(),
             tile_overlap_percent=self.tile_overlap.value(),
         )

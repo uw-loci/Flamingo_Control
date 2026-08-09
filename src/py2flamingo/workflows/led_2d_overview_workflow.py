@@ -1490,17 +1490,15 @@ class LED2DOverviewWorkflow(QObject):
         # Calculate all visualization types from the captured frames
         images = self._calculate_projections(frames)
 
-        # Check if focus stacking is requested for best_focus
-        if self._config.use_focus_stacking:
-            # TODO: Implement full focus stacking (combine best-focused regions)
-            best_frame = self._focus_stack_frames(frames)
-            best_z = z_center  # Focus-stacked image represents composite
-            images["best_focus"] = best_frame
-        else:
-            # Select single best-focused frame
-            best_z, best_frame, best_score = max(frames, key=lambda f: f[2])
-            logger.debug(f"Best focus at Z={best_z:.3f} (score={best_score:.1f})")
-            images["best_focus"] = best_frame
+        # "Best Focus" means the single sharpest plane, and only that. The
+        # focus-stacked composite is already computed by _calculate_projections
+        # as "focus_stack" / Extended Depth of Focus, so overwriting best_focus
+        # with a composite (what the old use_focus_stacking flag did) produced
+        # two identical result options and destroyed the only view that shows a
+        # real, unblended plane.
+        best_z, best_frame, best_score = max(frames, key=lambda f: f[2])
+        logger.debug(f"Best focus at Z={best_z:.3f} (score={best_score:.1f})")
+        images["best_focus"] = best_frame
 
         return TileResult(
             x=x,
