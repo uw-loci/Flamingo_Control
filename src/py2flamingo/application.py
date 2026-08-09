@@ -682,10 +682,32 @@ class FlamingoApplication(QObject):
         if self.jog_panel is not None:
             self.jog_panel.set_sample_view(self.sample_view)
 
-        self.sample_view.show()
-        self.sample_view.raise_()
-        self.sample_view.activateWindow()
-        self.logger.debug("Sample View shown and raised")
+        # Host it in a dock so it can sit beside the tabs instead of only on
+        # top of them. It floats by default, which is exactly the separate
+        # window it has always been — docking is something the user chooses.
+        # That default is not cosmetic: napari's GL canvas is already
+        # reparented once (chamber_visualization_manager.py swaps in the
+        # private _qt_viewer) and every dock/float cycle reparents it again.
+        docked = False
+        if self.main_window is not None and hasattr(self.main_window, "add_panel_dock"):
+            try:
+                dock = self.main_window.add_panel_dock(
+                    "sample_view", "Sample View", self.sample_view
+                )
+                dock.show()
+                dock.raise_()
+                docked = True
+            except Exception as exc:  # noqa: BLE001
+                # A layout convenience must never be why Sample View won't open.
+                self.logger.warning(
+                    "Could not dock Sample View (%r); showing as a window", exc
+                )
+
+        if not docked:
+            self.sample_view.show()
+            self.sample_view.raise_()
+            self.sample_view.activateWindow()
+        self.logger.debug("Sample View shown and raised (docked=%s)", docked)
 
         # Update menu states now that Sample View is open
         if self.main_window and self.connection_service:

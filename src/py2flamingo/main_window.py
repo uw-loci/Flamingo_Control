@@ -10,6 +10,7 @@ into a cohesive application window. The MainWindow is responsible for:
 - Handling window lifecycle events
 """
 
+import logging
 from typing import Optional
 
 from PyQt5.QtCore import Qt
@@ -17,6 +18,7 @@ from PyQt5.QtGui import QCloseEvent, QIcon, QShowEvent
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
+    QDockWidget,
     QMainWindow,
     QMessageBox,
     QScrollArea,
@@ -103,6 +105,11 @@ class MainWindow(QMainWindow):
         self.camera_live_viewer = camera_live_viewer
         self.image_controls_window = image_controls_window
 
+        # panel_id -> QDockWidget. Populated on demand by add_panel_dock(); a
+        # panel that is never opened never becomes a dock.
+        self._panel_docks: dict = {}
+        self._panels_menu = None
+
         self._setup_ui()
         self._setup_menu()
         self.setWindowIcon(get_app_icon())  # Use flamingo icon
@@ -161,6 +168,103 @@ class MainWindow(QMainWindow):
 
         # Set intelligent default window size based on screen dimensions
         self._set_default_size()
+
+    # ------------------------------------------------------------------
+    # Dockable panels
+    # ------------------------------------------------------------------
+    # The tabs stay the central widget. Panels the user watches *alongside*
+    # them — Sample View, Stitching, LED Overview — become docks so they can be
+    # placed side by side instead of stacked as separate windows.
+    #
+    # Two deliberate limits:
+    #
+    # * Panels default to FLOATING, which is byte-for-byte their current
+    #   behaviour as separate top-level windows. Docking is opt-in, so this
+    #   changes nothing until the user drags a panel into place. That matters
+    #   most for Sample View: napari's canvas is already reparented once (we
+    #   swap in the private _qt_viewer, see chamber_visualization_manager.py),
+    #   and every dock/float cycle reparents that GL canvas again. Keeping the
+    #   default floating means the risky path is chosen, never inherited.
+    # * Only a handful of panels are dockable. Turning ~20 panels into docks
+    #   produces a layout nobody can manage (napari#4579).
+    def add_panel_dock(
+        self,
+        panel_id: str,
+        title: str,
+        widget: QWidget,
+        area: int = Qt.RightDockWidgetArea,
+        floating: bool = True,
+    ) -> QDockWidget:
+        """Host ``widget`` in a dock, or re-show the dock it already has.
+
+        ``panel_id`` becomes the dock's objectName and must be stable forever:
+        restoreState() matches docks by objectName and silently drops any it
+        cannot find, so renaming one is indistinguishable from a corrupt layout.
+        """
+        existing = self._panel_docks.get(panel_id)
+        if existing is not None:
+            existing.show()
+            existing.raise_()
+            return existing
+
+        dock = QDockWidget(title, self)
+        dock.setObjectName(f"dock_{panel_id}")
+        dock.setWidget(widget)
+        dock.setAllowedAreas(
+            Qt.LeftDockWidgetArea
+            | Qt.RightDockWidgetArea
+            | Qt.BottomDockWidgetArea
+            | Qt.TopDockWidgetArea
+        )
+        self.addDockWidget(area, dock)
+        dock.setFloating(floating)
+        self._panel_docks[panel_id] = dock
+        self._refresh_panels_menu()
+        return dock
+
+    def tabify_panels(self, first_id: str, second_id: str) -> bool:
+        """Stack two docks as tabs. Returns False if either is missing.
+
+        Never tabify a panel carrying a value the user monitors during an
+        acquisition — stage position, progress — because a tab hides it behind
+        another panel exactly when it is being watched.
+        """
+        a = self._panel_docks.get(first_id)
+        b = self._panel_docks.get(second_id)
+        if a is None or b is None:
+            return False
+        self.tabifyDockWidget(a, b)
+        a.raise_()
+        return True
+
+    def reset_panel_layout(self) -> None:
+        """Return every dock to floating and visible.
+
+        The escape hatch for a layout restored from an older build: a dock
+        whose objectName has changed, or one dragged onto a monitor that is no
+        longer attached, is otherwise unreachable.
+        """
+        for dock in self._panel_docks.values():
+            dock.setFloating(True)
+            dock.show()
+        logging.getLogger(__name__).info("Panel layout reset to floating")
+
+    def _refresh_panels_menu(self) -> None:
+        """Rebuild the Panels submenu to match the docks that exist."""
+        menu = getattr(self, "_panels_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        for panel_id, dock in sorted(self._panel_docks.items()):
+            action = dock.toggleViewAction()
+            action.setStatusTip(f"Show or hide the {dock.windowTitle()} panel")
+            menu.addAction(action)
+        if self._panel_docks:
+            menu.addSeparator()
+        reset = QAction("&Reset Panel Layout", self)
+        reset.setStatusTip("Return all panels to separate floating windows")
+        reset.triggered.connect(self.reset_panel_layout)
+        menu.addAction(reset)
 
     def _wrap_in_scroll_area(self, widget: QWidget) -> QScrollArea:
         """Wrap a widget in a scroll area for overflow handling.
@@ -261,6 +365,12 @@ class MainWindow(QMainWindow):
         )
         jog_panel_action.triggered.connect(self._show_jog_panel)
         view_menu.addAction(jog_panel_action)
+
+        # Panels submenu — one toggle per dockable panel, plus the reset that
+        # rescues a layout restored from an older build or a detached monitor.
+        view_menu.addSeparator()
+        self._panels_menu = view_menu.addMenu("&Panels")
+        self._refresh_panels_menu()
 
         # Tools menu (requires connection)
         tools_menu = menubar.addMenu("&Tools")
