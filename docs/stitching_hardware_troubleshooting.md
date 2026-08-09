@@ -65,9 +65,16 @@ Output drive (...): 1917 GB free, need ~215 GB output + ~375 GB tile spill + ~21
 and warns if free space falls under 110% of need. **Plan for 2–3× the
 raw acquisition size in free output-drive space.**
 
-**Separate temp drive**: not currently supported. If your output drive
-is slow/full, there's no way to redirect `.stitch_tmp/` to a faster
-disk. This is a TODO (`StitchingConfig.temp_dir`).
+**Separate scratch drive (now supported, strongly recommended for TB runs)**:
+set a **Scratch dir** to redirect `.stitch_tmp/` (tile spill + fused memmap)
+onto a fast **local** SSD/NVMe, independent of the output drive. Single most
+important knob for full-res runs — the fuse phase streams >1 TB through
+`.stitch_tmp`, so a slow/spinning/network scratch drive backs writes up in RAM
+and can **freeze the whole machine** (memory thrash; Kernel-Power 41
+`BugcheckCode=0` + Resource-Exhaustion 2004). Pair with stitcher **≥ v0.5.7**,
+whose auto super-block fusion bounds the fuse working set (~127 GB → ~32 GB at
+full res). See the shipped `docs/stitching_hardware_troubleshooting.md` §2
+("the whole computer freezes") and `2026-07-10-stitcher-freeze-fix-and-superblock.md`.
 
 ### CPU
 
@@ -124,6 +131,30 @@ memmap, writers read from memmap). If you see the old slowness again:
 * Check that the "Step 6: Writing Imaris .ims" line reads "from fused
   memmap" and not "(block-streaming, no full-channel materialization)".
 
+### Symptom: Run aborts seconds in with `Tile N shape (1502, 1024, 1024) != expected (1287, 1024, 1024)`
+
+The acquisition has **per-tile Z ranges** — what Collect Tiles produces, so
+the scope images only the depth where the sample actually is. Tiles then
+legitimately differ in plane count.
+
+Fixed in **v0.10.1**. Before that, `_materialize_tiles_to_disk` probed
+`tiles[0]` and imposed its shape on every tile. Nothing downstream required
+that: `_build_fusion_inputs` already places each tile at its own `z_min_mm`,
+and multiview-stitcher accepts views of differing shape.
+
+Two things made this hard to see coming:
+
+* the header line `Planes per tile: 1287 (Z range: …)` reported **tile 0
+  only**, so the log gave no hint the tiles were ever different sizes. It now
+  reports the range (`Planes per tile: 1287–1502 (varies — per-tile Z ranges)`).
+* the border-QC pass failed first with the same message and was swallowed as
+  `Border QC pass failed (skipped)`.
+
+Frame size (Y/X) must still match across tiles — that means the AOI or binning
+changed mid-acquisition, and no placement can reconcile it. The Z **step** must
+also match; a differing step now warns, because one voxel size is applied to
+every tile and a mismatch silently stretches Z.
+
 ### Symptom: Stitching aborts with `ArrayMemoryError: Unable to allocate 5.68 GiB`
 
 Three separate bugs were all rooted in silent full-tile copies inside
@@ -136,6 +167,45 @@ dask / numpy:
 
 If you hit a new one on a recent branch, grab the full traceback — the
 line number pins which copy is the culprit.
+
+### Symptom: Run finishes the fuse, then aborts at "Writing pyramidal OME-TIFF" with `Unable to allocate ~N GiB ... float64`
+
+The whole streaming pipeline succeeded — the fused volume is already on
+disk as `fused.dat`. Only the **pyramid builder** OOM'd, because it
+materialised a whole downsample level in RAM as float64 (`.mean()` before
+`.astype`). The tell is the error shape: **half the fused Y/X, dtype
+float64**, e.g. `(1662, 7424, 5120)` for a `(1662, 14849, 10241)` fuse =
+471 GiB. This is *not* a full-resolution limit.
+
+Fixed in **v0.5.0** (`75aa9de`): `_downsample_yx_to_memmap` spills each
+pyramid level to disk one Z-plane at a time. Check the version banner at
+the top of the log; if it predates 0.5.0, update. Immediate workaround at
+the same resolution: switch **Output format -> OME-Zarr (sharded)**, which
+writes the pyramid chunk-by-chunk and never holds a level in RAM.
+
+Related, same run: `Registration failed: Missing optional dependency
+'pandas' ... Falling back to metadata positions only` means the tiles
+were **not** registered (raw stage positions used). v0.5.0 makes pandas a
+hard dependency (`pyproject.toml`), so the silent fallback can't happen.
+
+### When you hit an OOM: what to change (keeps the chosen resolution)
+
+On a memory failure the tool now prints step-aware advice in the log
+(and the memory-watchdog popup mirrors the top of it), keyed to the step
+that ran out and to the settings actually in force — it never suggests a
+lever already engaged (e.g. "switch to Streaming" while already
+streaming). The reference table:
+
+| Step that OOM'd | Levers (all keep full resolution, most-effective first) |
+|---|---|
+| **Write** | OME-TIFF/Imaris -> **OME-Zarr (sharded)** (streams pyramid); update to v0.5.0+; fewer pyramid levels |
+| **Fuse / preprocess** | Lower preprocess/fuse workers to 1-2 (workers x tile = the streaming working set); turn off content-based blending; disable per-tile float buffers (deconvolution, depth attenuation, non-fast destripe, flat-field); Leonardo illum-fusion -> Max/Mean; scratch dir on a fast, roomy disk |
+| **Register** | Tick "Skip registration (use stage positions)" if positions are good; ensure pandas is installed |
+| **Any, in-memory mode** | Switch Memory mode -> Streaming — the single biggest lever |
+| **Last resort (any)** | Raise XY or Z downsample one step — *the only lever that lowers resolution* |
+
+Logic lives in `oom_advice.py` (pure, unit-tested); the GUI failure
+handler and the watchdog popup both call it.
 
 ### Symptom: Stitching crashes before it starts with `SyntaxError` mentioning `\u00b5` or a backslash in f-string
 
@@ -160,6 +230,28 @@ uninstalled since.
 Fixed in commit `23effbc` — `create_array` kwarg conflict was raising,
 and the pipeline silently fell back to TIFF. If it recurs, grep for
 "OME-Zarr v2 write failed" in the log.
+
+### Symptom: log says `multiview-stitcher 0.1.44 is TOO OLD` on a build that bundles 0.1.59
+
+The guard was reading **package metadata**, and the metadata was stale.
+Inno Setup's `[Files]` only adds and overwrites — it never removes a file the
+new bundle no longer contains. Python metadata lives in *versioned* directory
+names (`multiview_stitcher-0.1.44.dist-info`), so upgrading in place left every
+old release's dist-info sitting beside the new one, and `importlib.metadata`
+answered with whichever it found first.
+
+CI proves the build was never at fault: every release back to **v0.8.4**
+resolved multiview-stitcher **0.1.59**.
+
+Fixed in **v0.10.1**, both halves:
+
+* `installer.iss` now has an `[InstallDelete]` wiping `{app}\_internal` before
+  the copy, so each upgrade is a clean slate.
+* the guard judges the **imported module's** `__version__` (the code that
+  actually runs), and reports any module-vs-metadata disagreement explicitly.
+
+If a log still shows a mismatch line, the install directory predates v0.10.1 —
+uninstall, then reinstall.
 
 ### Symptom: content-based fusion crashes with "'NoneType' object is not subscriptable"
 
