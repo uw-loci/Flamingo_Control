@@ -163,6 +163,48 @@ class LED2DOverviewWorkflow(QObject):
         """Tile overlap as a fraction of a FOV (0.0-0.5)."""
         return self._tile_overlap_percent() / 100.0
 
+    def _tile_step_mm(self) -> Optional[float]:
+        """Centre-to-centre tile pitch. The ONE place this is computed.
+
+        The step was previously worked out separately where positions are
+        generated and where the tile total is estimated. Both lines were
+        identical in source, and they still diverged in practice: the
+        2026-08-08 run logged "overlap: 10.0% (step 0.9654 mm)" from the
+        estimate while the generator laid tiles down at 1.0727 mm — a full FOV,
+        no overlap. The acquired grid was 9x12 against an expected 10x14, and
+        the mismatch only surfaced afterwards, in a results-window warning, on
+        228 tiles that were already on disk.
+
+        Duplicated arithmetic that must agree is a standing invitation for it
+        not to. One method, one answer.
+        """
+        fov = self._actual_fov_mm
+        if fov is None:
+            return None
+        return fov * (1.0 - self._tile_overlap_fraction())
+
+    @staticmethod
+    def tile_positions_1d(lo: float, hi: float, step: float) -> List[float]:
+        """Every position the scan will visit along one axis.
+
+        Counting is part of the geometry, not a separate estimate. The tile
+        total used to be ``int((hi - lo) / step) + 1`` while the generator ran
+        ``while x <= hi + step / 2``, and the two disagree by a whole row
+        whenever the range does not divide evenly: for the 2026-08-08 bounding
+        box that was 13 rows predicted against 14 laid down.
+
+        Anything that needs a count calls this and takes ``len()``, so a
+        prediction cannot differ from what the stage actually does.
+        """
+        if step <= 0:
+            return [lo]
+        positions = []
+        x = lo
+        while x <= hi + step / 2:
+            positions.append(x)
+            x += step
+        return positions or [lo]
+
     def _calculate_actual_fov(self) -> Optional[float]:
         """Actual field of view in mm, from the one shared resolver.
 
@@ -360,32 +402,30 @@ class LED2DOverviewWorkflow(QObject):
         Returns:
             List of (x, y, z, tile_x_idx, tile_y_idx) positions
         """
-        # Use actual FOV calculated from microscope settings
-        fov = self._actual_fov_mm
-
         # Tiles SHARE a fraction of a FOV. Butting them edge-to-edge (the old
         # `step = fov`) leaves the stitcher nothing to register on and turns any
-        # stage-repeatability error into a visible seam.
-        step = fov * (1.0 - self._tile_overlap_fraction())
+        # stage-repeatability error into a visible seam. _tile_step_mm() is the
+        # single definition — see its docstring for why this is not computed
+        # inline any more.
+        fov = self._actual_fov_mm
+        step = self._tile_step_mm()
 
-        logger.debug(
+        # INFO, not DEBUG: this is the number that decides where the stage goes,
+        # it is unrecoverable after the fact, and a run that quietly used the
+        # wrong one cost a 228-tile acquisition on 2026-08-08.
+        logger.info(
             f"Tile step size: {step:.4f} mm "
             f"(FOV={fov:.4f} mm, overlap={self._tile_overlap_percent():.1f}%)"
         )
 
         # Generate X positions (using effective tile_x range)
-        x_positions = []
-        x = effective_bbox.tile_x_min
-        while x <= effective_bbox.tile_x_max + step / 2:
-            x_positions.append(x)
-            x += step
-
+        x_positions = self.tile_positions_1d(
+            effective_bbox.tile_x_min, effective_bbox.tile_x_max, step
+        )
         # Generate Y positions (Y is unchanged between rotations)
-        y_positions = []
-        y = effective_bbox.tile_y_min
-        while y <= effective_bbox.tile_y_max + step / 2:
-            y_positions.append(y)
-            y += step
+        y_positions = self.tile_positions_1d(
+            effective_bbox.tile_y_min, effective_bbox.tile_y_max, step
+        )
 
         # Fit the tiling within the stage soft limits (shift to fit, preserving
         # coverage). Abort with a warning if a span exceeds the reachable travel.
@@ -397,6 +437,35 @@ class LED2DOverviewWorkflow(QObject):
 
         self._tiles_x = len(x_positions)
         self._tiles_y = len(y_positions)
+
+        # State the grid that is about to be scanned, in the same line as the
+        # overlap that produced it. On 2026-08-08 the only record of the real
+        # geometry was a results-window warning AFTER 228 tiles were on disk;
+        # by then the positions were unchangeable. This is the last moment the
+        # user can still stop and fix it.
+        try:
+            angle = self._rotation_angles[self._current_rotation_idx]
+        except Exception:  # noqa: BLE001
+            # Includes PyQt's RuntimeError for an un-__init__'d QObject. A line
+            # that only describes the run must never be able to stop it.
+            angle = "?"
+        logger.info(
+            f"Tile grid for R={angle}: "
+            f"{self._tiles_x}x{self._tiles_y} = "
+            f"{self._tiles_x * self._tiles_y} tiles, step {step:.4f} mm "
+            f"({self._tile_overlap_percent():.1f}% overlap), "
+            f"X {x_positions[0]:.3f}..{x_positions[-1]:.3f} mm, "
+            f"Y {y_positions[0]:.3f}..{y_positions[-1]:.3f} mm"
+        )
+        if abs(step - fov) < 1e-6 and self._tile_overlap_percent() > 0:
+            # The exact failure from 2026-08-08: overlap requested, edge-to-edge
+            # tiles scanned. Loud, because the result is unrecoverable.
+            logger.error(
+                f"Tile overlap {self._tile_overlap_percent():.1f}% was requested "
+                f"but the step ({step:.4f} mm) equals a full FOV "
+                f"({fov:.4f} mm) — tiles will butt edge to edge with nothing "
+                f"for the stitcher to register on. STOP and report this."
+            )
 
         # Use center Z from effective bounding box (this is the Z-stack center)
         z_center = (effective_bbox.z_min + effective_bbox.z_max) / 2
@@ -523,19 +592,19 @@ class LED2DOverviewWorkflow(QObject):
         # return it here when the scan ends (completion, cancel, or error).
         self._capture_origin_position()
 
-        # Calculate total tiles across both rotations using actual FOV. Must use
-        # the same step as _generate_tile_positions, or the progress bar's total
-        # is short by the overlap and the run appears to overshoot 100%.
+        # Total tiles across both rotations, counted with the SAME step and the
+        # SAME position walk the scan will use — see tile_positions_1d. Deriving
+        # this independently is how a run predicted 10x14 and laid down 9x12.
         total_tiles = 0
         fov = self._actual_fov_mm
-        step = fov * (1.0 - self._tile_overlap_fraction())
+        step = self._tile_step_mm()
         for i in range(len(self._rotation_angles)):
             eff_bbox = self._get_effective_bbox(i)
-            tiles_x = max(
-                1, int((eff_bbox.tile_x_max - eff_bbox.tile_x_min) / step) + 1
+            tiles_x = len(
+                self.tile_positions_1d(eff_bbox.tile_x_min, eff_bbox.tile_x_max, step)
             )
-            tiles_y = max(
-                1, int((eff_bbox.tile_y_max - eff_bbox.tile_y_min) / step) + 1
+            tiles_y = len(
+                self.tile_positions_1d(eff_bbox.tile_y_min, eff_bbox.tile_y_max, step)
             )
             total_tiles += tiles_x * tiles_y
 

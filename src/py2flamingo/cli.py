@@ -16,6 +16,7 @@ Usage:
 import argparse
 import logging
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 from py2flamingo.application import FlamingoApplication
@@ -178,28 +179,39 @@ def setup_logging(level: str):
     root_logger.info(f"Logging to file: {log_file}")
 
 
-def _get_git_version() -> Optional[str]:
-    """Get the current git commit hash, if available.
+def _get_git_version() -> str:
+    """Which commit is running, e.g. "a1b2c3d" or "a1b2c3d-dirty".
 
-    Returns short hash + dirty marker, e.g. "a1b2c3d" or "a1b2c3d-dirty".
-    Returns None silently if not in a git repo or git is unavailable.
+    Never returns None, and never fails silently. When the version cannot be
+    read it returns a string saying so *and why* — "version unknown: git not
+    found" — because the alternative is a log that omits the line entirely,
+    which is what happened on the rig on 2026-08-08.
+
+    That omission is expensive. The whole question that log could not answer was
+    which build produced it: it carried a post-fix INFO line alongside pre-fix
+    tile positions, and without a commit there is no way to tell a partially
+    updated checkout from a genuine bug. "-dirty" matters for the same reason —
+    a local edit on the rig looks identical to upstream code otherwise.
     """
     try:
         import subprocess
 
         repo_dir = Path(__file__).parent.parent.parent  # src/ -> Flamingo_Control/
         result = subprocess.run(
-            ["git", "describe", "--always", "--dirty"],
+            ["git", "describe", "--always", "--dirty", "--tags"],
             cwd=repo_dir,
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if result.returncode == 0:
+        if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-    except Exception:
-        pass
-    return None
+        detail = (result.stderr or "").strip().splitlines()
+        return f"version unknown: git said {detail[0] if detail else 'nothing'}"
+    except FileNotFoundError:
+        return "version unknown: git not found on PATH"
+    except Exception as exc:  # noqa: BLE001 - a banner must never block startup
+        return f"version unknown: {type(exc).__name__}: {exc}"
 
 
 def main(args: Optional[List[str]] = None) -> int:
@@ -228,9 +240,7 @@ def main(args: Optional[List[str]] = None) -> int:
     setup_logging(parsed_args.log_level)
 
     logger = logging.getLogger(__name__)
-    git_version = _get_git_version()
-    version_suffix = f" ({git_version})" if git_version else ""
-    logger.info(f"Starting Flamingo Microscope Control...{version_suffix}")
+    logger.info(f"Starting Flamingo Microscope Control... ({_get_git_version()})")
     logger.debug(f"Arguments: IP={parsed_args.ip}, Port={parsed_args.port}")
 
     # Validate arguments
