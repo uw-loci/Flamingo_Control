@@ -268,3 +268,64 @@ class TestEveryExtensionToolOpensAsATab:
     def test_sample_view_is_not_in_this_list(self):
         """It embeds napari; a tab is the reparent that crashed the dock."""
         assert not any(pid == "sample_view" for _m, pid in self.TOOLS)
+
+
+class TestTheOverviewResultsAreATab:
+    """The results view is wide — two rotation panels side by side.
+
+    As a floating window it competed for screen space with the very thing you
+    compare it against. As a tab it gets the full main-window width.
+
+    It is deliberately NOT hosted inside Sample View. Doing that would mean
+    turning Sample View into a QMainWindow so it could own dock areas, and its
+    napari canvas is the one widget in the app that must not be reparented
+    once live — that is what raised GL_INVALID_VALUE and closed the app.
+    """
+
+    def _workflow_source(self):
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parents[1]
+            / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+        ).read_text(encoding="utf-8")
+
+    def test_results_are_shown_as_a_panel(self):
+        src = self._workflow_source()
+        assert "_show_as_panel" in src
+        assert '"led_2d_overview_results"' in src
+
+    def test_it_falls_back_to_a_window_when_there_is_no_main_window(self):
+        """A headless or partially built app must still surface the results."""
+        src = self._workflow_source()
+        i = src.index('"led_2d_overview_results"')
+        tail = src[i : i + 900]
+        assert "self._result_window.show()" in tail, (
+            "losing the results because the tab could not be created would be "
+            "worse than the layout problem this solves"
+        )
+
+    def test_the_preview_grid_stays_a_floating_window(self):
+        """You edit the bounding box and watch the preview — both at once.
+
+        Making the preview a tab would hide the dialog being edited, which is
+        the opposite of what it is for. Consistency is not worth that.
+        """
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "src/py2flamingo/views/dialogs/led_2d_overview_dialog.py"
+        ).read_text(encoding="utf-8")
+        i = src.index("self._preview_window = LED2DOverviewResultWindow(")
+        tail = src[i : i + 500]
+        assert "self._preview_window.show()" in tail
+        assert "_show_as_panel" not in tail
+
+    def test_sample_view_is_still_never_a_host_or_a_tab(self):
+        import inspect
+
+        from py2flamingo.application import FlamingoApplication
+
+        src = inspect.getsource(FlamingoApplication._open_sample_view)
+        assert "add_panel_tab" not in src and "_show_as_panel" not in src

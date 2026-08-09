@@ -1847,13 +1847,27 @@ class LED2DOverviewWorkflow(QObject):
             )
             logger.info(f"Result window created: {self._result_window}")
 
-            self._result_window.show()
-            logger.info("Result window show() called")
-
-            # Ensure window is raised and activated
-            self._result_window.raise_()
-            self._result_window.activateWindow()
-            logger.info("Result window raised and activated")
+            # Show as a tab in the main window, matching every other tool.
+            # The results view is wide — two rotation panels side by side — so
+            # the full tab width suits it better than a floating window
+            # competing for space with the one you compare it against.
+            #
+            # It is NOT hosted inside Sample View. That would mean making
+            # Sample View a QMainWindow, and its napari canvas is the one
+            # widget in the app that must not be reparented after it is live.
+            main_window = getattr(self._app, "main_window", None)
+            if main_window is not None and hasattr(main_window, "_show_as_panel"):
+                main_window._show_as_panel(
+                    "led_2d_overview_results",
+                    "LED Overview Results",
+                    self._result_window,
+                )
+                logger.info("Result window shown as a tab")
+            else:
+                self._result_window.show()
+                self._result_window.raise_()
+                self._result_window.activateWindow()
+                logger.info("Result window shown as a separate window")
 
         except ImportError as e:
             logger.error(f"Could not import result window: {e}", exc_info=True)
