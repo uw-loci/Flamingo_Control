@@ -57,6 +57,9 @@ class MotionTracker:
         self.connection = connection
         self.logger = logging.getLogger(__name__)
         self._is_moving = False
+        # True only inside _wait_async(); gates the callback queue so it
+        # buffers during a wait and stays empty otherwise.
+        self._wait_active = False
         self._lock = threading.Lock()
         self._stop_waiting = False
         self._wait_thread: Optional[threading.Thread] = None
@@ -104,6 +107,17 @@ class MotionTracker:
         Args:
             message: ParsedMessage from socket_reader
         """
+        # Only buffer while something is actually waiting. Callbacks that
+        # arrive outside a wait are discarded by the next _wait_async() anyway
+        # (see its stale-drain), so queueing them achieves nothing and fills a
+        # 100-slot queue that then reports every overflow: a continuous Z sweep
+        # produced 200+ "queue full" warnings in 2.5 minutes, drowning a log
+        # that has to be readable when something real goes wrong.
+        with self._lock:
+            waiting = self._wait_active
+        if not waiting:
+            return
+
         try:
             if self._callback_queue:
                 self._callback_queue.put_nowait(message)
@@ -111,11 +125,15 @@ class MotionTracker:
                     f"Queued STAGE_MOTION_STOPPED callback (status={message.status_code})"
                 )
         except queue.Full:
+            # Now genuinely unexpected: a wait is in progress and still cannot
+            # keep up. Worth one line per 10, because it means a motion-complete
+            # signal may have been lost while someone was listening for it.
             self._queue_full_count += 1
-            # Only log every 10th occurrence to reduce spam
             if self._queue_full_count % 10 == 1:
                 self.logger.warning(
-                    f"Motion callback queue full - dropped {self._queue_full_count} messages (rapid Z-stack?)"
+                    f"Motion callback queue full DURING a wait - dropped "
+                    f"{self._queue_full_count} messages; a motion-complete "
+                    f"signal may have been missed"
                 )
 
     def cancel_wait(self) -> None:
@@ -193,6 +211,7 @@ class MotionTracker:
         try:
             with self._lock:
                 self._is_moving = True
+                self._wait_active = True
 
             # Wait for callbacks with periodic cancel checks
             remaining = timeout
@@ -238,6 +257,7 @@ class MotionTracker:
         finally:
             with self._lock:
                 self._is_moving = False
+                self._wait_active = False
 
     def _wait_sync(self, timeout: float, allow_cancel: bool) -> bool:
         """
