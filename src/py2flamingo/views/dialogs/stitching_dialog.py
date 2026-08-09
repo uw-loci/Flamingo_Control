@@ -2175,13 +2175,26 @@ class StitchingDialog(PersistentDialog):
                 "in an isolated environment."
             )
 
-        # --- Destriping (pystripe) ---
+        # --- Destriping ---
+        # Probe the backend the pipeline ACTUALLY calls, which since
+        # flamingo-stitcher v0.9.5 is the vendored stripe filter — it needs only
+        # pywt/scipy/scikit-image, all of which we already bundle.
+        #
+        # This used to probe `import pystripe`, and that was right while we were
+        # pinned to v0.4.2. It is now actively wrong: update_and_run.bat installs
+        # pystripe with --no-deps, so the package is present but its module-level
+        # dcimg/imageio/tqdm imports fail — greying out a destripe path that
+        # works perfectly, under a tooltip telling the user to install the very
+        # thing they already installed.
         try:
-            import pystripe  # noqa: F401
+            from flamingo_stitcher import _pystripe_core  # noqa: F401
 
             pystripe_ok = True
-        except Exception:
+        except Exception as exc:
             pystripe_ok = False
+            logger.warning(
+                "Destriping unavailable — destripe backend import failed: %r", exc
+            )
 
         if pystripe_ok:
             self._destripe_cb.setEnabled(True)
@@ -2195,7 +2208,9 @@ class StitchingDialog(PersistentDialog):
             self._destripe_fast_cb.setChecked(False)
             self._destripe_fast_cb.setEnabled(False)
             self._destripe_cb.setToolTip(
-                "Destriping requires pystripe.\n" "Install with: pip install pystripe"
+                "Destriping is unavailable — the stripe filter failed to "
+                "import.\nIt ships with flamingo-stitcher (>= 0.9.5); "
+                "reinstall requirements.txt.\nSee the log for the import error."
             )
 
         # --- Deconvolution (pycudadecon or RedLionfish) ---
