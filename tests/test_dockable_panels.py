@@ -181,3 +181,142 @@ def _new_widget():
     from PyQt5.QtWidgets import QWidget
 
     return QWidget()
+
+
+class TestDockingIsDiscoverable(_Base):
+    """A floating dock looks exactly like an ordinary window.
+
+    Nothing on screen says it can be dragged into the main window, so the
+    feature is invisible unless the menu offers placement explicitly.
+    """
+
+    def _submenu_for(self, title):
+        for action in self._win._panels_menu.actions():
+            if action.menu() and action.text() == title:
+                return action.menu()
+        return None
+
+    def test_each_panel_offers_explicit_placement(self):
+        self._panel("place_me", "Place Me")
+        sub = self._submenu_for("Place Me")
+        assert sub is not None, "each panel needs its own submenu"
+        labels = [a.text() for a in sub.actions() if a.text()]
+        for expected in ("Show Panel", "Dock &Left", "Dock &Right", "Dock &Bottom"):
+            assert any(
+                expected.replace("&", "") in t.replace("&", "") for t in labels
+            ), f"missing {expected!r} in {labels}"
+        assert any("Float" in t for t in labels), "must be able to undock again"
+
+    def test_dock_panel_moves_it_out_of_floating(self):
+        from PyQt5.QtCore import Qt
+
+        self._panel("mover", "Mover")
+        assert self._win.dock_panel("mover", Qt.RightDockWidgetArea)
+        assert not self._win._panel_docks["mover"].isFloating()
+
+    def test_dock_panel_can_float_it_again(self):
+        from PyQt5.QtCore import Qt
+
+        self._panel("floater", "Floater")
+        self._win.dock_panel("floater", Qt.BottomDockWidgetArea)
+        assert self._win.dock_panel("floater", None)
+        assert self._win._panel_docks["floater"].isFloating()
+
+    def test_docking_an_unknown_panel_reports_failure(self):
+        from PyQt5.QtCore import Qt
+
+        assert not self._win.dock_panel("never_opened", Qt.LeftDockWidgetArea)
+
+    def test_the_menu_says_something_when_no_panel_is_open(self):
+        from py2flamingo.main_window import MainWindow
+
+        fresh = MainWindow(connection_view=None, workflow_view=None)
+        try:
+            labels = [a.text() for a in fresh._panels_menu.actions()]
+            assert any(
+                "open a panel" in t for t in labels
+            ), "an empty menu reads as a broken feature"
+        finally:
+            fresh.deleteLater()
+
+
+class TestPanelGeometrySurvivesToggling(_Base):
+    """Hiding a floating dock destroys its native window; Qt gives the next
+    show() a default size and position, so a panel the user sized and placed
+    came back wrong every time they toggled it."""
+
+    def test_geometry_is_captured_when_a_floating_panel_hides(self):
+        dock = self._panel("remember", "Remember")
+        assert dock.isFloating()
+        dock.setGeometry(120, 140, 480, 360)
+        self._win._on_panel_visibility("remember", False)
+        assert "remember" in self._win._panel_geometry
+
+    def test_geometry_is_reapplied_when_it_shows_again(self):
+        dock = self._panel("restore_me", "Restore Me")
+        dock.setGeometry(200, 210, 520, 400)
+        saved = dock.saveGeometry()
+        self._win._panel_geometry["restore_me"] = saved
+        dock.setGeometry(10, 10, 100, 100)
+        self._win._on_panel_visibility("restore_me", True)
+        assert dock.saveGeometry() == saved
+
+    def test_a_docked_panel_does_not_have_window_geometry_saved(self):
+        """Docked panels are laid out by QMainWindow, not by geometry."""
+        from PyQt5.QtCore import Qt
+
+        self._panel("docked_one", "Docked One")
+        self._win.dock_panel("docked_one", Qt.RightDockWidgetArea)
+        self._win._panel_geometry.pop("docked_one", None)
+        self._win._on_panel_visibility("docked_one", False)
+        assert "docked_one" not in self._win._panel_geometry
+
+    def test_visibility_changes_are_wired_up_automatically(self):
+        """Without the connection nothing records geometry at all."""
+        dock = self._panel("wired", "Wired")
+        dock.setGeometry(60, 70, 300, 240)
+        dock.hide()
+        assert "wired" in self._win._panel_geometry
+
+
+class TestTheOtherToolsAreActuallyWired(_Base):
+    """The first cut described three panels and connected one."""
+
+    def test_show_as_panel_registers_a_dock(self):
+        from PyQt5.QtWidgets import QWidget
+
+        self._win._show_as_panel("tool_x", "Tool X", QWidget())
+        assert "tool_x" in self._win._panel_docks
+
+    def test_the_led_overview_opener_routes_through_show_as_panel(self):
+        import inspect
+
+        from py2flamingo.main_window import MainWindow
+
+        src = inspect.getsource(MainWindow._on_led_2d_overview)
+        assert "_show_as_panel" in src
+        assert "led_2d_overview" in src
+
+    def test_the_stitching_opener_routes_through_show_as_panel(self):
+        import inspect
+
+        from py2flamingo.main_window import MainWindow
+
+        src = inspect.getsource(MainWindow._on_stitching)
+        assert "_show_as_panel" in src
+        assert src.count("_show_as_panel") >= 2, (
+            "both the reuse path and the create path must register the dock, "
+            "or reopening the tool loses it from the Panels menu"
+        )
+
+    def test_a_failure_to_dock_still_shows_the_tool(self, monkeypatch):
+        """A layout convenience must never stop a tool opening."""
+        from PyQt5.QtWidgets import QWidget
+
+        def _boom(*a, **k):
+            raise RuntimeError("no docking today")
+
+        monkeypatch.setattr(self._win, "add_panel_dock", _boom)
+        w = QWidget()
+        self._win._show_as_panel("fallback", "Fallback", w)
+        assert w.isVisible()

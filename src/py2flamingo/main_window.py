@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         # panel_id -> QDockWidget. Populated on demand by add_panel_dock(); a
         # panel that is never opened never becomes a dock.
         self._panel_docks: dict = {}
+        self._panel_geometry: dict = {}
         self._panels_menu = None
 
         self._setup_ui()
@@ -219,8 +220,98 @@ class MainWindow(QMainWindow):
         self.addDockWidget(area, dock)
         dock.setFloating(floating)
         self._panel_docks[panel_id] = dock
+
+        # Hiding a floating dock destroys its native window, and Qt gives the
+        # next show() a default size and position — so a panel the user had
+        # sized and placed comes back wrong every time they toggle it off and
+        # on. Remember the geometry across both the toggle and the session.
+        dock.visibilityChanged.connect(
+            lambda visible, pid=panel_id: self._on_panel_visibility(pid, visible)
+        )
+        self._restore_panel_geometry(panel_id)
+
         self._refresh_panels_menu()
         return dock
+
+    def _show_as_panel(self, panel_id: str, title: str, widget: QWidget) -> None:
+        """Show a tool as a dockable panel, or as its own window if that fails.
+
+        Everything reached from the Extensions menu is a QDialog that has always
+        opened as an independent window. Hosting it in a floating dock keeps
+        that behaviour — same separate window — while adding it to View > Panels
+        so it can be docked beside the tabs. If anything about that goes wrong,
+        the tool still opens the way it always did: a layout convenience must
+        never be the reason a tool won't open.
+        """
+        try:
+            dock = self.add_panel_dock(panel_id, title, widget)
+            dock.show()
+            dock.raise_()
+            dock.activateWindow()
+            return
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "Could not dock %s (%r); showing as a window", panel_id, exc
+            )
+        widget.show()
+        widget.raise_()
+        widget.activateWindow()
+
+    def _on_panel_visibility(self, panel_id: str, visible: bool) -> None:
+        """Save a panel's geometry as it hides, restore it as it shows."""
+        dock = self._panel_docks.get(panel_id)
+        if dock is None:
+            return
+        if visible:
+            self._restore_panel_geometry(panel_id)
+        elif dock.isFloating():
+            self._panel_geometry[panel_id] = dock.saveGeometry()
+            if self._geometry_manager is not None:
+                try:
+                    self._geometry_manager.save_geometry(f"panel_{panel_id}", dock)
+                except Exception as exc:  # noqa: BLE001
+                    logging.getLogger(__name__).debug(
+                        "Could not persist %s geometry: %r", panel_id, exc
+                    )
+
+    def _restore_panel_geometry(self, panel_id: str) -> None:
+        """Put a panel back where it was, this session or a previous one."""
+        dock = self._panel_docks.get(panel_id)
+        if dock is None or not dock.isFloating():
+            return
+        saved = self._panel_geometry.get(panel_id)
+        if saved is not None:
+            dock.restoreGeometry(saved)
+            return
+        if self._geometry_manager is not None:
+            try:
+                self._geometry_manager.restore_geometry(f"panel_{panel_id}", dock)
+            except Exception as exc:  # noqa: BLE001
+                logging.getLogger(__name__).debug(
+                    "Could not restore %s geometry: %r", panel_id, exc
+                )
+
+    def dock_panel(self, panel_id: str, area: int) -> bool:
+        """Dock a panel into ``area``, or float it when ``area`` is None.
+
+        Exposed as menu actions because dragging a floating panel onto the main
+        window is the only other way to dock it, and nothing on screen says so.
+        A feature nobody can find is not a feature.
+        """
+        dock = self._panel_docks.get(panel_id)
+        if dock is None:
+            return False
+        if area is None:
+            dock.setFloating(True)
+            self._restore_panel_geometry(panel_id)
+        else:
+            if dock.isFloating():
+                self._panel_geometry[panel_id] = dock.saveGeometry()
+            dock.setFloating(False)
+            self.addDockWidget(area, dock)
+        dock.show()
+        dock.raise_()
+        return True
 
     def tabify_panels(self, first_id: str, second_id: str) -> bool:
         """Stack two docks as tabs. Returns False if either is missing.
@@ -255,10 +346,34 @@ class MainWindow(QMainWindow):
         if menu is None:
             return
         menu.clear()
+        if not self._panel_docks:
+            placeholder = QAction("(open a panel to dock it)", self)
+            placeholder.setEnabled(False)
+            menu.addAction(placeholder)
+            menu.addSeparator()
         for panel_id, dock in sorted(self._panel_docks.items()):
-            action = dock.toggleViewAction()
-            action.setStatusTip(f"Show or hide the {dock.windowTitle()} panel")
-            menu.addAction(action)
+            # One submenu per panel: show/hide, plus explicit placement. The
+            # placement entries exist because a floating dock looks exactly
+            # like an ordinary window — nothing tells the user it can be
+            # dragged into the main window at all.
+            sub = menu.addMenu(dock.windowTitle())
+            toggle = dock.toggleViewAction()
+            toggle.setText("&Show Panel")
+            toggle.setStatusTip(f"Show or hide the {dock.windowTitle()} panel")
+            sub.addAction(toggle)
+            sub.addSeparator()
+            for label, area in (
+                ("Dock &Left", Qt.LeftDockWidgetArea),
+                ("Dock &Right", Qt.RightDockWidgetArea),
+                ("Dock &Bottom", Qt.BottomDockWidgetArea),
+                ("&Float (separate window)", None),
+            ):
+                act = QAction(label, self)
+                act.setStatusTip(f"{label.replace('&', '')} — {dock.windowTitle()}")
+                act.triggered.connect(
+                    lambda _checked=False, p=panel_id, a=area: self.dock_panel(p, a)
+                )
+                sub.addAction(act)
         if self._panel_docks:
             menu.addSeparator()
         reset = QAction("&Reset Panel Layout", self)
@@ -949,7 +1064,11 @@ class MainWindow(QMainWindow):
             self._led_2d_overview_dialog = LED2DOverviewDialog(
                 app=self.app, parent=None  # No parent so it's independent window
             )
-            self._led_2d_overview_dialog.show()
+            self._show_as_panel(
+                "led_2d_overview",
+                "LED 2D Overview",
+                self._led_2d_overview_dialog,
+            )
 
         except ImportError as e:
             logger.error(f"Could not import LED 2D Overview dialog: {e}")
@@ -1168,9 +1287,9 @@ class MainWindow(QMainWindow):
                 hasattr(self, "_stitching_dialog")
                 and self._stitching_dialog is not None
             ):
-                self._stitching_dialog.show()
-                self._stitching_dialog.raise_()
-                self._stitching_dialog.activateWindow()
+                self._show_as_panel(
+                    "stitching", "Tile Stitching", self._stitching_dialog
+                )
                 return
 
             self._stitching_dialog = StitchingDialog(
@@ -1179,7 +1298,7 @@ class MainWindow(QMainWindow):
             self._stitching_dialog.load_stitched_requested.connect(
                 self._on_load_stitched_from_dialog
             )
-            self._stitching_dialog.show()
+            self._show_as_panel("stitching", "Tile Stitching", self._stitching_dialog)
 
         except Exception as e:
             logger.error(f"Error opening Tile Stitching: {e}", exc_info=True)
