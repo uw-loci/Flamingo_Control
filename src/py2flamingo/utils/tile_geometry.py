@@ -111,6 +111,29 @@ def client_tile_count_1d(range_mm: float, fov_mm: float, overlap_percent: float)
     return max(1, int(range_mm / step) + 1)
 
 
+def tile_positions_1d(lo: float, hi: float, step: float) -> List[float]:
+    """Every position a scan will visit along one axis. THE definition.
+
+    Counting tiles is part of the geometry, not a separate estimate. This one
+    function is walked by the LED overview's position generator, by its fast
+    (continuous) scan path, and by the dialog's tile-count preview, because
+    each of those once had its own arithmetic and they disagreed in production:
+    for one 2026-08-09 bounding box the preview said 13 rows, the generator
+    laid down 14, and the scan that moved the stage did 12.
+
+    ``int(range / step) + 1`` is NOT equivalent — it drops the final row
+    whenever the range does not divide evenly, which is most of the time.
+    """
+    if step <= 0:
+        return [lo]
+    positions: List[float] = []
+    x = lo
+    while x <= hi + step / 2:
+        positions.append(x)
+        x += step
+    return positions or [lo]
+
+
 def _clamp_overlap(value: float) -> float:
     if value < OVERLAP_PERCENT_MIN:
         return OVERLAP_PERCENT_MIN

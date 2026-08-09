@@ -1065,8 +1065,14 @@ class LED2DOverviewDialog(PersistentDialog):
         if step is None or step <= 0:
             return None
 
-        tiles_x = max(1, int((bbox.width / step) + 1))
-        tiles_y = max(1, int((bbox.height / step) + 1))
+        # The SAME walk the scan performs — see tile_geometry.tile_positions_1d.
+        # This used to be int(range/step)+1, which drops the last row whenever
+        # the range does not divide evenly: for a real bounding box the preview
+        # promised 10x13 while the scan laid down 10x14.
+        from py2flamingo.utils.tile_geometry import tile_positions_1d
+
+        tiles_x = len(tile_positions_1d(0.0, bbox.width, step))
+        tiles_y = len(tile_positions_1d(0.0, bbox.height, step))
 
         return tiles_x, tiles_y
 
@@ -1135,9 +1141,12 @@ class LED2DOverviewDialog(PersistentDialog):
         # Tiles step by FOV x (1 - overlap), not by a full FOV.
         step = self._tile_step_mm() or fov
 
-        # Rotation 1 (R): tile across X-Y, Z-stack through Z
-        tiles_x_r1 = max(1, int((bbox.width / step) + 1))
-        tiles_y_r1 = max(1, int((bbox.height / step) + 1))
+        # Rotation 1 (R): tile across X-Y, Z-stack through Z.
+        # Counted with the walk the scan performs, never int(range/step)+1.
+        from py2flamingo.utils.tile_geometry import tile_positions_1d
+
+        tiles_x_r1 = len(tile_positions_1d(0.0, bbox.width, step))
+        tiles_y_r1 = len(tile_positions_1d(0.0, bbox.height, step))
         tiles_r1 = tiles_x_r1 * tiles_y_r1
         z_depth_r1 = bbox.z_max - bbox.z_min
         z_planes_r1 = max(1, int(z_depth_r1 / z_step) + 1)
@@ -1164,7 +1173,7 @@ class LED2DOverviewDialog(PersistentDialog):
             new_z_max = max(c[1] for c in rotated)
 
             # Rotation 2 (R+90): transformed bbox
-            tiles_x_r2 = max(1, int(((new_x_max - new_x_min) / step) + 1))
+            tiles_x_r2 = len(tile_positions_1d(0.0, new_x_max - new_x_min, step))
             tiles_y_r2 = tiles_y_r1  # Y unchanged
             tiles_r2 = tiles_x_r2 * tiles_y_r2
             z_depth_r2 = new_z_max - new_z_min

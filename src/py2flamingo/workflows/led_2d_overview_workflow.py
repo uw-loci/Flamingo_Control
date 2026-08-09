@@ -185,25 +185,15 @@ class LED2DOverviewWorkflow(QObject):
 
     @staticmethod
     def tile_positions_1d(lo: float, hi: float, step: float) -> List[float]:
-        """Every position the scan will visit along one axis.
+        """Delegates to py2flamingo.utils.tile_geometry.tile_positions_1d.
 
-        Counting is part of the geometry, not a separate estimate. The tile
-        total used to be ``int((hi - lo) / step) + 1`` while the generator ran
-        ``while x <= hi + step / 2``, and the two disagree by a whole row
-        whenever the range does not divide evenly: for the 2026-08-08 bounding
-        box that was 13 rows predicted against 14 laid down.
-
-        Anything that needs a count calls this and takes ``len()``, so a
-        prediction cannot differ from what the stage actually does.
+        Kept as a method so the workflow reads naturally, but the definition
+        lives in the pure geometry module where the dialog can share it — the
+        preview and the scan disagreeing is the whole bug this closes.
         """
-        if step <= 0:
-            return [lo]
-        positions = []
-        x = lo
-        while x <= hi + step / 2:
-            positions.append(x)
-            x += step
-        return positions or [lo]
+        from py2flamingo.utils.tile_geometry import tile_positions_1d
+
+        return tile_positions_1d(lo, hi, step)
 
     def _calculate_actual_fov(self) -> Optional[float]:
         """Actual field of view in mm, from the one shared resolver.
