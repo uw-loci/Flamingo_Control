@@ -209,3 +209,62 @@ class TestFallingBackToAWindow(_Base):
         assert (
             stitch.count("_show_as_panel") >= 2
         ), "both the reuse path and the create path must register the tab"
+
+
+class TestEveryExtensionToolOpensAsATab:
+    """One tool behaving differently from the rest is its own bug.
+
+    LED 2D Overview and Tile Stitching were tabbed first; everything else still
+    opened as a floating window, so the Extensions menu behaved two different
+    ways depending on which entry you picked.
+
+    Sample View stays excluded — it embeds napari, and a tab reparents the
+    vispy canvas exactly as a dock did (GL_INVALID_VALUE, then the app closes).
+    The tools below were each checked for an embedded canvas; the two that
+    mention napari (PSF Analysis, Union Thresholder) only push layers into
+    Sample View's viewer, they do not host one.
+    """
+
+    TOOLS = [
+        ("_on_led_2d_overview", "led_2d_overview"),
+        ("_on_stitching", "stitching"),
+        ("_on_stitching_native", "stitching_native"),
+        ("_on_stitching_multiview", "stitching_multiview"),
+        ("_on_mip_overview", "mip_overview"),
+        ("_on_psf_analysis", "psf_analysis"),
+        ("_on_union_thresholder", "union_thresholder"),
+        ("_on_webcam_overview", "webcam_overview"),
+        ("_on_pixel_calibrator", "pixel_calibrator"),
+        ("_on_stage_repeatability", "stage_repeatability"),
+    ]
+
+    @pytest.mark.parametrize("method,panel_id", TOOLS)
+    def test_the_tool_registers_a_panel(self, method, panel_id):
+        import inspect
+
+        from py2flamingo.main_window import MainWindow
+
+        src = inspect.getsource(getattr(MainWindow, method))
+        assert "_show_as_panel" in src, f"{method} still opens its own window"
+        assert f'"{panel_id}"' in src, f"{method} does not use id {panel_id!r}"
+
+    @pytest.mark.parametrize("method,panel_id", TOOLS)
+    def test_the_tool_never_calls_show_directly(self, method, panel_id):
+        """A bare .show() bypasses the tab and floats a window instead."""
+        import inspect
+        import re
+
+        from py2flamingo.main_window import MainWindow
+
+        src = inspect.getsource(getattr(MainWindow, method))
+        stray = re.findall(r"self\._\w*dialog\.show\(\)", src)
+        assert not stray, f"{method} still shows a bare window: {stray}"
+
+    def test_panel_ids_are_unique(self):
+        """Two tools sharing an id would fight over one tab."""
+        ids = [pid for _m, pid in self.TOOLS]
+        assert len(ids) == len(set(ids))
+
+    def test_sample_view_is_not_in_this_list(self):
+        """It embeds napari; a tab is the reparent that crashed the dock."""
+        assert not any(pid == "sample_view" for _m, pid in self.TOOLS)

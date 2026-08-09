@@ -1066,8 +1066,10 @@ class MainWindow(QMainWindow):
         try:
             from py2flamingo.views.dialogs.mip_overview_dialog import MIPOverviewDialog
 
-            dialog = MIPOverviewDialog(app=self.app, parent=self)
-            dialog.show()
+            self._mip_overview_dialog = MIPOverviewDialog(app=self.app, parent=self)
+            self._show_as_panel(
+                "mip_overview", "MIP Overview", self._mip_overview_dialog
+            )
 
             # Keep reference to prevent garbage collection
             if not hasattr(self, "_mip_overview_dialogs"):
@@ -1095,8 +1097,10 @@ class MainWindow(QMainWindow):
         try:
             from py2flamingo.views.dialogs.psf_analysis_dialog import PSFAnalysisDialog
 
-            dialog = PSFAnalysisDialog(app=self.app, parent=self)
-            dialog.show()
+            self._psf_analysis_dialog = PSFAnalysisDialog(app=self.app, parent=self)
+            self._show_as_panel(
+                "psf_analysis", "PSF Analysis", self._psf_analysis_dialog
+            )
 
             # Keep reference to prevent garbage collection
             if not hasattr(self, "_psf_analysis_dialogs"):
@@ -1132,7 +1136,11 @@ class MainWindow(QMainWindow):
             self._union_thresholder_dialog = UnionThresholderDialog(
                 app=self.app, parent=None
             )
-            self._union_thresholder_dialog.show()
+            self._show_as_panel(
+                "union_thresholder",
+                "Union Thresholder",
+                self._union_thresholder_dialog,
+            )
 
         except ImportError as e:
             logger.error(f"Could not import Union of Thresholders dialog: {e}")
@@ -1230,9 +1238,11 @@ class MainWindow(QMainWindow):
                 hasattr(self, "_stitching_native_dialog")
                 and self._stitching_native_dialog is not None
             ):
-                self._stitching_native_dialog.show()
-                self._stitching_native_dialog.raise_()
-                self._stitching_native_dialog.activateWindow()
+                self._show_as_panel(
+                    "stitching_native",
+                    "Tile Stitching (Single Workflow)",
+                    self._stitching_native_dialog,
+                )
                 return
 
             self._stitching_native_dialog = NativeStitchingDialog(
@@ -1241,7 +1251,11 @@ class MainWindow(QMainWindow):
             self._stitching_native_dialog.load_stitched_requested.connect(
                 self._on_load_stitched_from_dialog
             )
-            self._stitching_native_dialog.show()
+            self._show_as_panel(
+                "stitching_native",
+                "Tile Stitching (Single Workflow)",
+                self._stitching_native_dialog,
+            )
 
         except Exception as e:
             logger.error(
@@ -1266,9 +1280,11 @@ class MainWindow(QMainWindow):
                 hasattr(self, "_stitching_multiview_dialog")
                 and self._stitching_multiview_dialog is not None
             ):
-                self._stitching_multiview_dialog.show()
-                self._stitching_multiview_dialog.raise_()
-                self._stitching_multiview_dialog.activateWindow()
+                self._show_as_panel(
+                    "stitching_multiview",
+                    "Tile Stitching (Multi-View)",
+                    self._stitching_multiview_dialog,
+                )
                 return
 
             self._stitching_multiview_dialog = MultiViewStitchingDialog(
@@ -1277,7 +1293,11 @@ class MainWindow(QMainWindow):
             self._stitching_multiview_dialog.load_stitched_requested.connect(
                 self._on_load_stitched_from_dialog
             )
-            self._stitching_multiview_dialog.show()
+            self._show_as_panel(
+                "stitching_multiview",
+                "Tile Stitching (Multi-View)",
+                self._stitching_multiview_dialog,
+            )
 
         except Exception as e:
             logger.error(
@@ -1304,15 +1324,17 @@ class MainWindow(QMainWindow):
                 hasattr(self, "_webcam_overview_dialog")
                 and self._webcam_overview_dialog is not None
             ):
-                self._webcam_overview_dialog.show()
-                self._webcam_overview_dialog.raise_()
-                self._webcam_overview_dialog.activateWindow()
+                self._show_as_panel(
+                    "webcam_overview", "Webcam Overview", self._webcam_overview_dialog
+                )
                 return
 
             self._webcam_overview_dialog = WebcamOverviewDialog(
                 app=self.app, parent=None
             )
-            self._webcam_overview_dialog.show()
+            self._show_as_panel(
+                "webcam_overview", "Webcam Overview", self._webcam_overview_dialog
+            )
 
         except Exception as e:
             logger.error(f"Error opening Webcam Overview: {e}", exc_info=True)
@@ -1335,15 +1357,19 @@ class MainWindow(QMainWindow):
                 hasattr(self, "_pixel_calibrator_dialog")
                 and self._pixel_calibrator_dialog is not None
             ):
-                self._pixel_calibrator_dialog.show()
-                self._pixel_calibrator_dialog.raise_()
-                self._pixel_calibrator_dialog.activateWindow()
+                self._show_as_panel(
+                    "pixel_calibrator",
+                    "XY Pixel Calibrator",
+                    self._pixel_calibrator_dialog,
+                )
                 return
 
             self._pixel_calibrator_dialog = PixelCalibratorDialog(
                 app=self.app, parent=None
             )
-            self._pixel_calibrator_dialog.show()
+            self._show_as_panel(
+                "pixel_calibrator", "XY Pixel Calibrator", self._pixel_calibrator_dialog
+            )
 
         except Exception as e:
             logger.error(f"Error opening Pixel Calibrator: {e}", exc_info=True)
@@ -1368,15 +1394,21 @@ class MainWindow(QMainWindow):
                 hasattr(self, "_stage_repeatability_dialog")
                 and self._stage_repeatability_dialog is not None
             ):
-                self._stage_repeatability_dialog.show()
-                self._stage_repeatability_dialog.raise_()
-                self._stage_repeatability_dialog.activateWindow()
+                self._show_as_panel(
+                    "stage_repeatability",
+                    "Stage Repeatability",
+                    self._stage_repeatability_dialog,
+                )
                 return
 
             self._stage_repeatability_dialog = StageRepeatabilityDialog(
                 app=self.app, parent=None
             )
-            self._stage_repeatability_dialog.show()
+            self._show_as_panel(
+                "stage_repeatability",
+                "Stage Repeatability",
+                self._stage_repeatability_dialog,
+            )
 
         except Exception as e:
             logger.error(f"Error opening Stage Repeatability: {e}", exc_info=True)
