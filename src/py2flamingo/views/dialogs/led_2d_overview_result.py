@@ -1719,6 +1719,14 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 "led_name": self._config.led_name,
                 "led_intensity": self._config.led_intensity,
                 "z_step_size": getattr(self._config, "z_step_size", 0.250),
+                # The overlap this overview's grid was BUILT with. It fixes the
+                # tile positions, so every later acquisition from this session
+                # inherits it and it cannot be changed after the fact. Omitting
+                # it made a reloaded session report the dataclass default
+                # instead of what was actually scanned.
+                "tile_overlap_percent": getattr(
+                    self._config, "tile_overlap_percent", None
+                ),
             }
 
         # Collect rotation metadata (without images)
@@ -1831,12 +1839,24 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 z_max=bbox_data.get("z_max", 0),
             )
 
+            # Sessions saved before tile_overlap_percent was recorded carry no
+            # value. Fall back to the dataclass default rather than 0 — a
+            # missing record means "unknown", and assuming zero overlap on a
+            # session that had some would shift every tile position.
+            saved_overlap = metadata["config"].get("tile_overlap_percent")
+            overlap_kwargs = (
+                {"tile_overlap_percent": float(saved_overlap)}
+                if saved_overlap is not None
+                else {}
+            )
+
             config = ScanConfiguration(
                 bounding_box=bounding_box,
                 starting_r=metadata["config"].get("starting_r", 0),
                 led_name=metadata["config"].get("led_name", "led_red"),
                 led_intensity=metadata["config"].get("led_intensity", 50),
                 z_step_size=metadata["config"].get("z_step_size", 0.250),
+                **overlap_kwargs,
             )
 
         # Determine default viz type (matches _populate_visualization_types index 2)

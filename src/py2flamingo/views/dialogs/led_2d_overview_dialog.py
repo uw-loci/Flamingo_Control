@@ -1023,31 +1023,19 @@ class LED2DOverviewDialog(PersistentDialog):
         )
 
     def _get_actual_fov(self) -> Optional[float]:
-        """Get actual field of view from camera.
+        """Get actual field of view from the one shared resolver.
 
-        Returns:
-            FOV in mm, or None if it cannot be determined
+        This used to read ``camera_service.get_pixel_field_of_view()`` directly
+        — the firmware value — while the workflow that actually moves the stage
+        resolved its FOV through the calibration-aware hardware config. Two
+        sources for the same number means the tile grid previewed here can
+        differ from the grid the scope scans, and the user cannot tell which is
+        right. See py2flamingo.utils.fov.
         """
+        from py2flamingo.utils.fov import resolve_fov_mm
+
         try:
-            if (
-                not self._app
-                or not hasattr(self._app, "camera_service")
-                or not self._app.camera_service
-            ):
-                return None
-
-            pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
-            width, height = self._app.camera_service.get_image_size()
-            frame_size = min(width, height)
-
-            if frame_size <= 0 or pixel_size_mm <= 0:
-                return None
-
-            fov = pixel_size_mm * frame_size
-            if fov < 0.01 or fov > 50:
-                return None
-
-            return fov
+            return resolve_fov_mm(self._app, log=self._logger)
         except Exception:
             return None
 

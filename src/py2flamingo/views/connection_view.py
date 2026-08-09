@@ -6,6 +6,7 @@ This module provides the ConnectionView widget for handling connection UI.
 
 import logging
 import struct
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -61,6 +62,7 @@ class ConnectionView(QWidget):
         config_manager=None,
         position_controller=None,
         workflow_service=None,
+        camera_service=None,
     ):
         """Initialize connection view with controller.
 
@@ -69,12 +71,16 @@ class ConnectionView(QWidget):
             config_manager: Optional ConfigurationManager for loading configs
             position_controller: Optional PositionController for debug features
             workflow_service: Optional MVCWorkflowService for workflow testing
+            camera_service: Optional CameraService, used only to report the
+                firmware pixel size alongside the configured one in the
+                settings readout (see ``_pixel_size_lines``)
         """
         super().__init__()
         self._controller = controller
         self._config_manager = config_manager
         self._position_controller = position_controller
         self._workflow_service = workflow_service
+        self._camera_service = camera_service
         self._configurations = {}  # Map of name -> MicroscopeConfiguration
         self._logger = logging.getLogger(__name__)
         self.setup_ui()
@@ -1071,6 +1077,43 @@ class ConnectionView(QWidget):
             self.connection_error.emit("Communication error")
             return False
 
+    def _pixel_size_lines(self) -> List[str]:
+        """Pixel size, and a mismatch notice, for the settings readout.
+
+        Every tile grid the client draws or scans derives from one pixel size
+        (py2flamingo.utils.fov). Two sources exist — the calibration-aware
+        hardware config, which wins, and the firmware's magnification-derived
+        value — and they can drift apart without anything visibly breaking
+        until a tile grid comes out the wrong size.
+
+        Reported here, once, at connection: a mismatch is a property of how the
+        scope is configured, not of any one acquisition, so this is where the
+        user can actually see it and act on it. Never raises — a diagnostics
+        line must not be able to break the settings readout.
+        """
+        try:
+            from py2flamingo.utils.fov import compare_pixel_size_sources
+
+            # compare_pixel_size_sources() reads `app.camera_service`; this view
+            # is handed the service directly, so wrap it in that shape.
+            report = compare_pixel_size_sources(
+                SimpleNamespace(camera_service=self._camera_service)
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._logger.debug("pixel-size report unavailable: %r", exc)
+            return []
+
+        lines = [report.summary()]
+        if report.objective_mag:
+            lines.append(f"Objective: {report.objective_mag:.4g}x")
+        warning = report.warning()
+        if warning:
+            lines.append("")
+            lines.append("!! " + warning)
+            self._logger.warning(warning)
+        lines.append("")
+        return lines
+
     def _format_settings(self, settings: Dict[str, Any]) -> str:
         """Format microscope settings dictionary into readable text.
 
@@ -1085,6 +1128,7 @@ class ConnectionView(QWidget):
         lines.append("MICROSCOPE SETTINGS")
         lines.append("=" * 60)
         lines.append("")
+        lines.extend(self._pixel_size_lines())
 
         # Helper function to format nested dictionaries
         def format_section(data: Any, indent: int = 0) -> List[str]:

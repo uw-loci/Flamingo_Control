@@ -547,17 +547,12 @@ class UnionThresholderDialog(PersistentDialog):
             ):
                 return None
 
-            pixel_size_mm = self._app.camera_service.get_pixel_field_of_view()
-            width, height = self._app.camera_service.get_image_size()
-            frame_size = min(width, height)
+            # One shared resolver for pixel size / FOV — see
+            # py2flamingo.utils.fov. Reading the firmware value directly here
+            # made this a second source of truth for tile geometry.
+            from py2flamingo.utils.fov import resolve_fov_mm
 
-            if frame_size <= 0 or pixel_size_mm <= 0:
-                return None
-
-            fov = pixel_size_mm * frame_size
-            if fov < 0.01 or fov > 50:
-                return None
-            return fov
+            return resolve_fov_mm(self._app)
         except Exception:
             return None
 

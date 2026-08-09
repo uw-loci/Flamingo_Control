@@ -221,6 +221,7 @@ def create_views_layer(
     camera_controller,
     laser_led_controller,
     geometry_manager,
+    camera_service=None,
 ) -> dict:
     """Create views layer components.
 
@@ -234,6 +235,9 @@ def create_views_layer(
         camera_controller: CameraController instance
         laser_led_controller: LaserLEDController instance
         geometry_manager: WindowGeometryManager instance
+        camera_service: Optional CameraService. Only used so the Connection
+            tab can show the firmware pixel size beside the configured one;
+            omitting it drops that one line rather than breaking the view.
 
     Returns:
         Dict with keys: connection_view, workflow_view, sample_info_view,
@@ -255,6 +259,7 @@ def create_views_layer(
         config_manager=config_manager,
         position_controller=position_controller,
         workflow_service=workflow_service,
+        camera_service=camera_service,
     )
 
     workflow_view = WorkflowView(workflow_controller)

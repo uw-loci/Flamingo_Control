@@ -205,6 +205,7 @@ class FlamingoApplication(QObject):
             self.camera_controller,
             self.laser_led_controller,
             self.geometry_manager,
+            camera_service=getattr(self, "camera_service", None),
         )
         self.connection_view = views["connection_view"]
         self.workflow_view = views["workflow_view"]

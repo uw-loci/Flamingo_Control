@@ -164,95 +164,19 @@ class LED2DOverviewWorkflow(QObject):
         return self._tile_overlap_percent() / 100.0
 
     def _calculate_actual_fov(self) -> Optional[float]:
-        """Calculate the actual field of view from microscope settings.
+        """Actual field of view in mm, from the one shared resolver.
 
-        Queries the camera service for pixel size and frame size to calculate
-        the true FOV. Returns None if FOV cannot be determined - the workflow
-        must not proceed with unknown FOV to avoid potential equipment damage.
+        Returns None if it cannot be determined — the workflow must not proceed
+        with an unknown FOV, since it drives stage movement.
 
-        Returns:
-            Field of view in mm, or None if it cannot be determined
+        The resolution order (calibration > ScopeSettings > YAML, firmware only
+        as a fallback) now lives in py2flamingo.utils.fov so the dialog's tile
+        preview and this scan cannot disagree about how big a tile is.
         """
+        from py2flamingo.utils.fov import resolve_fov_mm
+
         try:
-            if (
-                not self._app
-                or not hasattr(self._app, "camera_service")
-                or not self._app.camera_service
-            ):
-                logger.error("Camera service not available - cannot determine FOV")
-                return None
-
-            # Frame size (px) from the camera — honours any cropped AOI, which the
-            # static config does not know about.
-            width, height = self._app.camera_service.get_image_size()
-            frame_size = min(width, height)  # Use smaller dimension for FOV
-
-            if frame_size <= 0:
-                logger.error(
-                    f"Invalid frame size from camera: {frame_size} - cannot determine FOV"
-                )
-                return None
-
-            # Pixel size: prefer the calibration-aware hardware config so a measured
-            # Pixel Calibrator result (and the scope/YAML fallback chain) governs tile
-            # spacing.  The firmware value is objective-magnification-derived only and
-            # ignores any saved calibration, so trusting it blindly causes tile overlap
-            # (duplicated structure) whenever the true sample-plane pixel size differs
-            # from sensor_pixel / objective_mag.  Fall back to the firmware value only
-            # if the config is unavailable.
-            pixel_size_mm = 0.0
-            try:
-                from py2flamingo.configs.config_loader import get_hardware_config
-
-                hw = get_hardware_config()
-                pixel_size_mm = hw.effective_pixel_size_um / 1000.0
-                logger.info(
-                    f"Pixel size from hardware config: {hw.effective_pixel_size_um:.4f} "
-                    f"um/px (source={hw.optics_source}"
-                    f"{', calibrated' if hw.pixel_size_override_um else ''})"
-                )
-            except Exception as cfg_err:  # noqa: BLE001 - config is best-effort here
-                logger.warning(
-                    f"Hardware config unavailable ({cfg_err}); "
-                    "falling back to firmware pixel field of view"
-                )
-
-            # Cross-check / fallback against the firmware-reported value.
-            firmware_pixel_mm = self._app.camera_service.get_pixel_field_of_view()
-            if pixel_size_mm <= 0:
-                pixel_size_mm = firmware_pixel_mm
-            elif firmware_pixel_mm > 0:
-                ratio = pixel_size_mm / firmware_pixel_mm
-                if ratio < 0.8 or ratio > 1.25:
-                    logger.warning(
-                        f"Effective pixel size {pixel_size_mm * 1000:.4f} um/px differs "
-                        f"from firmware {firmware_pixel_mm * 1000:.4f} um/px "
-                        f"(ratio {ratio:.2f}); using the calibration-aware value. If "
-                        "tiles still overlap, re-run the XY Pixel Calibrator."
-                    )
-
-            if pixel_size_mm <= 0:
-                logger.error(
-                    f"Invalid pixel size: {pixel_size_mm} - cannot determine FOV"
-                )
-                return None
-
-            actual_fov = pixel_size_mm * frame_size
-
-            # Sanity check - FOV should be reasonable (0.01mm to 50mm typically)
-            if actual_fov < 0.01 or actual_fov > 50:
-                logger.error(
-                    f"Calculated FOV {actual_fov:.4f}mm is outside reasonable range (0.01-50mm)"
-                )
-                return None
-
-            logger.info(
-                f"Calculated actual FOV: {actual_fov:.4f} mm "
-                f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)"
-            )
-
-            return actual_fov
-
+            return resolve_fov_mm(self._app, log=logger)
         except Exception as e:
             logger.error(f"Failed to calculate FOV: {e}")
             return None
