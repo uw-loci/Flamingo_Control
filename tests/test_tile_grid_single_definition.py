@@ -171,3 +171,77 @@ class TestTheLogCanAlwaysNameItsOwnBuild:
         monkeypatch.setattr(subprocess, "run", _boom)
         v = cli._get_git_version()
         assert "unknown" in v and "git" in v
+
+
+class TestFastModeUsesTheSameGrid:
+    """Fast mode is the DEFAULT path, and it had its own grid arithmetic.
+
+    On 2026-08-09, three seconds apart in one run:
+
+        Generated 140 tile positions (10 x 14)          <- 10% overlap, correct
+        Fast mode: Scanning 9x12=108 tiles ...          <- its own loop, step=fov
+
+    The 108 is what reached the sample. Every "the overlap I set was ignored"
+    acquisition traced back here: `69fceac` fixed _generate_tile_positions and
+    the tile-count estimate, and this third copy — the one that actually moves
+    the stage — kept stepping by a raw FOV.
+
+    The general lesson is worth more than the fix: unifying "the two places"
+    was not enough, because nobody had counted the places.
+    """
+
+    def test_fast_mode_no_longer_steps_by_a_raw_fov(self):
+        src = WORKFLOW.read_text(encoding="utf-8")
+        fn_start = src.index("def _scan_tiles_continuous")
+        fn = src[fn_start : fn_start + 4000]
+        assert (
+            "x += fov" not in fn and "y += fov" not in fn
+        ), "fast mode must not walk the grid by a full FOV; that ignores overlap"
+        assert "self._tile_step_mm()" in fn
+        assert "self.tile_positions_1d(" in fn
+
+    def test_fast_mode_shouts_if_its_grid_differs_from_the_generated_one(self):
+        src = WORKFLOW.read_text(encoding="utf-8")
+        fn_start = src.index("def _scan_tiles_continuous")
+        fn = src[fn_start : fn_start + 4000]
+        assert "does not match" in fn and "logger.error" in fn
+
+    def test_every_grid_walk_in_the_workflow_goes_through_one_helper(self):
+        """A fourth copy must not be able to appear unnoticed.
+
+        Exactly one hand-rolled walk is legitimate — the one inside
+        tile_positions_1d, which is the definition everything else calls.
+        """
+        import re
+
+        src = WORKFLOW.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        helper = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "tile_positions_1d"
+        )
+        helper_src = ast.get_source_segment(src, helper) or ""
+        outside = src.replace(helper_src, "")
+
+        pattern = r"while \w+ <= .*\+ \w+ / 2:"
+        assert re.findall(pattern, helper_src), (
+            "the canonical walk should live in tile_positions_1d; if it moved, "
+            "point this test at its new home"
+        )
+        hand_rolled = re.findall(pattern, outside)
+        assert not hand_rolled, (
+            f"hand-rolled grid walks found outside tile_positions_1d: "
+            f"{hand_rolled}. Fast mode had one of these and scanned 9x12 while "
+            "the generator announced 10x14."
+        )
+
+    def test_the_rig_numbers_reproduce_the_reported_failure(self):
+        """step=FOV gives the 9x12 that was scanned; the fix gives 10x14."""
+        cls = _cls()
+        wrong_x = len(cls.tile_positions_1d(*BBOX_X, FOV_MM))
+        wrong_y = len(cls.tile_positions_1d(*BBOX_Y, FOV_MM))
+        right_x = len(cls.tile_positions_1d(*BBOX_X, FOV_MM * 0.9))
+        right_y = len(cls.tile_positions_1d(*BBOX_Y, FOV_MM * 0.9))
+        assert (wrong_x, wrong_y) == (9, 12)
+        assert (right_x, right_y) == (10, 14)

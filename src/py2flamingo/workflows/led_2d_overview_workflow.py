@@ -1118,19 +1118,19 @@ class LED2DOverviewWorkflow(QObject):
         z_min = eff_bbox.z_min
         z_max = eff_bbox.z_max
 
-        # Generate X positions
-        x_positions = []
-        x = eff_bbox.tile_x_min
-        while x <= eff_bbox.tile_x_max + fov / 2:
-            x_positions.append(x)
-            x += fov
-
-        # Generate Y positions
-        y_positions = []
-        y = eff_bbox.tile_y_min
-        while y <= eff_bbox.tile_y_max + fov / 2:
-            y_positions.append(y)
-            y += fov
+        # Same step and same walk as _generate_tile_positions. This path had its
+        # own copy that stepped by a raw `fov`, so fast mode — the DEFAULT —
+        # ignored tile overlap entirely: on 2026-08-09 the generator produced
+        # 10x14 = 140 positions at 10% overlap and three seconds later this loop
+        # scanned its own 9x12 = 108 at 0%, which is what actually reached the
+        # sample. Every "no overlap" acquisition traced back to here.
+        step = self._tile_step_mm()
+        x_positions = self.tile_positions_1d(
+            eff_bbox.tile_x_min, eff_bbox.tile_x_max, step
+        )
+        y_positions = self.tile_positions_1d(
+            eff_bbox.tile_y_min, eff_bbox.tile_y_max, step
+        )
 
         # Fit the tiling within the stage soft limits: shift the whole scan to sit
         # flush against the nearest reachable edge if it overruns, preserving
@@ -1149,8 +1149,22 @@ class LED2DOverviewWorkflow(QObject):
         tiles_y = len(y_positions)
         total_tiles = tiles_x * tiles_y
 
+        # What is about to be scanned must match what was generated and
+        # announced. When it did not, the difference surfaced only as a
+        # results-window warning hours later, on tiles already written to disk.
+        expected = self._tiles_x * self._tiles_y
+        if expected and total_tiles != expected:
+            logger.error(
+                f"Fast mode grid {tiles_x}x{tiles_y}={total_tiles} does not match "
+                f"the generated grid {self._tiles_x}x{self._tiles_y}={expected}. "
+                f"The scan would cover a different region than planned — STOP and "
+                f"report this."
+            )
+
         logger.info(
-            f"Fast mode: Scanning {tiles_x}x{tiles_y}={total_tiles} tiles with continuous Z sweeps"
+            f"Fast mode: Scanning {tiles_x}x{tiles_y}={total_tiles} tiles with "
+            f"continuous Z sweeps, step {step:.4f} mm "
+            f"({self._tile_overlap_percent():.1f}% overlap)"
         )
         logger.info(f"Fast mode: Z range {z_min:.3f} to {z_max:.3f}mm")
 
