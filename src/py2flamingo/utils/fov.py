@@ -113,6 +113,26 @@ class PixelSizeComparison:
         )
 
 
+_last_logged: dict = {}
+
+
+def _log_once(log, key: str, message: str) -> None:
+    """INFO the first time this message is seen, DEBUG while it stays the same.
+
+    These lines are worth having in the log — the pixel size is what decides
+    where the stage goes. They are not worth having eight times per second: the
+    LED Overview dialog re-derives its FOV on every widget signal, so loading a
+    preset produced a wall of identical "Calculated actual FOV" lines that pushed
+    the surrounding context out of view. A *change* still logs at INFO, which is
+    the case anyone reading for provenance cares about.
+    """
+    if _last_logged.get(key) == message:
+        log.debug(message)
+        return
+    _last_logged[key] = message
+    log.info(message)
+
+
 def compare_pixel_size_sources(app) -> PixelSizeComparison:
     """Read both pixel-size sources so the Connection tab can report them.
 
@@ -167,7 +187,6 @@ def resolve_pixel_size_mm(app, log=None) -> Optional[float]:
     callers drive the stage with this.
     """
     log = log or logger
-    cs = _camera_service(app)
 
     pixel_size_mm = 0.0
     try:
@@ -175,10 +194,12 @@ def resolve_pixel_size_mm(app, log=None) -> Optional[float]:
 
         hw = get_hardware_config()
         pixel_size_mm = hw.effective_pixel_size_um / 1000.0
-        log.info(
+        _log_once(
+            log,
+            "pixel_size",
             f"Pixel size from hardware config: {hw.effective_pixel_size_um:.4f} "
             f"um/px (source={hw.optics_source}"
-            f"{', calibrated' if hw.pixel_size_override_um else ''})"
+            f"{', calibrated' if hw.pixel_size_override_um else ''})",
         )
     except Exception as cfg_err:  # noqa: BLE001 - config is best-effort here
         log.warning(
@@ -186,15 +207,19 @@ def resolve_pixel_size_mm(app, log=None) -> Optional[float]:
             "falling back to firmware pixel field of view"
         )
 
-    firmware_pixel_mm = 0.0
-    if cs is not None:
-        try:
-            firmware_pixel_mm = cs.get_pixel_field_of_view() or 0.0
-        except Exception as exc:  # noqa: BLE001
-            log.warning(f"Firmware pixel size unavailable: {exc!r}")
-
+    # Only ask the firmware when the config could not answer. This used to query
+    # unconditionally and then discard the result whenever the config had
+    # succeeded — which is every normal call. Each query is a TCP round-trip on
+    # the command socket, and the dialog re-derives its FOV on every widget
+    # signal, so opening the LED Overview fired a burst of PIXEL_FIELD_OF_VIEW_GET
+    # requests whose answers were thrown away.
     if pixel_size_mm <= 0:
-        pixel_size_mm = firmware_pixel_mm
+        cs = _camera_service(app)
+        if cs is not None:
+            try:
+                pixel_size_mm = cs.get_pixel_field_of_view() or 0.0
+            except Exception as exc:  # noqa: BLE001
+                log.warning(f"Firmware pixel size unavailable: {exc!r}")
 
     # No divergence warning here on purpose. A config-vs-firmware mismatch is a
     # property of how the scope is set up, not of this acquisition, and it is
@@ -252,8 +277,10 @@ def resolve_fov_mm(app, log=None) -> Optional[float]:
         )
         return None
 
-    log.info(
+    _log_once(
+        log,
+        "fov",
         f"Calculated actual FOV: {fov:.4f} mm "
-        f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)"
+        f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)",
     )
     return fov

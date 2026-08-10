@@ -231,3 +231,104 @@ class TestTheOverviewRemembersItsOverlap:
         assert (
             ScanConfiguration.__dataclass_fields__["tile_overlap_percent"].default > 0
         ), "defaulting to 0 overlap is the bug this all started from"
+
+
+class TestTheResolverDoesNotTalkToTheScopeNeedlessly:
+    """Every firmware query is a round-trip on the command socket.
+
+    ``resolve_pixel_size_mm`` used to call ``get_pixel_field_of_view()``
+    unconditionally and then discard the answer whenever the hardware config had
+    already supplied a value — i.e. on every normal call. The LED Overview dialog
+    re-derives its FOV on each widget signal, so opening it fired a burst of
+    PIXEL_FIELD_OF_VIEW_GET / IMAGE_SIZE_GET pairs and filled the log with
+    identical lines. That socket is the same one stage moves go out on.
+    """
+
+    def _app(self, calls):
+        def _pfov():
+            calls.append("pixel_field_of_view")
+            return 0.0005
+
+        def _size():
+            calls.append("image_size")
+            return (1024, 1024)
+
+        return SimpleNamespace(
+            camera_service=SimpleNamespace(
+                get_pixel_field_of_view=_pfov, get_image_size=_size
+            )
+        )
+
+    def test_the_firmware_is_not_queried_when_the_config_answers(self, monkeypatch):
+        import py2flamingo.configs.config_loader as cl
+        from py2flamingo.utils import fov
+
+        monkeypatch.setattr(
+            cl,
+            "get_hardware_config",
+            lambda: SimpleNamespace(
+                effective_pixel_size_um=1.0475,
+                optics_source="scope",
+                pixel_size_override_um=None,
+            ),
+        )
+        calls = []
+        fov.resolve_pixel_size_mm(self._app(calls))
+        assert "pixel_field_of_view" not in calls
+
+    def test_it_is_still_queried_when_the_config_cannot_answer(self, monkeypatch):
+        """The fallback must survive the optimisation."""
+        import py2flamingo.configs.config_loader as cl
+        from py2flamingo.utils import fov
+
+        def _boom():
+            raise RuntimeError("no config")
+
+        monkeypatch.setattr(cl, "get_hardware_config", _boom)
+        calls = []
+        assert fov.resolve_pixel_size_mm(self._app(calls)) == pytest.approx(0.0005)
+        assert "pixel_field_of_view" in calls
+
+    def test_repeating_the_same_result_stops_logging_at_info(self, monkeypatch):
+        """A changed value still reaches INFO; an unchanged one drops to DEBUG."""
+        import logging
+
+        import py2flamingo.configs.config_loader as cl
+        from py2flamingo.utils import fov
+
+        monkeypatch.setattr(
+            cl,
+            "get_hardware_config",
+            lambda: SimpleNamespace(
+                effective_pixel_size_um=1.0475,
+                optics_source="scope",
+                pixel_size_override_um=None,
+            ),
+        )
+        fov._last_logged.clear()
+        app = self._app([])
+
+        seen = []
+
+        class _Log:
+            def info(self, m):
+                seen.append(("info", m))
+
+            def debug(self, m):
+                seen.append(("debug", m))
+
+            def warning(self, m):
+                pass
+
+            def error(self, m):
+                pass
+
+        log = _Log()
+        for _ in range(8):
+            fov.resolve_fov_mm(app, log=log)
+
+        infos = [m for lvl, m in seen if lvl == "info"]
+        assert len(infos) == 2, (
+            f"expected one INFO for pixel size and one for FOV, got {len(infos)}: "
+            f"{infos}"
+        )

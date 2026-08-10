@@ -75,6 +75,12 @@ def _workflow(cancelled=False):
     wf._cancelled = cancelled
     wf._last_xyz = [0.0, 0.0, 0.0]
     wf._broadcast_stage_position = lambda *a, **k: None
+    # None = "looked up, no tracker available", which sends _wait_for_z_arrival
+    # down its polling fallback. That is the path FakeStage models, so these
+    # tests keep exercising arrival-before-frame without needing a live
+    # STAGE_MOTION_STOPPED stream. The callback path is covered in
+    # tests/test_motion_callback_queue.py.
+    wf._motion_tracker_cache = None
     return wf
 
 

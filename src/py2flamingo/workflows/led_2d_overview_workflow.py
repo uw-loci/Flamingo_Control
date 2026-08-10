@@ -29,6 +29,10 @@ from py2flamingo.models.data.overview_results import (
 
 logger = logging.getLogger(__name__)
 
+# Sentinel for "not looked up yet", so a cached None (no tracker available) is
+# not retried on every one of the thousands of Z planes in a scan.
+_UNSET = object()
+
 
 class LED2DOverviewWorkflow(QObject):
     """Workflow for LED 2D Overview scans.
@@ -77,6 +81,9 @@ class LED2DOverviewWorkflow(QObject):
         self._cancelled = False
         # Cached stage soft limits {axis: {'min','max'}} for the tile-position guard.
         self._stage_limits_cache = None
+        # Cached MotionTracker for the per-plane Z wait. Sentinel-guarded because
+        # None is a legitimate cached value (no connection / no async reader).
+        self._motion_tracker_cache = _UNSET
 
         # Live stage-position broadcast to the UI. The C++ GUI sliders track the
         # stage continuously while scanning; the overview drives the stage through
@@ -908,6 +915,74 @@ class LED2DOverviewWorkflow(QObject):
             return False
         return True
 
+    def _get_motion_tracker(self):
+        """A MotionTracker listening for STAGE_MOTION_STOPPED, or None.
+
+        Built once per scan against the same TCPConnection PositionController
+        uses. Returns None when there is no async reader — MotionTracker's sync
+        mode reads the command socket directly, which would race the async reader
+        for the same bytes, so the caller falls back to polling instead.
+        """
+        if self._motion_tracker_cache is not _UNSET:
+            return self._motion_tracker_cache
+
+        tracker = None
+        try:
+            from py2flamingo.controllers.motion_tracker import MotionTracker
+
+            tcp_conn = getattr(self._app.connection_service, "tcp_connection", None)
+            if tcp_conn is not None:
+                candidate = MotionTracker(connection=tcp_conn)
+                if candidate._use_async_mode():
+                    tracker = candidate
+                else:
+                    logger.info(
+                        "No async reader on this connection; the Z sweep will "
+                        "poll the stage position instead of listening for "
+                        "motion-stopped callbacks (slower)"
+                    )
+        except Exception as exc:  # noqa: BLE001 - never break a scan over this
+            logger.warning(
+                f"Could not create a motion tracker ({exc}); the Z sweep will "
+                "poll the stage position instead"
+            )
+
+        self._motion_tracker_cache = tracker
+        return tracker
+
+    def _wait_for_z_arrival(
+        self, stage_service, z_pos: float, timeout_s: float
+    ) -> bool:
+        """Block until Z has arrived at ``z_pos``, preferring zero-traffic waiting.
+
+        Uses the STAGE_MOTION_STOPPED callback when the connection has an async
+        reader (no command sent, so nothing to congest), and only falls back to
+        position polling otherwise. See :meth:`_capture_plane` for why the poll
+        is the slow path rather than the default.
+        """
+        from py2flamingo.services.stage_service import AxisCode
+
+        tracker = self._get_motion_tracker()
+        if tracker is not None:
+            # allow_cancel=False: the scan is the only thing driving the stage
+            # (the UI's stage controls are locked for the duration of an
+            # acquisition), and a cancelled wait here would return immediately
+            # and hand back a mid-travel frame.
+            return tracker.wait_for_motion_complete(
+                timeout=timeout_s, allow_cancel=False
+            )
+
+        # Fallback: poll, but at an interval that acknowledges each poll is a
+        # network round-trip, and with a tolerance the readback can actually hit.
+        return self._wait_for_axes_settled(
+            stage_service,
+            {AxisCode.Z_AXIS: z_pos},
+            tolerance_mm=0.005,
+            timeout_s=timeout_s,
+            poll_interval_s=0.05,
+            broadcast=False,
+        )
+
     def _capture_plane(
         self,
         stage_service,
@@ -939,27 +1014,52 @@ class LED2DOverviewWorkflow(QObject):
           then contains duplicates, its focus scores are duplicated with them,
           and the true best-focus plane may never have been sampled at all.
 
-        Waiting on the real per-axis position fixes the first; waiting for the
-        frame counter to advance fixes the second. The frame number is returned
-        so the caller can detect and report any plane that still had to reuse a
-        frame rather than silently scoring it.
+        Waiting for arrival fixes the first; waiting for the frame counter to
+        advance fixes the second. The frame number is returned so the caller can
+        detect and report any plane that still had to reuse a frame rather than
+        silently scoring it.
+
+        HOW we wait for arrival matters as much as that we do. The first version
+        of this polled ``get_axis_position`` every 10 ms with a 2 um tolerance.
+        Every one of those polls is a STAGE_POSITION_GET round-trip on the shared
+        command socket, so a single Z plane could fire ~100 queries at a server
+        that is simultaneously streaming LED preview frames. It could not answer
+        them; the polls timed out, the loop never saw an in-tolerance reading,
+        and each plane burned the full ``settle_timeout_s``. At ~6 planes a tile
+        that is ~18 s of pure waiting, and it is why the 2026-08-09 overview ran
+        at ~25 s/tile. The same flood produced the 0x6008 timeout cluster and the
+        "Overwriting pending request" warnings (POSITION_SET and POSITION_GET
+        share command code 24584, so a move ack and a position reply land in the
+        same single-slot pending-request queue).
+
+        The stage already announces its own arrival: STAGE_MOTION_STOPPED
+        (0x6010), unsolicited, no query needed. Those callbacks were arriving in
+        their thousands the whole time — that is what the "motion callback queue
+        full" warnings were counting — and this loop was ignoring them while
+        interrogating the stage for the same fact. So wait on the callback and
+        send nothing. Polling remains only as a fallback for a connection with no
+        async reader, and at a poll interval that reflects the real cost of a
+        round-trip.
         """
         from py2flamingo.services.stage_service import AxisCode
 
-        stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
+        # Arm BEFORE moving: a short Z step can complete while move_to_position is
+        # still waiting for its own ack, and an unarmed tracker would discard that
+        # completion as stale. See MotionTracker.arm().
+        tracker = self._get_motion_tracker()
+        try:
+            if tracker is not None:
+                tracker.arm()
 
-        before = camera_controller.get_latest_frame()
-        last_number = before[2] if before is not None else None
+            stage_service.move_to_position(AxisCode.Z_AXIS, z_pos)
 
-        # Poll the actual Z position — a small step settles fast, so poll tight.
-        self._wait_for_axes_settled(
-            stage_service,
-            {AxisCode.Z_AXIS: z_pos},
-            tolerance_mm=0.002,
-            timeout_s=settle_timeout_s,
-            poll_interval_s=0.01,
-            broadcast=False,
-        )
+            before = camera_controller.get_latest_frame()
+            last_number = before[2] if before is not None else None
+
+            self._wait_for_z_arrival(stage_service, z_pos, settle_timeout_s)
+        finally:
+            if tracker is not None:
+                tracker.disarm()
         self._broadcast_stage_position(z=z_pos)
 
         # Then wait for a frame that started AFTER the stage stopped.

@@ -136,6 +136,47 @@ class MotionTracker:
                     f"signal may have been missed"
                 )
 
+    def arm(self) -> None:
+        """Start buffering motion-stopped callbacks *before* the move is sent.
+
+        Without this there is a race that turns the callback path into a
+        guaranteed timeout: ``move_to_position`` waits for its own ack, so a
+        short move (a 250 um Z step settles in tens of milliseconds) can finish —
+        and fire STAGE_MOTION_STOPPED — before the caller reaches
+        :meth:`wait_for_motion_complete`. The queue only buffers while a wait is
+        active, so that callback would be discarded and the wait would then sit
+        out its full timeout waiting for an event that already happened.
+
+        Arm first, then move, then wait. Idempotent. Safe to pair with
+        :meth:`disarm` in a ``finally``; the wait itself also disarms on exit.
+        """
+        self._setup_async_callback()
+        if self._callback_queue is None:
+            return
+        with self._lock:
+            if self._wait_active:
+                return  # already armed or already waiting; keep what is buffered
+            self._wait_active = True
+        self._drain_stale()
+
+    def disarm(self) -> None:
+        """Stop buffering callbacks. Idempotent; safe if never armed."""
+        with self._lock:
+            self._wait_active = False
+
+    def _drain_stale(self) -> None:
+        """Discard callbacks buffered before this wait began."""
+        if self._callback_queue is None:
+            return
+        while not self._callback_queue.empty():
+            try:
+                stale = self._callback_queue.get_nowait()
+                self.logger.debug(
+                    f"Discarded stale motion callback (status={stale.status_code})"
+                )
+            except queue.Empty:
+                break
+
     def cancel_wait(self) -> None:
         """
         Cancel the current motion wait operation.
@@ -198,20 +239,18 @@ class MotionTracker:
         # Ensure callback is registered
         self._setup_async_callback()
 
-        # Clear any stale callbacks from queue
-        while not self._callback_queue.empty():
-            try:
-                stale = self._callback_queue.get_nowait()
-                self.logger.debug(
-                    f"Discarded stale motion callback (status={stale.status_code})"
-                )
-            except queue.Empty:
-                break
+        # Only discard buffered callbacks if we were NOT armed before the move.
+        # When arm() ran first, anything in the queue arrived after arming — i.e.
+        # it is this move's completion, possibly already delivered — and draining
+        # it here would throw away the very event being waited for.
+        with self._lock:
+            was_armed = self._wait_active
+            self._wait_active = True
+            self._is_moving = True
+        if not was_armed:
+            self._drain_stale()
 
         try:
-            with self._lock:
-                self._is_moving = True
-                self._wait_active = True
 
             # Wait for callbacks with periodic cancel checks
             remaining = timeout
