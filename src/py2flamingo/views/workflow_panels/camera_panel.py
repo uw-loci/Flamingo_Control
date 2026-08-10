@@ -146,34 +146,35 @@ class CameraPanel(QWidget):
         self._update_detected_display()
 
     def _max_frame_rate(self) -> float:
-        """Frame-rate ceiling for the CURRENT AOI, in frames/second.
+        """Acquisition frame-rate cap, in frames/second. Does NOT scale with AOI.
 
-        Was a hardcoded 40.0, which is the FULL-FRAME figure. A rolling-shutter
-        sCMOS reads one row at a time, so a 1024-row AOI runs at roughly twice
-        that. Since ``z_velocity = z_step * frame_rate``, capping at 40 while
-        the camera actually ran at 80 halved the Z sweep for every cropped-AOI
-        acquisition.
+        This is the number a Z-stack workflow is built from, and it is not a
+        camera-capability question. ``z_velocity = z_step * frame_rate``
+        (``zstack_panel.py:451``) with a FIXED Z step, so the frame rate *is*
+        the stage speed. Raising it does not collect the same stack faster — it
+        drives the stage through the sample faster and blurs every frame.
 
-        Falls back to 40 fps scaled by the AOI if the hardware config cannot be
-        read, so the panel keeps working offline.
+        This scaled with AOI between 2026-08-07 and 2026-08-09, on the reasoning
+        that a rolling-shutter sCMOS reads one row at a time so a 1024-row AOI
+        can run at ~2x. That is true of the *sensor* and irrelevant *here*: what
+        the camera is capable of is not what the acquisition should request.
+        Cropping the AOI silently doubled the requested rate to 80, doubled the Z
+        sweep speed, and produced blurry stacks that cost real time to diagnose
+        because nothing in the UI said the speed had changed.
+
+        40 fps at the full sensor is the standing configuration for motion and
+        acquisition. An explicitly entered rate still wins — this only bounds
+        what a short exposure is allowed to imply. For the camera's true ceiling
+        (a capability question, e.g. "can the hardware keep up?") see
+        ``HardwareConfig.max_frame_rate_hz``.
         """
         try:
             from py2flamingo.configs.config_loader import get_hardware_config
 
-            hw = get_hardware_config()
-            # The panel's AOI is what the workflow will request, which may not
-            # be what the camera currently reports — prefer ours.
-            rows = int(self._aoi_height) if self._aoi_height else hw.active_height_px
-            base = float(hw.max_frame_rate_hz_full_frame or 40.0)
-            full = int(hw.sensor_height_px or 2048)
+            return float(get_hardware_config().max_frame_rate_hz_full_frame or 40.0)
         except Exception as e:  # noqa: BLE001 - config best-effort; keep UI alive
             self._logger.debug(f"Hardware config unavailable for frame rate: {e!r}")
-            rows = int(self._aoi_height) if self._aoi_height else 2048
-            base, full = 40.0, 2048
-
-        if rows <= 0 or full <= 0:
-            return base
-        return base * (float(full) / float(rows))
+            return 40.0
 
     def _update_detected_display(self) -> None:
         """Update the detected settings display."""

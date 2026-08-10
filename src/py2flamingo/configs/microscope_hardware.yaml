@@ -16,12 +16,16 @@ camera:
   sensor_width_px: 2048
   sensor_height_px: 2048
 
-  # Maximum frame rate at the FULL sensor height, in frames/second.
-  # A rolling-shutter sCMOS reads one row at a time, so the ceiling scales
-  # inversely with the number of rows in the AOI: a 1024-row AOI runs at
-  # roughly twice this. Code that needs the ceiling for the CURRENT AOI must
-  # use HardwareConfig.max_frame_rate_hz rather than hardcoding a constant —
-  # a fixed 40 fps silently halved the Z sweep velocity at a cropped AOI.
+  # Acquisition frame rate, in frames/second. This is the standing setting for
+  # motion AND acquisition, and it is deliberately NOT scaled by the AOI.
+  #
+  # z_velocity = z_step * frame_rate with a fixed Z step, so this number is the
+  # stage sweep speed. A rolling-shutter sCMOS can physically run ~2x faster at
+  # a 1024-row crop, and deriving the rate from that capability (2026-08-07 to
+  # 2026-08-09) doubled the sweep to 80 fps whenever the AOI was cropped — the
+  # stacks came back blurry and nothing in the UI said the speed had changed.
+  # Capability lives in HardwareConfig.max_frame_rate_hz; it must not choose
+  # this. An explicitly entered rate still overrides.
   max_frame_rate_hz_full_frame: 40.0
 
 optics:

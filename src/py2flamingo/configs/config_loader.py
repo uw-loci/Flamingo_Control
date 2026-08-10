@@ -136,13 +136,25 @@ class HardwareConfig:
 
     @property
     def max_frame_rate_hz(self) -> float:
-        """Camera frame-rate ceiling for the CURRENT AOI, in frames/second.
+        """Camera CAPABILITY ceiling for the current AOI, in frames/second.
 
         A rolling-shutter sCMOS reads one row at a time, so the ceiling scales
-        inversely with the number of rows: cropping 2048 -> 1024 roughly
-        doubles it. Anything deriving a frame rate must use this rather than a
-        constant — a hardcoded 40 fps halved the Z sweep velocity whenever the
-        camera ran at a cropped AOI, since z_velocity = z_step * frame_rate.
+        inversely with the number of rows: cropping 2048 -> 1024 roughly doubles
+        it. That is a fact about the sensor.
+
+        **Do not derive an acquisition frame rate from this.** Because
+        ``z_velocity = z_step * frame_rate`` with a fixed Z step, the acquisition
+        frame rate IS the stage speed — so feeding an AOI-scaled ceiling into a
+        workflow makes the stage sweep faster purely because the sensor was
+        cropped, and every frame comes out motion-blurred. That is exactly what
+        happened between 2026-08-07 and 2026-08-09: cropping to 1024 raised the
+        requested rate to 80, doubled the Z sweep, and the resulting blur took
+        real time to trace because nothing announced the speed change.
+
+        40 fps at the full sensor is the standing configuration for motion and
+        acquisition, and it does not change with AOI. Use this property only to
+        answer capability questions ("can the hardware sustain this?"), never to
+        choose a rate. See ``CameraPanel._max_frame_rate``.
         """
         base = float(self.max_frame_rate_hz_full_frame or 40.0)
         rows = self.active_height_px
