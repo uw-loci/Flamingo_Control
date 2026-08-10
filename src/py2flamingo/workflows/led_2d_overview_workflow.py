@@ -770,11 +770,8 @@ class LED2DOverviewWorkflow(QObject):
             # rotation move), then the linear axes via the stage service.
             if mc is not None:
                 mc.move_absolute("r", r)
-            stage_service.move_to_position(AxisCode.X_AXIS, x)
-            stage_service.move_to_position(AxisCode.Y_AXIS, y)
-            stage_service.move_to_position(AxisCode.Z_AXIS, z)
             # Streams the live travel home to the sliders / 3D view as it settles.
-            self._wait_for_axes_settled(
+            self._move_and_settle(
                 stage_service,
                 {AxisCode.X_AXIS: x, AxisCode.Y_AXIS: y, AxisCode.Z_AXIS: z},
             )
@@ -849,6 +846,58 @@ class LED2DOverviewWorkflow(QObject):
             if app is not None:
                 app.processEvents()
 
+    def _move_and_settle(
+        self,
+        stage_service,
+        targets: dict,
+        *,
+        tolerance_mm: float = 0.01,
+        timeout_s: float = 10.0,
+        broadcast: bool = True,
+    ) -> bool:
+        """Command every axis in ``targets`` and block until all have arrived.
+
+        Arms the motion-stopped listener BEFORE issuing the moves, waits for the
+        stage to announce it has stopped, and only then confirms the positions
+        with a single polling pass. If that pass finds an axis still short, it
+        falls back to the old poll loop for whatever time is left.
+
+        The point is the ordering. ``_wait_for_axes_settled`` on its own opens
+        with a position query and keeps querying every 100 ms until the tolerance
+        is met — on a command socket the LED preview has saturated, those queries
+        time out and the loop runs to its full 10 s. Waiting for the event first
+        means the common case costs one unsolicited callback plus one query per
+        axis (three, for a tile move) instead of seventy.
+
+        Args:
+            targets: {axis_code: target_mm}, commanded in dict order.
+        """
+        tracker = self._get_motion_tracker()
+        deadline = time.monotonic() + timeout_s
+        try:
+            if tracker is not None:
+                tracker.arm()
+            for axis, target in targets.items():
+                stage_service.move_to_position(axis, target)
+            if tracker is not None:
+                tracker.wait_for_motion_complete(
+                    timeout=max(0.0, deadline - time.monotonic()),
+                    allow_cancel=False,
+                )
+        finally:
+            if tracker is not None:
+                tracker.disarm()
+
+        # Confirm. The callback says motion stopped, not that it stopped where we
+        # asked, and a multi-axis move may report before the last axis is done.
+        return self._wait_for_axes_settled(
+            stage_service,
+            targets,
+            tolerance_mm=tolerance_mm,
+            timeout_s=max(0.0, deadline - time.monotonic()),
+            broadcast=broadcast,
+        )
+
     def _wait_for_axes_settled(
         self,
         stage_service,
@@ -878,7 +927,12 @@ class LED2DOverviewWorkflow(QObject):
         # Map stage axis code (X=1, Y=2, Z=3) to the _last_xyz index so the real
         # positions polled below can be streamed to the sliders as the stage moves.
         axis_to_idx = {1: 0, 2: 1, 3: 2}
-        while remaining and time.monotonic() < deadline:
+        # Always make one pass, even with no time left: _move_and_settle calls
+        # this purely to confirm an arrival the stage has already announced, and
+        # a zero-budget call must check rather than report a phantom timeout.
+        first_pass = True
+        while remaining and (first_pass or time.monotonic() < deadline):
+            first_pass = False
             if self._cancelled:
                 return False
             settled = []
@@ -923,8 +977,14 @@ class LED2DOverviewWorkflow(QObject):
         mode reads the command socket directly, which would race the async reader
         for the same bytes, so the caller falls back to polling instead.
         """
-        if self._motion_tracker_cache is not _UNSET:
-            return self._motion_tracker_cache
+        # Guarded read: attribute access on a QObject whose __init__ never ran
+        # raises, and a cache lookup must not be the thing that breaks a scan.
+        try:
+            cached = self._motion_tracker_cache
+        except Exception:  # noqa: BLE001
+            cached = _UNSET
+        if cached is not _UNSET:
+            return cached
 
         tracker = None
         try:
@@ -947,7 +1007,10 @@ class LED2DOverviewWorkflow(QObject):
                 "poll the stage position instead"
             )
 
-        self._motion_tracker_cache = tracker
+        try:
+            self._motion_tracker_cache = tracker
+        except Exception:  # noqa: BLE001 - caching is an optimisation, not a step
+            pass
         return tracker
 
     def _wait_for_z_arrival(
@@ -1302,15 +1365,21 @@ class LED2DOverviewWorkflow(QObject):
                 # the live X/Y/Z travel to the sliders without jerking any axis.
                 self._last_xyz = [x_pos, y_pos, z_start]
 
-                stage_service.move_to_position(AxisCode.Y_AXIS, y_pos)
-                stage_service.move_to_position(AxisCode.Z_AXIS, z_start)
-                self._wait_for_axes_settled(
+                # X was already commanded at the top of the column loop; Y and Z
+                # go out from here, and _move_and_settle waits on the stage's own
+                # motion-stopped callback rather than interrogating it.
+                self._move_and_settle(
                     stage_service,
                     {
-                        AxisCode.X_AXIS: x_pos,
                         AxisCode.Y_AXIS: y_pos,
                         AxisCode.Z_AXIS: z_start,
                     },
+                )
+                # X confirmed separately: its move predates this tile, so it has
+                # had the whole Y/Z travel to arrive and normally settles on the
+                # first query.
+                self._wait_for_axes_settled(
+                    stage_service, {AxisCode.X_AXIS: x_pos}, timeout_s=2.0
                 )
 
                 # Flush frames buffered before/during the move to this tile so the
@@ -1511,11 +1580,7 @@ class LED2DOverviewWorkflow(QObject):
         # Seed the broadcast baseline (incl. this tile's Z) so the settle poll can
         # stream the live X/Y travel to the Sample View sliders + 3D view.
         self._last_xyz = [x, y, z_center]
-        stage_service.move_to_position(AxisCode.X_AXIS, x)
-        stage_service.move_to_position(AxisCode.Y_AXIS, y)
-        self._wait_for_axes_settled(
-            stage_service, {AxisCode.X_AXIS: x, AxisCode.Y_AXIS: y}
-        )
+        self._move_and_settle(stage_service, {AxisCode.X_AXIS: x, AxisCode.Y_AXIS: y})
 
         # Calculate Z positions for stack using effective bounding box Z range
         # (For rotated view, this is the original X range swapped to Z)
