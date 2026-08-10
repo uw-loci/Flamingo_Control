@@ -84,6 +84,10 @@ class LED2DOverviewWorkflow(QObject):
         # Cached MotionTracker for the per-plane Z wait. Sentinel-guarded because
         # None is a legitimate cached value (no connection / no async reader).
         self._motion_tracker_cache = _UNSET
+        # [move_seconds, sweep_seconds, tiles] accumulated across a fast scan, so
+        # the end of a run can say where its time went instead of leaving it to
+        # be reconstructed from timestamps.
+        self._tile_time_totals = [0.0, 0.0, 0]
 
         # Live stage-position broadcast to the UI. The C++ GUI sliders track the
         # stage continuously while scanning; the overview drives the stage through
@@ -1365,6 +1369,8 @@ class LED2DOverviewWorkflow(QObject):
                 # the live X/Y/Z travel to the sliders without jerking any axis.
                 self._last_xyz = [x_pos, y_pos, z_start]
 
+                tile_t0 = time.monotonic()
+
                 # X was already commanded at the top of the column loop; Y and Z
                 # go out from here, and _move_and_settle waits on the stage's own
                 # motion-stopped callback rather than interrogating it.
@@ -1381,6 +1387,7 @@ class LED2DOverviewWorkflow(QObject):
                 self._wait_for_axes_settled(
                     stage_service, {AxisCode.X_AXIS: x_pos}, timeout_s=2.0
                 )
+                move_s = time.monotonic() - tile_t0
 
                 # Flush frames buffered before/during the move to this tile so the
                 # sweep below captures only fresh frames. The live buffer is small
@@ -1395,6 +1402,7 @@ class LED2DOverviewWorkflow(QObject):
                 z_step = self._config.z_step_size
                 z_values = self._z_sweep_positions(z_min, z_max, z_step, z_sweep_up)
 
+                sweep_t0 = time.monotonic()
                 seen_frame_numbers = set()
                 reused = 0
                 for z_pos in z_values:
@@ -1418,6 +1426,8 @@ class LED2DOverviewWorkflow(QObject):
                     focus_score = variance_of_laplacian(image)
                     frames.append((z_pos, image.copy(), focus_score))
 
+                sweep_s = time.monotonic() - sweep_t0
+
                 if reused:
                     logger.warning(
                         f"Tile ({x_pos:.2f}, {y_pos:.2f}): {reused}/{len(z_values)} "
@@ -1425,6 +1435,22 @@ class LED2DOverviewWorkflow(QObject):
                         "camera is not keeping up with the Z sweep, so best-focus "
                         "is chosen from fewer planes than requested"
                     )
+
+                # Where the time actually went. A scan that is "too slow" is not
+                # actionable; "1.2 s moving, 18.4 s sweeping 6 planes" is. This
+                # breakdown had to be reconstructed from log timestamps to find
+                # the ~25 s/tile stall on 2026-08-09, which meant guessing at the
+                # split between the tile move and the sweep. One line per tile is
+                # nothing next to a 250k-line log.
+                self._tile_time_totals[0] += move_s
+                self._tile_time_totals[1] += sweep_s
+                self._tile_time_totals[2] += 1
+                logger.info(
+                    f"Tile {tile_idx + 1}/{total_tiles} timing: move {move_s:.2f}s, "
+                    f"sweep {sweep_s:.2f}s over {len(z_values)} planes "
+                    f"({sweep_s / max(1, len(z_values)):.2f}s/plane), "
+                    f"total {move_s + sweep_s:.2f}s"
+                )
 
                 # Compute projections from captured frames
                 if frames:
@@ -1480,6 +1506,16 @@ class LED2DOverviewWorkflow(QObject):
                     return
 
         logger.info(f"Fast mode: Captured {len(rotation_result.tiles)} tiles")
+
+        move_total, sweep_total, counted = self._tile_time_totals
+        if counted:
+            logger.info(
+                f"Fast mode timing over {counted} tiles: "
+                f"{move_total / counted:.2f}s/tile moving, "
+                f"{sweep_total / counted:.2f}s/tile sweeping, "
+                f"{(move_total + sweep_total) / counted:.2f}s/tile total "
+                f"({(move_total + sweep_total) / 60:.1f} min of stage+camera wait)"
+            )
 
         # Finish this rotation
         self._finish_rotation()
