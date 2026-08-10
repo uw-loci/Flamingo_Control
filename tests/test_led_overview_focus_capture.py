@@ -239,3 +239,73 @@ class TestTheTileMoveWaitsOnTheEventNotThePoll:
         wf, stage = self._wf(None), FakeStage(moves_to_arrive=1)
         stage.move_to_position(Z_AXIS, 3.0)
         assert wf._wait_for_axes_settled(stage, {Z_AXIS: 3.0}, timeout_s=0.0) is True
+
+
+class TestThePlaneCapAppliesToThePathThatMoves:
+    """The cap existed only in the path that isn't used.
+
+    ``_capture_tile`` (slow, non-default) capped at 10 planes under the comment
+    "this is a quick overview, not precision imaging". Fast mode is the DEFAULT
+    and walked the whole Z range at z_step with no bound, so a deep bounding box
+    could ask for 30+ planes per tile and the guard written to prevent exactly
+    that never ran. Same shape as the tile-step bug: two copies of one
+    calculation, and the copy driving hardware was missing the guard.
+
+    Sweep time is planes x per-plane cost, so this is the ceiling on the
+    dominant term in the whole scan.
+    """
+
+    def test_a_deep_range_is_capped(self):
+        # 10 mm at 0.25 mm would be 41 planes.
+        planes = LED2DOverviewWorkflow._z_sweep_positions(0.0, 10.0, 0.25)
+        assert len(planes) == LED2DOverviewWorkflow.MAX_Z_PLANES_PER_TILE
+
+    def test_the_cap_still_spans_the_whole_range(self):
+        """Subsample, do not truncate — a truncated sweep misses the far half."""
+        planes = LED2DOverviewWorkflow._z_sweep_positions(2.0, 12.0, 0.25)
+        assert planes[0] == pytest.approx(2.0)
+        assert planes[-1] == pytest.approx(12.0)
+
+    def test_a_shallow_range_is_untouched(self):
+        planes = LED2DOverviewWorkflow._z_sweep_positions(0.0, 1.0, 0.25)
+        assert len(planes) == 5  # 0.00 .. 1.00
+        assert planes == pytest.approx([0.0, 0.25, 0.5, 0.75, 1.0])
+
+    def test_descending_tiles_are_capped_the_same_way(self):
+        """Serpentine Z must not change how many planes a tile costs."""
+        up = LED2DOverviewWorkflow._z_sweep_positions(0.0, 10.0, 0.25, True)
+        down = LED2DOverviewWorkflow._z_sweep_positions(0.0, 10.0, 0.25, False)
+        assert len(up) == len(down)
+        assert up == list(reversed(down))
+
+    def test_the_cap_can_be_lifted_explicitly(self):
+        planes = LED2DOverviewWorkflow._z_sweep_positions(
+            0.0, 10.0, 0.25, True, max_planes=None
+        )
+        assert len(planes) == 41
+
+    def test_a_degenerate_range_still_yields_one_plane(self):
+        """z_min == z_max must not produce an empty sweep (no frames at all)."""
+        assert LED2DOverviewWorkflow._z_sweep_positions(3.0, 3.0, 0.25) == [3.0]
+
+    def test_both_scan_paths_share_one_definition(self):
+        """The regression: a private copy of the walk in _capture_tile."""
+        import ast
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        fn = next(
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.FunctionDef) and n.name == "_capture_tile"
+        )
+        whiles = [n for n in ast.walk(fn) if isinstance(n, ast.While)]
+        assert not whiles, (
+            "_capture_tile is walking Z itself again; it must call "
+            "_z_sweep_positions so the plane cap cannot diverge between the "
+            "two scan paths"
+        )

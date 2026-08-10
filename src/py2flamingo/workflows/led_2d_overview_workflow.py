@@ -54,6 +54,12 @@ class LED2DOverviewWorkflow(QObject):
         scan_error: (error_message: str)
     """
 
+    # Most planes any single tile will sweep, however deep the bounding box or
+    # however fine the Z step. The overview answers "is the sample here?", and
+    # sweep time is planes x per-plane cost, so this is the ceiling on the
+    # dominant term. Applied in _z_sweep_positions so BOTH scan paths get it.
+    MAX_Z_PLANES_PER_TILE = 10
+
     scan_started = pyqtSignal()
     scan_progress = pyqtSignal(str, float)  # message, percent
     tile_completed = pyqtSignal(int, int, int)  # rotation_idx, tile_idx, total_tiles
@@ -1233,19 +1239,38 @@ class LED2DOverviewWorkflow(QObject):
         self.scan_error.emit(msg)
 
     @staticmethod
-    def _z_sweep_positions(z_min, z_max, z_step, ascending):
+    def _z_sweep_positions(
+        z_min, z_max, z_step, ascending=True, max_planes=MAX_Z_PLANES_PER_TILE
+    ):
         """Z-plane positions for one tile's sweep, in stage-travel order.
 
         Ascending tiles sweep z_min -> z_max; alternate tiles sweep the *same*
         planes in reverse (serpentine in Z) so the stage never has to travel the
         full stack back to z_min between tiles. The overview output is a
         Z-collapsed projection, so the sweep direction does not affect it.
+
+        The plane cap lives HERE because it has to apply to the path that moves
+        the stage. It used to sit inside ``_capture_tile`` only — the slow,
+        non-default path — under the comment "this is a quick overview, not
+        precision imaging". Fast mode is the default and walked the whole Z range
+        at ``z_step`` with no bound at all, so a deep bounding box could ask for
+        30+ planes per tile and the guard written to prevent exactly that never
+        ran. Same shape as the tile-step bug: two copies of one calculation, and
+        the copy driving hardware was the one missing the guard.
+
+        Pass ``max_planes=None`` to sweep every plane.
         """
         positions = []
         z = z_min
         while z <= z_max:
             positions.append(z)
             z += z_step
+        if not positions:
+            positions = [z_min]
+        if max_planes and len(positions) > max_planes:
+            # Subsample evenly so the pair still spans the full Z range.
+            idx = np.linspace(0, len(positions) - 1, max_planes, dtype=int)
+            positions = [positions[i] for i in idx]
         if not ascending:
             positions.reverse()
         return positions
@@ -1324,6 +1349,22 @@ class LED2DOverviewWorkflow(QObject):
             f"({self._tile_overlap_percent():.1f}% overlap)"
         )
         logger.info(f"Fast mode: Z range {z_min:.3f} to {z_max:.3f}mm")
+
+        # Planes per tile is the dominant term in scan time (sweep = planes x
+        # per-plane cost), so say it up front, and say when the cap changed it —
+        # otherwise a Z step the user chose and a Z step the scan actually used
+        # differ silently.
+        _step = self._config.z_step_size
+        _planes = len(self._z_sweep_positions(z_min, z_max, _step))
+        _uncapped = len(self._z_sweep_positions(z_min, z_max, _step, max_planes=None))
+        if _uncapped > _planes:
+            logger.info(
+                f"Fast mode: {_planes} Z planes/tile — capped from {_uncapped} "
+                f"(Z range {z_max - z_min:.3f}mm / step {_step:.3f}mm). Effective "
+                f"step is {(z_max - z_min) / max(1, _planes - 1):.3f}mm"
+            )
+        else:
+            logger.info(f"Fast mode: {_planes} Z planes/tile at {_step:.3f}mm step")
 
         # Scan in serpentine pattern
         tile_idx = 0
@@ -1621,20 +1662,11 @@ class LED2DOverviewWorkflow(QObject):
         # Calculate Z positions for stack using effective bounding box Z range
         # (For rotated view, this is the original X range swapped to Z)
         eff_bbox = self._current_effective_bbox
-        z_step = self._config.z_step_size
-        z_positions = []
-        z = eff_bbox.z_min
-        while z <= eff_bbox.z_max:
-            z_positions.append(z)
-            z += z_step
-
-        # Cap at 10 Z positions for speed - this is a quick overview, not precision imaging
-        MAX_Z_POSITIONS = 10
-        if len(z_positions) > MAX_Z_POSITIONS:
-            # Subsample evenly across the range
-            indices = np.linspace(0, len(z_positions) - 1, MAX_Z_POSITIONS, dtype=int)
-            z_positions = [z_positions[i] for i in indices]
-            logger.info(f"Capped Z-stack to {MAX_Z_POSITIONS} planes for speed")
+        # Same walk and same cap as fast mode. This used to be a private copy,
+        # and it was the copy that HAD the cap while the default path did not.
+        z_positions = self._z_sweep_positions(
+            eff_bbox.z_min, eff_bbox.z_max, self._config.z_step_size
+        )
 
         logger.debug(
             f"Capturing Z-stack: {len(z_positions)} planes from {z_positions[0]:.3f} to {z_positions[-1]:.3f}"
