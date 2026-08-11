@@ -75,9 +75,20 @@ class ConfigurationManager:
 
         If file doesn't exist, start with empty configuration set.
         """
+        # A connection profile is configuration, not per-run state. When this
+        # file went missing on 2026-08-10 the app started cleanly with an empty
+        # set and simply could not reach the microscope — the log line below was
+        # the only clue, and it reads like a normal first-run message. Seed from
+        # the tracked example first so a fresh clone is not dead on arrival.
+        from py2flamingo.utils.seed_config import seed_from_example
+
+        seed_from_example(self.config_file, logger)
+
         if not self.config_file.exists():
-            logger.info(
-                f"Configuration file not found: {self.config_file}. Starting with empty configuration set."
+            logger.warning(
+                f"No connection profiles: neither {self.config_file} nor its "
+                f".example sibling exists. Add a microscope in the Connection "
+                f"tab (name, IP, port) — nothing can connect until you do."
             )
             self._configurations = {}
             return

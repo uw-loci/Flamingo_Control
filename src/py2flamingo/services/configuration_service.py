@@ -407,6 +407,13 @@ class ConfigurationService:
     def _load_drive_mappings(self) -> None:
         """Load drive mappings from JSON file on disk."""
         path = self._drive_mappings_path()
+        # Drive mappings are configuration, not per-run state: they change only
+        # when someone edits them, and without them server paths cannot be
+        # resolved to local drives. Seed from the tracked example so a fresh
+        # clone — or a machine that lost the file — starts able to find data.
+        from py2flamingo.utils.seed_config import seed_from_example
+
+        seed_from_example(path, self.logger)
         if not path.exists():
             return
         try:
