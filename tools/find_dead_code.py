@@ -289,7 +289,10 @@ def main() -> int:
         in_src = name in src_uses
         in_tests = name in test_uses
         for path, qualifier, lineno in sites:
-            entry = f"{path}:{lineno}:{qualifier}.{name}"
+            # Keyed on path + qualified name, NOT line number: a baseline
+            # anchored to lines re-fires for every untouched function that an
+            # edit above it happens to shift, which trains people to ignore it.
+            entry = f"{path}::{qualifier}.{name}"
             if not in_src and not in_tests:
                 findings.append(entry)
             elif not in_src and in_tests:
@@ -311,7 +314,7 @@ def main() -> int:
                 total_by_file[str(path)] = total_by_file.get(str(path), 0) + 1
         dead_by_file: Dict[str, int] = {}
         for entry in findings:
-            path = entry.rsplit(":", 2)[0]
+            path = entry.split("::", 1)[0]
             dead_by_file[path] = dead_by_file.get(path, 0) + 1
         print(f"{'dead':>5} {'of':>5}  file")
         for path, count in sorted(dead_by_file.items(), key=lambda kv: -kv[1]):

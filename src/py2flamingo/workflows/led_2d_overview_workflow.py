@@ -54,11 +54,27 @@ class LED2DOverviewWorkflow(QObject):
         scan_error: (error_message: str)
     """
 
-    # Most planes any single tile will sweep, however deep the bounding box or
-    # however fine the Z step. The overview answers "is the sample here?", and
-    # sweep time is planes x per-plane cost, so this is the ceiling on the
-    # dominant term. Applied in _z_sweep_positions so BOTH scan paths get it.
+    # Fallback ceiling on planes per tile, used only when a config predating
+    # the setting is loaded. The live value is config.max_z_planes, set on the
+    # LED 2D Overview dialog: sweep time is planes x per-plane cost, so this is
+    # the ceiling on the dominant term in a scan and it belongs to the
+    # acquisition, not to the code. Applied in _z_sweep_positions so BOTH scan
+    # paths get it.
     MAX_Z_PLANES_PER_TILE = 10
+
+    def _max_z_planes(self) -> int:
+        """Planes-per-tile ceiling for THIS acquisition.
+
+        Sessions saved before the control existed have no such field, so fall
+        back to the constant rather than to "unlimited" — an old config should
+        keep behaving the way it did.
+        """
+        value = getattr(self._config, "max_z_planes", None)
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            return self.MAX_Z_PLANES_PER_TILE
+        return value if value > 0 else self.MAX_Z_PLANES_PER_TILE
 
     scan_started = pyqtSignal()
     scan_progress = pyqtSignal(str, float)  # message, percent
@@ -1355,12 +1371,14 @@ class LED2DOverviewWorkflow(QObject):
         # otherwise a Z step the user chose and a Z step the scan actually used
         # differ silently.
         _step = self._config.z_step_size
-        _planes = len(self._z_sweep_positions(z_min, z_max, _step))
+        _cap = self._max_z_planes()
+        _planes = len(self._z_sweep_positions(z_min, z_max, _step, True, _cap))
         _uncapped = len(self._z_sweep_positions(z_min, z_max, _step, max_planes=None))
         if _uncapped > _planes:
             logger.info(
                 f"Fast mode: {_planes} Z planes/tile — capped from {_uncapped} "
-                f"(Z range {z_max - z_min:.3f}mm / step {_step:.3f}mm). Effective "
+                f"(Z range {z_max - z_min:.3f}mm / step {_step:.3f}mm, cap {_cap}). "
+                f"Effective "
                 f"step is {(z_max - z_min) / max(1, _planes - 1):.3f}mm"
             )
         else:
@@ -1441,7 +1459,9 @@ class LED2DOverviewWorkflow(QObject):
                 # projection, so direction does not change it.
                 frames = []  # List of (z_approx, image, focus_score)
                 z_step = self._config.z_step_size
-                z_values = self._z_sweep_positions(z_min, z_max, z_step, z_sweep_up)
+                z_values = self._z_sweep_positions(
+                    z_min, z_max, z_step, z_sweep_up, self._max_z_planes()
+                )
 
                 sweep_t0 = time.monotonic()
                 seen_frame_numbers = set()
@@ -1665,7 +1685,10 @@ class LED2DOverviewWorkflow(QObject):
         # Same walk and same cap as fast mode. This used to be a private copy,
         # and it was the copy that HAD the cap while the default path did not.
         z_positions = self._z_sweep_positions(
-            eff_bbox.z_min, eff_bbox.z_max, self._config.z_step_size
+            eff_bbox.z_min,
+            eff_bbox.z_max,
+            self._config.z_step_size,
+            max_planes=self._max_z_planes(),
         )
 
         logger.debug(
@@ -1748,21 +1771,6 @@ class LED2DOverviewWorkflow(QObject):
             z_stack_min=eff_bbox.z_min,
             z_stack_max=eff_bbox.z_max,
         )
-
-    def _focus_stack_frames(self, frames: list) -> np.ndarray:
-        """Combine frames using focus stacking (extended depth of focus).
-
-        Combines the best-focused regions from each frame in the Z-stack
-        to create a single all-in-focus composite image.
-
-        Args:
-            frames: List of (z, image, focus_score) tuples
-
-        Returns:
-            Focus-stacked composite image
-        """
-        images = [frame[1] for frame in frames]
-        return self._compute_focus_stack(images)
 
     def _calculate_projections(self, frames: list) -> dict:
         """Calculate all projection types from captured Z-stack frames.

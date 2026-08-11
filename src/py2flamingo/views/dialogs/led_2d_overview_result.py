@@ -1719,6 +1719,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 "led_name": self._config.led_name,
                 "led_intensity": self._config.led_intensity,
                 "z_step_size": getattr(self._config, "z_step_size", 0.250),
+                "max_z_planes": getattr(self._config, "max_z_planes", 10),
                 # The overlap this overview's grid was BUILT with. It fixes the
                 # tile positions, so every later acquisition from this session
                 # inherits it and it cannot be changed after the fact. Omitting
@@ -1856,6 +1857,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 led_name=metadata["config"].get("led_name", "led_red"),
                 led_intensity=metadata["config"].get("led_intensity", 50),
                 z_step_size=metadata["config"].get("z_step_size", 0.250),
+                max_z_planes=metadata["config"].get("max_z_planes", 10),
                 **overlap_kwargs,
             )
 

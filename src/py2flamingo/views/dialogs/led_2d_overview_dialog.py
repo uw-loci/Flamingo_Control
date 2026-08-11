@@ -25,6 +25,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
 )
 
@@ -75,6 +76,10 @@ class ScanConfiguration:
     led_name: str
     led_intensity: float
     z_step_size: float = 0.050  # mm (50 um default)
+    # Ceiling on planes per tile, whatever the Z range. Sweep time is
+    # planes x per-plane cost, so with z_step_size this is the cost of a
+    # tile. Exposed on the dialog rather than fixed in the workflow.
+    max_z_planes: int = 10
     # Retained so sessions saved before the checkbox was removed still load.
     # Ignored: every projection is computed from the Z sweep regardless.
     use_focus_stacking: bool = False
@@ -443,6 +448,25 @@ class LED2DOverviewDialog(PersistentDialog):
         )
         self.z_step_size.valueChanged.connect(self._update_scan_info)
         layout.addWidget(self.z_step_size, 1, 1)
+
+        # Ceiling on planes per tile. Sweep time is planes x per-plane cost, so
+        # with the Z step this is the whole cost of a tile. It used to be a
+        # constant buried in the workflow, which meant a deep bounding box
+        # quietly cost several times more per tile than a shallow one with the
+        # same settings, and nothing on this dialog said so.
+        layout.addWidget(QLabel("Max Z Planes:"), 1, 2)
+        self.max_z_planes = QSpinBox()
+        self.max_z_planes.setRange(1, 200)
+        self.max_z_planes.setValue(10)
+        self.max_z_planes.setToolTip(
+            "Most Z planes any single tile will sweep, whatever the Z range.\n"
+            "Sweep time is planes × per-plane cost, so this caps the dominant\n"
+            "term in the scan. When it bites, the planes are spread evenly\n"
+            "across the full Z range rather than truncated — so coverage is\n"
+            "kept and only the Z resolution of the focus search drops."
+        )
+        self.max_z_planes.valueChanged.connect(self._update_scan_info)
+        layout.addWidget(self.max_z_planes, 1, 3)
 
         # Tile overlap gets its own full-width, framed row rather than a slot in
         # the grid. It is the one setting on this dialog that CANNOT be changed
@@ -1478,6 +1502,7 @@ class LED2DOverviewDialog(PersistentDialog):
             led_name=self._current_led_name if self._current_led_name else "none",
             led_intensity=self._current_led_intensity,
             z_step_size=self.z_step_size.value(),
+            max_z_planes=self.max_z_planes.value(),
             single_rotation=self.single_rotation_checkbox.isChecked(),
             tile_overlap_percent=self.tile_overlap.value(),
         )
