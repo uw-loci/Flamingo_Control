@@ -1539,11 +1539,27 @@ class SampleView(QWidget):
         )
         self.populate_btn.clicked.connect(self._on_populate_toggled)
         self.populate_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px 16px; }"
+            "QPushButton { background-color: #4CAF50; color: white; font-weight: bold;"
+            " font-size: 9pt; padding: 8px 10px; }"
             "QPushButton:checked { background-color: #f44336; }"
             "QPushButton:hover { background-color: #45a049; }"
             "QPushButton:checked:hover { background-color: #da190b; }"
         )
+        # The label was rendering as "opulate from Liv": 16px of padding each
+        # side plus a bold face pushed the text wider than the row would grant,
+        # and a QPushButton clips rather than eliding, so it lost a character
+        # off BOTH ends with no ellipsis to hint that anything was missing.
+        # Narrower padding and 9pt buy the room; this floor guarantees it,
+        # because the row can otherwise squeeze a button below its own
+        # sizeHint. Measured on the widest label it will ever hold — it swaps
+        # to "Stop Populating" while running, so sizing for the initial text
+        # alone would clip the other state.
+        _fm = self.populate_btn.fontMetrics()
+        _widest = max(
+            _fm.horizontalAdvance("Populate from Live"),
+            _fm.horizontalAdvance("Stop Populating"),
+        )
+        self.populate_btn.setMinimumWidth(_widest + 28)  # 2x10px padding + border
         data_row.addWidget(self.populate_btn)
 
         # Clear Data button
