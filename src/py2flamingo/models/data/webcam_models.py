@@ -207,21 +207,6 @@ class WebcamSession:
         self.views.append(view)
         self.views.sort(key=lambda v: v.rotation_angle)
 
-    def get_view(self, angle: float) -> Optional[WebcamAngleView]:
-        """Get the view at a specific rotation angle."""
-        for v in self.views:
-            if abs(v.rotation_angle - angle) < 0.1:
-                return v
-        return None
-
-    def get_selections(self, angle: float) -> List[WebcamTileSelection]:
-        """Get tile selections for a specific angle."""
-        return self.selections.get(angle, [])
-
-    def set_selections(self, angle: float, tiles: List[WebcamTileSelection]) -> None:
-        """Set tile selections for a specific angle."""
-        self.selections[angle] = tiles
-
     def to_dict(self) -> dict:
         # Convert selections dict keys to strings for JSON
         selections_dict = {}

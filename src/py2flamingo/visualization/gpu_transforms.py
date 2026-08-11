@@ -428,17 +428,6 @@ def get_gpu_info() -> dict:
     return info
 
 
-def clear_gpu_memory():
-    """Clear GPU memory pools.
-
-    Call this after intensive GPU operations to free memory.
-    """
-    if GPU_AVAILABLE and cp is not None:
-        cp.get_default_memory_pool().free_all_blocks()
-        cp.get_default_pinned_memory_pool().free_all_blocks()
-        logger.debug("GPU memory pools cleared")
-
-
 # ---------------------------------------------------------------------------
 # Analysis operations (segmentation / morphology)
 # ---------------------------------------------------------------------------

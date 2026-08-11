@@ -255,46 +255,6 @@ class WorkflowOrchestrator:
 
     # ==================== Workflow Management ====================
 
-    def prepare_workflow(self, workflow: Workflow) -> bool:
-        """Prepare a workflow for execution.
-
-        This includes:
-        - Generating execution steps
-        - Calculating estimates
-        - Setting up resources
-
-        Args:
-            workflow: Workflow to prepare
-
-        Returns:
-            True if preparation successful
-        """
-        try:
-            # Generate execution steps
-            workflow.generate_steps()
-
-            # Calculate total images
-            workflow.calculate_total_images()
-
-            # Set workflow ID if not set
-            if not workflow.id:
-                workflow.id = f"workflow_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-            # Add to active workflows
-            self._active_workflows[workflow.id] = workflow
-
-            # Trigger callback
-            self._trigger_callback("started", workflow)
-
-            logger.info(
-                f"Prepared workflow: {workflow.name} with {len(workflow.steps)} steps"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to prepare workflow: {e}")
-            return False
-
     def update_workflow_progress(
         self, workflow: Workflow, step_index: int, status: str = "completed"
     ) -> None:
@@ -331,125 +291,7 @@ class WorkflowOrchestrator:
         # Trigger progress callback
         self._trigger_callback("progress", workflow)
 
-    def finalize_workflow(self, workflow: Workflow, success: bool = True) -> None:
-        """Finalize a workflow after execution.
-
-        Args:
-            workflow: Workflow to finalize
-            success: Whether workflow completed successfully
-        """
-        if success:
-            workflow.mark_completed()
-            logger.info(f"Workflow completed: {workflow.name}")
-        else:
-            workflow.mark_error("Workflow terminated")
-            logger.warning(f"Workflow failed: {workflow.name}")
-
-        # Remove from active workflows
-        if workflow.id in self._active_workflows:
-            del self._active_workflows[workflow.id]
-
-        # Auto-save if enabled
-        if self.config.enable_auto_save:
-            self._auto_save_workflow(workflow)
-
-    def _auto_save_workflow(self, workflow: Workflow):
-        """Auto-save workflow results."""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{workflow.name.replace(' ', '_')}_{timestamp}.json"
-            filepath = self.config.default_save_directory / "completed" / filename
-
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-
-            # Save workflow metadata
-            with open(filepath, "w") as f:
-                json.dump(
-                    {
-                        "name": workflow.name,
-                        "type": workflow.workflow_type.value,
-                        "start_time": (
-                            workflow.start_time.isoformat()
-                            if workflow.start_time
-                            else None
-                        ),
-                        "end_time": (
-                            workflow.end_time.isoformat() if workflow.end_time else None
-                        ),
-                        "images_acquired": workflow.images_acquired,
-                        "state": workflow.state.value,
-                        "error": workflow.error_message,
-                    },
-                    f,
-                    indent=2,
-                )
-
-            logger.info(f"Auto-saved workflow to {filepath}")
-
-        except Exception as e:
-            logger.error(f"Failed to auto-save workflow: {e}")
-
     # ==================== Workflow Optimization ====================
-
-    def optimize_workflow(self, workflow: Workflow) -> Workflow:
-        """Optimize workflow for efficient execution.
-
-        This includes:
-        - Optimizing movement patterns
-        - Grouping similar operations
-        - Minimizing stage movements
-
-        Args:
-            workflow: Workflow to optimize
-
-        Returns:
-            Optimized workflow
-        """
-        # Optimize tile scanning pattern
-        if workflow.tile_settings:
-            self._optimize_tile_pattern(workflow)
-
-        # Optimize multi-position order
-        if len(workflow.positions) > 1:
-            self._optimize_position_order(workflow)
-
-        # Optimize z-stack direction
-        if workflow.stack_settings:
-            self._optimize_stack_direction(workflow)
-
-        logger.info(f"Optimized workflow: {workflow.name}")
-        return workflow
-
-    def _optimize_tile_pattern(self, workflow: Workflow):
-        """Optimize tile scanning pattern to minimize stage movement."""
-        if workflow.tile_settings:
-            # Snake pattern is usually optimal
-            from ..models.data.workflow import TillingPattern
-
-            workflow.tile_settings.pattern = TillingPattern.SNAKE
-
-    def _optimize_position_order(self, workflow: Workflow):
-        """Optimize order of multiple positions to minimize travel."""
-        if len(workflow.positions) <= 2:
-            return
-
-        # Simple nearest-neighbor optimization
-        optimized = [workflow.positions[0]]
-        remaining = workflow.positions[1:].copy()
-
-        while remaining:
-            current = optimized[-1]
-            nearest = min(remaining, key=lambda p: current.distance_to(p))
-            optimized.append(nearest)
-            remaining.remove(nearest)
-
-        workflow.positions = optimized
-
-    def _optimize_stack_direction(self, workflow: Workflow):
-        """Optimize z-stack direction based on objective."""
-        # Generally, moving away from sample is safer
-        # This would need hardware-specific logic
-        pass
 
     # ==================== Callbacks ====================
 
@@ -515,22 +357,6 @@ class WorkflowOrchestrator:
         }
 
     # ==================== Utilities ====================
-
-    def get_active_workflows(self) -> List[Workflow]:
-        """Get all active workflows."""
-        return list(self._active_workflows.values())
-
-    def get_workflow_by_id(self, workflow_id: str) -> Optional[Workflow]:
-        """Get workflow by ID."""
-        return self._active_workflows.get(workflow_id)
-
-    def cancel_all_workflows(self):
-        """Cancel all active workflows."""
-        for workflow in self._active_workflows.values():
-            workflow.mark_error("Cancelled by user")
-
-        self._active_workflows.clear()
-        logger.info("Cancelled all active workflows")
 
     def reset(self):
         """Reset orchestrator to initial state."""

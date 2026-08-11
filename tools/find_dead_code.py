@@ -197,6 +197,28 @@ class _Uses(ast.NodeVisitor):
                 self.used.add(part.strip("\"'()[]{}.:"))
         self.generic_visit(node)
 
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.used.add(alias.name.split(".")[-1])
+            if alias.asname:
+                self.used.add(alias.asname)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """`from x import helper` is a use.
+
+        Missing this deleted `dict_comment` from utils.file_handlers on
+        2026-08-11 -- it is imported by name in image_acquisition_service and
+        called nowhere else in that module's AST as a Name node, so the scanner
+        called it dead and 18 modules stopped importing. Import statements bind
+        names; they are uses.
+        """
+        for alias in node.names:
+            self.used.add(alias.name)
+            if alias.asname:
+                self.used.add(alias.asname)
+        self.generic_visit(node)
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         # A decorator naming the function it wraps is a use.
         for dec in node.decorator_list:

@@ -307,10 +307,6 @@ class DualPositionPanel(QWidget):
 
         self._logger.debug(f"Panel mode set to: {mode}")
 
-    def get_mode(self) -> str:
-        """Get current panel mode."""
-        return self._mode
-
     def get_position_a(self) -> Position:
         """
         Get Position A values from UI.

@@ -256,31 +256,6 @@ class TCPClient:
         self.nuc_socket.send(workflow_bytes)
         self.logger.info(f"Workflow sent successfully")
 
-    def receive_response(self, timeout: float = 1.0) -> Optional[bytes]:
-        """
-        Receive a response from the microscope.
-
-        Args:
-            timeout: Timeout in seconds
-
-        Returns:
-            Response bytes or None if timeout
-        """
-        if not self.nuc_socket:
-            return None
-
-        try:
-            self.nuc_socket.settimeout(timeout)
-            response = self.nuc_socket.recv(4096)
-            self.nuc_socket.settimeout(None)
-            return response
-        except socket.timeout:
-            self.logger.debug("Response timeout")
-            return None
-        except Exception as e:
-            self.logger.error(f"Error receiving response: {e}")
-            return None
-
     def is_connected(self) -> bool:
         """Check if connected to microscope."""
         return self.nuc_socket is not None and self.live_socket is not None

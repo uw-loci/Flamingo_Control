@@ -248,15 +248,3 @@ class MultiAnglePanel(QWidget):
                 self._angle_step,
                 _num(exp_dict.get("Angle step size"), self._angle_step.value()),
             )
-
-    def get_num_angles(self) -> int:
-        """Get number of angles."""
-        return self._num_angles.value()
-
-    def get_angle_step(self) -> float:
-        """Get angle step in degrees."""
-        return self._angle_step.value()
-
-    def get_total_rotation(self) -> float:
-        """Get total rotation in degrees."""
-        return (self._num_angles.value() - 1) * self._angle_step.value()

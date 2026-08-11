@@ -459,21 +459,9 @@ class Pipeline:
         """Remove a connection by ID."""
         self.connections.pop(connection_id, None)
 
-    def get_connections_for_node(self, node_id: str) -> List[Connection]:
-        """Get all connections involving a node."""
-        return [
-            c
-            for c in self.connections.values()
-            if c.source_node_id == node_id or c.target_node_id == node_id
-        ]
-
     def get_incoming_connections(self, node_id: str) -> List[Connection]:
         """Get connections where this node is the target."""
         return [c for c in self.connections.values() if c.target_node_id == node_id]
-
-    def get_outgoing_connections(self, node_id: str) -> List[Connection]:
-        """Get connections where this node is the source."""
-        return [c for c in self.connections.values() if c.source_node_id == node_id]
 
     # ---- Graph algorithms ----
 
@@ -529,19 +517,6 @@ class Pipeline:
         if len(result) != len(self.nodes):
             raise ValueError("Pipeline contains a cycle")
         return result
-
-    def get_downstream_nodes(self, start_node_id: str) -> Set[str]:
-        """Get all nodes reachable from start_node_id (not including it)."""
-        adj = self._build_adjacency()
-        visited: Set[str] = set()
-        queue = deque(adj.get(start_node_id, set()))
-        while queue:
-            nid = queue.popleft()
-            if nid in visited:
-                continue
-            visited.add(nid)
-            queue.extend(adj.get(nid, set()))
-        return visited
 
     def get_downstream_from_port(self, node_id: str, port_id: str) -> Set[str]:
         """Get all nodes reachable from a specific output port.

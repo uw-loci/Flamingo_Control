@@ -66,7 +66,7 @@ file.** `drive_mappings.json` likewise holds a dict of mappings.
 |---|---|---|---|---|
 | `ScopeSettings.txt` | Downloaded from the scope. Type, **Microscope name**, stage limits, home | 1 (overwritten per connection) | yes | Name falls back to `"default"`, so `default_settings.json` is sought and stage limits are unknown |
 | `{name}_settings.json` | Stage soft limits, position-history sizing, **`reference_position`** (the recovery anchor). `n7_settings.json` | **N** | yes | Placeholder limits 0-26 mm are used — a guess, possibly WIDER than the instrument. Run Edit ▸ Microscope Setup |
-| `{name}_start_position.txt` | Per-scope start position | **N** | yes | `check_start_position()` creates `default_start_position.txt` |
+| `{name}_start_position.txt` | **Vestigial.** Nothing reads its contents any more — `get_start_position()` was removed as dead in `2026-08-11`. `FlamingoConnect.check_start_position()` only checks that *some* `*_start_position.txt` exists and creates an empty `default_start_position.txt` if not | 1 | yes | An empty placeholder is created |
 | `pixel_calibration.json` | XY Pixel Calibrator result (µm/px + the optics it was measured at) | 1 ⚠ | yes | Falls back to ScopeSettings/YAML optics |
 | `optics_guard.json` | Remembers optics config to detect a changed objective | 1 ⚠ | yes | No mismatch warning |
 | `position_presets.json` | Named stage positions | 1 ⚠ | yes | No presets |
@@ -114,7 +114,6 @@ disuse here.
 
 - `microscope_settings/{name}_settings.json` — stage soft limits are the important
   part and they are genuinely instrument-specific.
-- `microscope_settings/{name}_start_position.txt` — optional; auto-placeholdered.
 
 **Add an entry, not a file:**
 

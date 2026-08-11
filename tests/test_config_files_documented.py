@@ -34,8 +34,16 @@ class TestPerMicroscopeFilesAreStillNameDerived:
             "services/microscope_settings_service.py"
         )
 
-    def test_start_position_is_built_from_the_microscope_name(self):
-        assert "{microscope_name}_start_position.txt" in _src(
+    def test_start_position_is_now_vestigial(self):
+        """`get_start_position()` was dead and was removed on 2026-08-11.
+
+        Nothing reads the file's CONTENTS any more; `FlamingoConnect` only
+        checks that some `*_start_position.txt` exists and creates an empty
+        placeholder if not. Asserted so the doc and the code cannot drift apart
+        again — if a real reader comes back, this fails and the doc's
+        "vestigial" row needs revisiting.
+        """
+        assert "{microscope_name}_start_position.txt" not in _src(
             "services/configuration_service.py"
         )
 

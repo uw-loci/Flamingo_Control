@@ -155,15 +155,3 @@ def get_facade() -> WorkflowFacade:
     if _facade_instance is None:
         _facade_instance = WorkflowFacade()
     return _facade_instance
-
-
-def reset_facade():
-    """Reset the singleton facade instance.
-
-    This is mainly useful for testing or when you need to
-    completely reinitialize the workflow system.
-    """
-    global _facade_instance
-    if _facade_instance is not None:
-        _facade_instance.reset()
-        _facade_instance = None

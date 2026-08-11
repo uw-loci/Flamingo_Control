@@ -105,17 +105,6 @@ class StatusIndicatorService(QObject):
             # since the ConnectionModel doesn't have Qt signals
             pass
 
-    def set_connection_service(self, connection_service: "MVCConnectionService"):
-        """
-        Set or update the connection service to monitor.
-
-        Args:
-            connection_service: Connection service instance
-        """
-        self.connection_service = connection_service
-        self._setup_connection_monitoring()
-        self.logger.debug("Connection service updated")
-
     def on_connection_established(self):
         """
         Handle connection established event.
@@ -142,18 +131,6 @@ class StatusIndicatorService(QObject):
         self._has_error = True
         self._error_message = message
         self._update_status()
-
-    def clear_error(self):
-        """
-        Clear the error state.
-
-        Call this when the error condition has been resolved.
-        """
-        if self._has_error:
-            self.logger.info("Error state cleared")
-            self._has_error = False
-            self._error_message = ""
-            self._update_status()
 
     def on_connection_closed(self):
         """
@@ -292,33 +269,3 @@ class StatusIndicatorService(QObject):
             GlobalStatus.ERROR: "Communication Error",
         }
         return descriptions.get(status, "Unknown")
-
-    def get_current_status(self) -> GlobalStatus:
-        """
-        Get current global status.
-
-        Returns:
-            Current GlobalStatus
-        """
-        return self._current_status
-
-    def get_status_description(self) -> str:
-        """
-        Get description of current status.
-
-        Returns:
-            Human-readable status description
-        """
-        return self._get_status_description(self._current_status)
-
-    def is_busy(self) -> bool:
-        """
-        Check if system is busy (not idle).
-
-        Returns:
-            True if system is moving or running workflow
-        """
-        return self._current_status in (
-            GlobalStatus.MOVING,
-            GlobalStatus.WORKFLOW_RUNNING,
-        )

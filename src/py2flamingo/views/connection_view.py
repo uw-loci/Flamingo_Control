@@ -399,40 +399,6 @@ class ConnectionView(QWidget):
         self._logger.info("Sample View button clicked")
         self.sample_view_requested.emit()
 
-    def _create_topmost_messagebox(
-        self, icon, title: str, text: str, informative_text: str = None, buttons=None
-    ) -> "QMessageBox":
-        """Create a QMessageBox that stays on top of all windows.
-
-        This ensures the dialog appears above windows with WindowStaysOnTopHint
-        (like Camera Live Viewer).
-
-        Args:
-            icon: QMessageBox icon (e.g., QMessageBox.Question)
-            title: Window title
-            text: Main message text
-            informative_text: Optional additional text
-            buttons: QMessageBox buttons (default: Yes|No)
-
-        Returns:
-            Configured QMessageBox ready to exec_()
-        """
-        from PyQt5.QtWidgets import QMessageBox
-
-        msg = QMessageBox(self)
-        msg.setIcon(icon)
-        msg.setWindowTitle(title)
-        msg.setText(text)
-        if informative_text:
-            msg.setInformativeText(informative_text)
-        msg.setStandardButtons(buttons or (QMessageBox.Yes | QMessageBox.No))
-        msg.setDefaultButton(QMessageBox.No)
-
-        # Critical: Set WindowStaysOnTopHint so dialog appears above camera viewer
-        msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint)
-
-        return msg
-
     def _show_message(self, message: str, is_error: bool = False) -> None:
         """Display feedback message with appropriate color coding.
 
@@ -1161,19 +1127,3 @@ class ConnectionView(QWidget):
         lines.append("=" * 60)
 
         return "\n".join(lines)
-
-    def update_settings_display(self, settings: Dict[str, Any]) -> None:
-        """Public method to update settings display from outside.
-
-        Args:
-            settings: Dictionary containing microscope settings
-        """
-        formatted_text = self._format_settings(settings)
-        self.settings_display.setPlainText(formatted_text)
-
-    def clear_settings_display(self) -> None:
-        """Clear the settings display."""
-        self.settings_display.clear()
-        self.settings_display.setPlaceholderText(
-            "Microscope settings will appear here after connection..."
-        )

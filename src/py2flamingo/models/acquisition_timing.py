@@ -205,10 +205,6 @@ class TimingHistory:
         if len(self.records) > self.max_records:
             self.records = self.records[: self.max_records]
 
-    def get_records_by_type(self, workflow_type: str) -> List[AcquisitionTimingRecord]:
-        """Get records filtered by workflow type."""
-        return [r for r in self.records if r.workflow_type == workflow_type]
-
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {

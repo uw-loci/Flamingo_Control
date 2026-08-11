@@ -308,16 +308,6 @@ class MicroscopeSettings:
             "temperature_control": self.temperature_control,
         }
 
-    def save_to_file(self, filepath: Path):
-        """
-        Save settings to JSON file.
-
-        Args:
-            filepath: Path to save settings file
-        """
-        with open(filepath, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-
     @classmethod
     def load_from_file(cls, filepath: Path) -> "MicroscopeSettings":
         """
@@ -347,40 +337,6 @@ class MicroscopeSettings:
             # Validation happens in StageLimit.__post_init__
             pass
 
-    def get_stage_limit(self, axis: str) -> Optional[StageLimit]:
-        """
-        Get stage limit for specific axis.
-
-        Args:
-            axis: Axis name ('x', 'y', 'z', or 'r')
-
-        Returns:
-            Optional[StageLimit]: Stage limit if defined
-        """
-        return self.stage_limits.get(axis)
-
-    def set_filter_position(self, position: int, filter_type: str):
-        """
-        Set filter type for a wheel position.
-
-        Args:
-            position: Filter wheel position
-            filter_type: Type of filter
-        """
-        self.filter_wheel_positions[position] = filter_type
-
-    def get_filter_at_position(self, position: int) -> Optional[str]:
-        """
-        Get filter type at specific position.
-
-        Args:
-            position: Filter wheel position
-
-        Returns:
-            Optional[str]: Filter type if defined
-        """
-        return self.filter_wheel_positions.get(position)
-
 
 @dataclass
 class SettingsManager:
@@ -405,78 +361,3 @@ class SettingsManager:
     def refresh_profiles(self):
         """Refresh list of available setting profiles."""
         self.available_profiles = [f.stem for f in self.settings_dir.glob("*.json")]
-
-    def load_profile(self, profile_name: str):
-        """
-        Load a settings profile.
-
-        Args:
-            profile_name: Name of profile to load
-        """
-        filepath = self.settings_dir / f"{profile_name}.json"
-        if not filepath.exists():
-            raise FileNotFoundError(f"Profile {profile_name} not found")
-
-        self.current_settings = MicroscopeSettings.load_from_file(filepath)
-
-    def save_profile(
-        self, profile_name: str, settings: Optional[MicroscopeSettings] = None
-    ):
-        """
-        Save settings to a profile.
-
-        Args:
-            profile_name: Name for the profile
-            settings: Settings to save (uses current if None)
-        """
-        if settings is None:
-            settings = self.current_settings
-
-        if settings is None:
-            raise ValueError("No settings to save")
-
-        filepath = self.settings_dir / f"{profile_name}.json"
-        settings.save_to_file(filepath)
-        self.refresh_profiles()
-
-    def delete_profile(self, profile_name: str):
-        """
-        Delete a settings profile.
-
-        Args:
-            profile_name: Name of profile to delete
-        """
-        filepath = self.settings_dir / f"{profile_name}.json"
-        if filepath.exists():
-            filepath.unlink()
-            self.refresh_profiles()
-
-    def get_default_settings(self) -> MicroscopeSettings:
-        """
-        Get default microscope settings.
-
-        Returns:
-            MicroscopeSettings: Default settings
-        """
-        return MicroscopeSettings(
-            filter_wheel_positions={
-                1: FilterType.EMPTY.value,
-                2: FilterType.GFP.value,
-                3: FilterType.RFP.value,
-                4: FilterType.DAPI.value,
-            },
-            stage_limits={
-                "x": StageLimit(min_value=0.0, max_value=100.0),
-                "y": StageLimit(min_value=0.0, max_value=100.0),
-                "z": StageLimit(min_value=0.0, max_value=50.0),
-                "r": StageLimit(min_value=-180.0, max_value=180.0),
-            },
-            camera_settings=CameraSettings(
-                overlap_percent=10.0, exposure_time_ms=100.0, binning=1, bit_depth=16
-            ),
-            led_settings={
-                "488nm": LEDSettings(wavelength=488),
-                "561nm": LEDSettings(wavelength=561),
-                "405nm": LEDSettings(wavelength=405),
-            },
-        )

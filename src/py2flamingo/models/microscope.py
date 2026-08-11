@@ -62,15 +62,6 @@ class Position:
     z: float
     r: float
 
-    def to_list(self) -> List[float]:
-        """
-        Convert position to list format for backward compatibility.
-
-        Returns:
-            List[float]: [x, y, z, r] coordinates
-        """
-        return [self.x, self.y, self.z, self.r]
-
     def to_dict(self) -> Dict[str, float]:
         """
         Convert position to dictionary format.
@@ -215,12 +206,3 @@ class MicroscopeModel:
             bool: True if connected
         """
         return self.state != MicroscopeState.DISCONNECTED
-
-    def can_accept_commands(self) -> bool:
-        """
-        Check if microscope can accept commands.
-
-        Returns:
-            bool: True if in a state that can accept commands
-        """
-        return self.state in [MicroscopeState.IDLE, MicroscopeState.PROCESSING]

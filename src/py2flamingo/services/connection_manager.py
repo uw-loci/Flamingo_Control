@@ -236,10 +236,6 @@ class ConnectionManager:
         """Subscribe to position updates."""
         self.position_callbacks.append(callback)
 
-    def subscribe_image_updates(self, callback: Callable[[np.ndarray], None]):
-        """Subscribe to image updates."""
-        self.image_callbacks.append(callback)
-
     def send_command(self, command: str):
         """Send command to microscope."""
         self.command_queue.put(command)
@@ -254,64 +250,6 @@ class ConnectionManager:
     def send_emergency_stop(self):
         """Send emergency stop command."""
         self.send_command("EMERGENCY_STOP\n")
-
-    def send_set_home_command(self, position: Position):
-        """Send set home command."""
-        command = (
-            f"SET_HOME:X={position.x},Y={position.y},Z={position.z},R={position.r}\n"
-        )
-        self.send_command(command)
-
-    def send_clear_home_command(self):
-        """Send clear home command."""
-        self.send_command("CLEAR_HOME\n")
-
-    def send_filter_wheel_position(self, position: int, filter_type: str):
-        """Send filter wheel position command."""
-        command = f"FILTER:POS={position},TYPE={filter_type}\n"
-        self.send_command(command)
-
-    def send_illumination_path(self, path: str):
-        """Send illumination path command."""
-        command = f"ILLUMINATION_PATH:{path}\n"
-        self.send_command(command)
-
-    def send_camera_settings(self, settings: dict):
-        """Send camera settings."""
-        command = f"CAMERA_SETTINGS:{settings}\n"
-        self.send_command(command)
-
-    def send_led_settings(
-        self, channel: str, intensity: float, pulse_mode: bool, pulse_duration: float
-    ):
-        """Send LED settings."""
-        command = (
-            f"LED:CHANNEL={channel},INTENSITY={intensity},"
-            f"PULSE={pulse_mode},DURATION={pulse_duration}\n"
-        )
-        self.send_command(command)
-
-    def capture_single_image(
-        self, laser_channel: str, laser_power: float
-    ) -> np.ndarray:
-        """Capture single image."""
-        # Send capture command
-        command = f"CAPTURE:LASER={laser_channel},POWER={laser_power}\n"
-        self.send_command(command)
-
-        # Wait for image response
-        # This is simplified - actual implementation would handle async response
-        time.sleep(0.5)
-
-        # Return dummy image for now
-        return np.zeros((2048, 2048), dtype=np.uint16)
-
-    def get_camera_info(self) -> dict:
-        """Get camera information."""
-        self.send_command("GET_CAMERA_INFO\n")
-
-        # This is simplified - actual implementation would wait for response
-        return {"pixel_size_mm": 0.00325, "frame_size": 2048, "bit_depth": 16}
 
     def get_workflow_status(self) -> dict:
         """Get current workflow status."""
@@ -334,25 +272,3 @@ class ConnectionManager:
             Dictionary with thread status information
         """
         return self.thread_manager.get_all_status()
-
-    def is_healthy(self) -> bool:
-        """
-        Check if all communication threads are healthy.
-
-        ENHANCED: New health check method.
-
-        Returns:
-            True if all threads are running properly
-        """
-        if not self.connected:
-            return False
-
-        status = self.get_thread_status()
-        for thread_name, thread_info in status.items():
-            if thread_info.get("state") != "running":
-                self.logger.warning(
-                    f"Thread '{thread_name}' is not running: {thread_info.get('state')}"
-                )
-                return False
-
-        return True

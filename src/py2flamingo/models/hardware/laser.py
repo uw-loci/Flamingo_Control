@@ -131,39 +131,6 @@ class LaserCalibration:
         default_factory=dict
     )  # Set vs actual power
 
-    def get_actual_power(self, set_power_mw: float) -> float:
-        """Get actual power from calibration curve.
-
-        Args:
-            set_power_mw: Set power value
-
-        Returns:
-            Actual/measured power, or set power if no calibration
-        """
-        if not self.power_calibration:
-            return set_power_mw
-
-        # Find nearest calibration points for interpolation
-        set_points = sorted(self.power_calibration.keys())
-
-        if set_power_mw <= set_points[0]:
-            return self.power_calibration[set_points[0]]
-        if set_power_mw >= set_points[-1]:
-            return self.power_calibration[set_points[-1]]
-
-        # Linear interpolation between points
-        for i in range(len(set_points) - 1):
-            if set_points[i] <= set_power_mw <= set_points[i + 1]:
-                x1, x2 = set_points[i], set_points[i + 1]
-                y1 = self.power_calibration[x1]
-                y2 = self.power_calibration[x2]
-
-                # Linear interpolation
-                ratio = (set_power_mw - x1) / (x2 - x1)
-                return y1 + ratio * (y2 - y1)
-
-        return set_power_mw
-
 
 @dataclass
 class PulseSettings:
@@ -193,17 +160,6 @@ class PulseSettings:
                 max_val=1e9,
                 field_name="pulse_width_ns",
             )
-
-    def get_average_power(self, peak_power_mw: float) -> float:
-        """Calculate average power for pulsed operation.
-
-        Args:
-            peak_power_mw: Peak power during pulse
-
-        Returns:
-            Average power in milliwatts
-        """
-        return peak_power_mw * (self.duty_cycle_percent / 100.0)
 
 
 @dataclass
@@ -251,26 +207,6 @@ class LaserSettings(ValidatedModel):
         # Validate pulse settings if in pulsed mode
         if self.mode == LaserMode.PULSED and self.pulse_settings is None:
             raise ValidationError("Pulse settings required for pulsed mode")
-
-    def get_effective_power(self) -> float:
-        """Get effective output power based on mode.
-
-        Returns:
-            Effective power in milliwatts
-        """
-        if not self.enabled or not self.shutter_open:
-            return 0.0
-
-        if self.mode == LaserMode.PULSED and self.pulse_settings:
-            return self.pulse_settings.get_average_power(self.power_setpoint_mw)
-
-        if self.mode == LaserMode.MODULATED and self.modulation_depth_percent:
-            # Average power for sinusoidal modulation
-            return self.power_setpoint_mw * (
-                1.0 - self.modulation_depth_percent / 200.0
-            )
-
-        return self.power_setpoint_mw
 
 
 @dataclass
@@ -387,34 +323,6 @@ class Laser(ValidatedModel):
         self.settings.shutter_open = False
         self.state = LaserState.OFF
         self.update()
-
-    def is_warmed_up(self) -> bool:
-        """Check if laser has completed warmup.
-
-        Returns:
-            True if warmed up or no warmup required
-        """
-        if self.warmup_time_seconds <= 0:
-            return True
-
-        if not self.last_enabled_time:
-            return False
-
-        elapsed = (datetime.now() - self.last_enabled_time).total_seconds()
-        return elapsed >= self.warmup_time_seconds
-
-    def get_actual_output_power(self) -> float:
-        """Get actual output power based on calibration.
-
-        Returns:
-            Actual output power in milliwatts
-        """
-        effective_power = self.settings.get_effective_power()
-
-        if effective_power == 0:
-            return 0.0
-
-        return self.calibration.get_actual_power(effective_power)
 
     @classmethod
     def create_default(

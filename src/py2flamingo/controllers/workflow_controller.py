@@ -628,14 +628,6 @@ class WorkflowController(QObject):
 
     # Workflow Validation Methods
 
-    def set_check_stack_callback(self, callback: Callable[[bytes], Dict]) -> None:
-        """
-        Set callback for hardware CHECK_STACK validation.
-
-        The callback should send CHECK_STACK command (12331) and return result dict.
-        """
-        self._check_stack_callback = callback
-
     def check_workflow(self, workflow_dict: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate workflow and calculate estimates.
@@ -1057,10 +1049,6 @@ class WorkflowController(QObject):
 
     # Timing Service Methods
 
-    def set_timing_service(self, timing_service: "AcquisitionTimingService") -> None:
-        """Set the timing service for adaptive time estimation."""
-        self._timing_service = timing_service
-
     def record_workflow_completion(self) -> None:
         """
         Record workflow completion timing for learning.
@@ -1112,22 +1100,6 @@ class WorkflowController(QObject):
         self.record_workflow_completion()
 
         # Update model
-        if self._workflow_model:
-            self._workflow_model.mark_completed()
-
-        # Clear tile position for Sample View integration
-        self._clear_tile_position()
-
-    def on_workflow_cancelled(self) -> None:
-        """
-        Handle workflow cancellation.
-
-        Does not record timing (incomplete data).
-        """
-        self._is_executing = False
-        self._current_workflow_start_time = None
-        self._current_workflow_params = None
-
         if self._workflow_model:
             self._workflow_model.mark_completed()
 

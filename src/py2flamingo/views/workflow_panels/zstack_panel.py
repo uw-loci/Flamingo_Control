@@ -697,14 +697,6 @@ class ZStackPanel(QWidget):
             self._updating = False
         self._update_calculations()
 
-    def get_z_range_um(self) -> float:
-        """Get total Z range in micrometers."""
-        return (self._num_planes.value() - 1) * self._z_step.value()
-
-    def get_z_range_mm(self) -> float:
-        """Get total Z range in millimeters."""
-        return self.get_z_range_um() / 1000.0
-
     def set_z_range(self, z_min_mm: float, z_max_mm: float) -> None:
         """Set Z range externally for tile collection mode.
 
@@ -785,10 +777,6 @@ class ZStackPanel(QWidget):
         """
         if option in STACK_OPTIONS:
             self._stack_option.setCurrentText(option)
-
-    def get_stack_option(self) -> str:
-        """Get current stack option."""
-        return self._stack_option.currentText()
 
     def set_stack_option_enabled(self, enabled: bool) -> None:
         """Enable/disable the stack option dropdown.

@@ -302,24 +302,6 @@ class ConnectionService:
         """
         return self._connected
 
-    def get_connection_data(self) -> Optional[List]:
-        """
-        Get connection data for backward compatibility.
-
-        Returns:
-            Optional[List]: Connection data or None
-        """
-        return self.connection_data if self._connected else None
-
-    def get_threads(self) -> Optional[Tuple]:
-        """
-        Get thread references for backward compatibility.
-
-        Returns:
-            Optional[Tuple]: Thread references or None
-        """
-        return self.threads if self._connected else None
-
     def send_command(self, command: int, data: Optional[List] = None) -> None:
         """
         Send a command to the microscope.
@@ -775,20 +757,10 @@ class MVCConnectionService:
         if listener not in self._connection_lost_listeners:
             self._connection_lost_listeners.append(listener)
 
-    def remove_connection_lost_listener(self, listener: Callable[[str], None]) -> None:
-        """Unregister a previously-registered connection_lost listener."""
-        if listener in self._connection_lost_listeners:
-            self._connection_lost_listeners.remove(listener)
-
     def add_connection_restored_listener(self, listener: Callable[[], None]) -> None:
         """Register a callback invoked after a successful reconnect."""
         if listener not in self._connection_restored_listeners:
             self._connection_restored_listeners.append(listener)
-
-    def remove_connection_restored_listener(self, listener: Callable[[], None]) -> None:
-        """Unregister a previously-registered connection_restored listener."""
-        if listener in self._connection_restored_listeners:
-            self._connection_restored_listeners.remove(listener)
 
     def _on_tcp_connection_lost(self, reason: str) -> None:
         """Invoked from the background reader when the socket dies.

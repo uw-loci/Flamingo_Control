@@ -295,15 +295,6 @@ class VolumeScanWorkflow(QObject):
         # the camera should be capturing frames and the 3D viewer
         # should be populating voxels
 
-    def _get_current_z(self) -> Optional[float]:
-        """Get current Z position."""
-        try:
-            if hasattr(self.position_controller, "stage_service"):
-                return self.position_controller.stage_service.get_axis_position(3)
-        except Exception as e:
-            logger.warning(f"Could not get Z position: {e}")
-        return None
-
     @property
     def is_running(self) -> bool:
         """Check if scan is currently running."""

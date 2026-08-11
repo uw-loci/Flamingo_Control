@@ -126,115 +126,6 @@ class WorkflowFacade:
         logger.info(f"Created snapshot workflow at position {position}")
         return workflow
 
-    def create_zstack(
-        self,
-        position: Position,
-        num_planes: int,
-        z_step_um: float,
-        laser_channel: Optional[str] = None,
-        laser_power: float = 5.0,
-    ) -> Workflow:
-        """Create a z-stack workflow.
-
-        Args:
-            position: Starting position
-            num_planes: Number of z-planes
-            z_step_um: Step size in micrometers
-            laser_channel: Laser channel to use
-            laser_power: Laser power in mW
-
-        Returns:
-            Configured z-stack workflow
-        """
-        self._ensure_components()
-
-        workflow = Workflow(
-            workflow_type=WorkflowType.ZSTACK,
-            name="Z-Stack",
-            start_position=position,
-            illumination=IlluminationSettings(
-                laser_channel=laser_channel or "Laser 3 488 nm",
-                laser_power_mw=laser_power,
-                laser_enabled=True,
-            ),
-            stack_settings=StackSettings(num_planes=num_planes, z_step_um=z_step_um),
-            experiment_settings=ExperimentSettings(),
-        )
-
-        logger.info(
-            f"Created z-stack workflow: {num_planes} planes, {z_step_um}μm step"
-        )
-        return workflow
-
-    def create_tile_scan(
-        self,
-        start_position: Position,
-        num_tiles_x: int,
-        num_tiles_y: int,
-        tile_size_mm: float,
-        overlap_percent: float = 10.0,
-    ) -> Workflow:
-        """Create a tile scan workflow.
-
-        Args:
-            start_position: Top-left corner position
-            num_tiles_x: Number of tiles in X
-            num_tiles_y: Number of tiles in Y
-            tile_size_mm: Size of each tile in mm
-            overlap_percent: Overlap between tiles
-
-        Returns:
-            Configured tile scan workflow
-        """
-        self._ensure_components()
-
-        workflow = Workflow(
-            workflow_type=WorkflowType.TILE,
-            name="Tile Scan",
-            start_position=start_position,
-            tile_settings=TileSettings(
-                num_tiles_x=num_tiles_x,
-                num_tiles_y=num_tiles_y,
-                tile_size_x_mm=tile_size_mm,
-                tile_size_y_mm=tile_size_mm,
-                overlap_percent=overlap_percent,
-            ),
-            experiment_settings=ExperimentSettings(),
-        )
-
-        logger.info(f"Created tile scan: {num_tiles_x}x{num_tiles_y} tiles")
-        return workflow
-
-    def create_time_lapse(
-        self, position: Position, num_timepoints: int, interval_seconds: float
-    ) -> Workflow:
-        """Create a time-lapse workflow.
-
-        Args:
-            position: Acquisition position
-            num_timepoints: Number of time points
-            interval_seconds: Interval between acquisitions
-
-        Returns:
-            Configured time-lapse workflow
-        """
-        self._ensure_components()
-
-        workflow = Workflow(
-            workflow_type=WorkflowType.TIME_LAPSE,
-            name="Time Lapse",
-            start_position=position,
-            time_lapse_settings=TimeLapseSettings(
-                num_timepoints=num_timepoints, interval_seconds=interval_seconds
-            ),
-            experiment_settings=ExperimentSettings(),
-        )
-
-        logger.info(
-            f"Created time-lapse: {num_timepoints} points, {interval_seconds}s interval"
-        )
-        return workflow
-
     def create_from_dict(self, workflow_dict: Dict[str, Any]) -> Workflow:
         """Create a workflow from a dictionary representation.
 
@@ -278,54 +169,6 @@ class WorkflowFacade:
             return workflow
         except Exception as e:
             raise WorkflowValidationError(f"Failed to load workflow: {e}")
-
-    def save_workflow(
-        self, workflow: Workflow, file_path: Optional[Union[str, Path]] = None
-    ) -> Path:
-        """Save a workflow to a file.
-
-        Args:
-            workflow: Workflow to save
-            file_path: Optional file path (auto-generated if not provided)
-
-        Returns:
-            Path where workflow was saved
-
-        Raises:
-            WorkflowValidationError: If workflow is invalid
-        """
-        self._ensure_components()
-
-        # Validate before saving
-        self._validator.validate(workflow)
-
-        # Save to repository
-        saved_path = self._repository.save(workflow, file_path)
-        logger.info(f"Saved workflow to {saved_path}")
-        return saved_path
-
-    def list_saved_workflows(
-        self, directory: Optional[Union[str, Path]] = None
-    ) -> List[Path]:
-        """List all saved workflow files.
-
-        Args:
-            directory: Directory to search (default: workflows directory)
-
-        Returns:
-            List of workflow file paths
-        """
-        self._ensure_components()
-        return self._repository.list_workflows(directory)
-
-    def get_workflow_templates(self) -> Dict[str, Workflow]:
-        """Get available workflow templates.
-
-        Returns:
-            Dictionary of template name to workflow
-        """
-        self._ensure_components()
-        return self._repository.get_templates()
 
     # ==================== Validation ====================
 
@@ -413,32 +256,6 @@ class WorkflowFacade:
 
         return success
 
-    def pause_workflow(self) -> bool:
-        """Pause the currently executing workflow.
-
-        Returns:
-            True if workflow was paused
-        """
-        self._ensure_components()
-
-        if not self._current_workflow:
-            return False
-
-        return self._executor.pause()
-
-    def resume_workflow(self) -> bool:
-        """Resume a paused workflow.
-
-        Returns:
-            True if workflow was resumed
-        """
-        self._ensure_components()
-
-        if not self._current_workflow:
-            return False
-
-        return self._executor.resume()
-
     # ==================== Monitoring ====================
 
     def get_current_workflow(self) -> Optional[Workflow]:
@@ -459,16 +276,6 @@ class WorkflowFacade:
             return self._current_workflow.state
         return None
 
-    def get_workflow_progress(self) -> float:
-        """Get the progress of the current workflow.
-
-        Returns:
-            Progress percentage (0-100) or 0 if no workflow
-        """
-        if self._current_workflow:
-            return self._current_workflow.get_progress()
-        return 0.0
-
     def get_current_step(self) -> Optional[WorkflowStep]:
         """Get the currently executing workflow step.
 
@@ -478,26 +285,6 @@ class WorkflowFacade:
         if self._current_workflow:
             return self._current_workflow.get_current_step()
         return None
-
-    def get_workflow_history(self, limit: int = 10) -> List[Workflow]:
-        """Get recent workflow history.
-
-        Args:
-            limit: Maximum number of workflows to return
-
-        Returns:
-            List of recent workflows (newest first)
-        """
-        return list(reversed(self._workflow_history[-limit:]))
-
-    def get_workflow_statistics(self) -> Dict[str, Any]:
-        """Get statistics about workflow execution.
-
-        Returns:
-            Dictionary with statistics
-        """
-        self._ensure_components()
-        return self._executor.get_statistics()
 
     # ==================== Configuration ====================
 
@@ -530,38 +317,6 @@ class WorkflowFacade:
         return self._orchestrator.get_configuration()
 
     # ==================== Utility Methods ====================
-
-    def estimate_workflow_duration(self, workflow: Workflow) -> float:
-        """Estimate how long a workflow will take.
-
-        Args:
-            workflow: Workflow to estimate
-
-        Returns:
-            Estimated duration in seconds
-        """
-        return workflow.estimate_duration()
-
-    def estimate_data_size(
-        self, workflow: Workflow, bytes_per_image: int = 4_000_000
-    ) -> float:
-        """Estimate data size for a workflow.
-
-        Args:
-            workflow: Workflow to estimate
-            bytes_per_image: Estimated bytes per image
-
-        Returns:
-            Estimated size in GB
-        """
-        total_images = workflow.calculate_total_images()
-        total_bytes = total_images * bytes_per_image
-        return total_bytes / (1024**3)
-
-    def clear_history(self) -> None:
-        """Clear workflow history."""
-        self._workflow_history.clear()
-        logger.info("Cleared workflow history")
 
     def reset(self) -> None:
         """Reset the facade to initial state."""

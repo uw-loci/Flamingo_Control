@@ -701,10 +701,6 @@ class LaserLEDControlPanel(QWidget):
             self.logger.warning(f"Unknown source button ID: {source_id}")
             return "none"
 
-    def is_source_active(self) -> bool:
-        """Check if any light source is currently active."""
-        return self.laser_led_controller.is_preview_active()
-
     def get_illumination_selection_state(self) -> Dict[str, Any]:
         """Get the current illumination selection state for persistence.
 

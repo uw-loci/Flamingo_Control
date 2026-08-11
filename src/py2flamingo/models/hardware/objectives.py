@@ -104,60 +104,6 @@ class ObjectiveProperties:
             # Just a warning, not an error
             pass
 
-    def get_resolution_um(self, wavelength_nm: float = 520) -> float:
-        """Calculate theoretical resolution (Rayleigh criterion).
-
-        Args:
-            wavelength_nm: Wavelength of light
-
-        Returns:
-            Resolution in micrometers
-        """
-        # Rayleigh criterion: r = 0.61 * λ / NA
-        return 0.61 * wavelength_nm / (self.numerical_aperture * 1000)
-
-    def get_depth_of_field_um(
-        self, wavelength_nm: float = 520, detector_pixel_um: float = 6.5
-    ) -> float:
-        """Calculate depth of field.
-
-        Args:
-            wavelength_nm: Wavelength of light
-            detector_pixel_um: Detector pixel size
-
-        Returns:
-            Depth of field in micrometers
-        """
-        # Wave optical depth of field
-        wave_dof = wavelength_nm / (self.numerical_aperture**2) / 1000
-
-        # Geometrical depth of field
-        n = self.immersion_medium.refractive_index
-        e = detector_pixel_um / self.magnification  # Detector resolution at specimen
-        geom_dof = (n * e) / self.numerical_aperture
-
-        # Total depth of field
-        return wave_dof + geom_dof
-
-    def get_field_of_view_mm(self, sensor_diagonal_mm: float) -> float:
-        """Calculate field of view diameter.
-
-        Args:
-            sensor_diagonal_mm: Sensor diagonal in mm
-
-        Returns:
-            Field of view diameter in mm
-        """
-        return sensor_diagonal_mm / self.magnification
-
-    def get_light_gathering_power(self) -> float:
-        """Calculate relative light-gathering power.
-
-        Returns:
-            Relative brightness (proportional to NA²/Mag²)
-        """
-        return (self.numerical_aperture**2) / (self.magnification**2)
-
 
 @dataclass
 class Objective(ValidatedModel):
@@ -208,57 +154,6 @@ class Objective(ValidatedModel):
                 max_val=0.5,
                 field_name="coverslip_thickness_mm",
             )
-
-    def get_display_name(self) -> str:
-        """Get formatted display name for objective.
-
-        Returns:
-            Human-readable objective description
-        """
-        immersion = ""
-        if self.objective_type != ObjectiveType.DRY:
-            immersion = f" {self.properties.immersion_medium.medium_name.capitalize()}"
-
-        correction = ""
-        if self.correction_type in [
-            CorrectionType.PLAN_APOCHROMAT,
-            CorrectionType.APOCHROMAT,
-        ]:
-            correction = " Apo"
-        elif self.correction_type in [
-            CorrectionType.PLAN_FLUORITE,
-            CorrectionType.FLUORITE,
-        ]:
-            correction = " Fluor"
-
-        return (
-            f"{self.properties.magnification:.0f}x/"
-            f"{self.properties.numerical_aperture:.2f}"
-            f"{immersion}{correction}"
-        )
-
-    def is_compatible_with_wavelength(self, wavelength_nm: float) -> bool:
-        """Check if objective is suitable for given wavelength.
-
-        Args:
-            wavelength_nm: Wavelength to check
-
-        Returns:
-            True if wavelength is within transmission range
-        """
-        min_wl, max_wl = self.properties.transmission_range_nm
-        return min_wl <= wavelength_nm <= max_wl
-
-    def calculate_pixel_size_um(self, sensor_pixel_um: float) -> float:
-        """Calculate effective pixel size at sample.
-
-        Args:
-            sensor_pixel_um: Physical sensor pixel size
-
-        Returns:
-            Effective pixel size at sample in micrometers
-        """
-        return sensor_pixel_um / self.properties.magnification
 
     @classmethod
     def create_default(
@@ -324,57 +219,3 @@ class ObjectiveTurret(ValidatedModel):
             if obj is not None:
                 obj.position_index = i
                 obj.is_selected = i == self.current_position
-
-    def get_current_objective(self) -> Optional[Objective]:
-        """Get currently selected objective.
-
-        Returns:
-            Current objective or None if position is empty
-        """
-        return self.objectives[self.current_position]
-
-    def find_objective_position(self, magnification: float) -> Optional[int]:
-        """Find position of objective with given magnification.
-
-        Args:
-            magnification: Target magnification
-
-        Returns:
-            Position index or None if not found
-        """
-        for i, obj in enumerate(self.objectives):
-            if obj and abs(obj.properties.magnification - magnification) < 0.1:
-                return i
-        return None
-
-    def select_position(self, position: int) -> bool:
-        """Select objective at given position.
-
-        Args:
-            position: Target position index
-
-        Returns:
-            True if selection successful
-        """
-        if not (0 <= position < self.num_positions):
-            return False
-
-        # Update selection state
-        for i, obj in enumerate(self.objectives):
-            if obj:
-                obj.is_selected = i == position
-
-        self.current_position = position
-        self.update()
-        return True
-
-    def get_parfocal_offset(self, position: int) -> float:
-        """Get Z-axis parfocal adjustment for position.
-
-        Args:
-            position: Position index
-
-        Returns:
-            Z-axis offset in mm
-        """
-        return self.parfocal_adjustment.get(position, 0.0)

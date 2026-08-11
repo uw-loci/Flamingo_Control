@@ -330,23 +330,6 @@ class ExperimentSettings(ValidatedModel):
         if not self.file_prefix:
             raise ValidationError("File prefix cannot be empty")
 
-    def get_output_path(self, timestamp: datetime = None) -> Path:
-        """Generate output file path.
-
-        Args:
-            timestamp: Acquisition timestamp
-
-        Returns:
-            Full output path
-        """
-        if timestamp is None:
-            timestamp = datetime.now()
-
-        date_str = timestamp.strftime("%Y%m%d_%H%M%S")
-        filename = f"{self.file_prefix}_{date_str}"
-
-        return self.save_directory / filename
-
 
 @dataclass
 class WorkflowStep:
@@ -381,12 +364,6 @@ class WorkflowStep:
         self.status = "error"
         self.end_time = datetime.now()
         self.error_message = error
-
-    def get_duration(self) -> Optional[float]:
-        """Get step execution time in seconds."""
-        if self.start_time and self.end_time:
-            return (self.end_time - self.start_time).total_seconds()
-        return None
 
 
 @dataclass
@@ -440,65 +417,6 @@ class Workflow(ValidatedModel):
         # Validate positions
         if self.workflow_type == WorkflowType.MULTI_POSITION and not self.positions:
             raise ValidationError("Multi-position workflow requires position list")
-
-    def calculate_total_images(self) -> int:
-        """Calculate total number of images to acquire.
-
-        Returns:
-            Total image count
-        """
-        count = 1
-
-        # Stack multiplier
-        if self.stack_settings:
-            count *= self.stack_settings.num_planes
-
-        # Tile multiplier
-        if self.tile_settings:
-            count *= self.tile_settings.total_tiles
-
-        # Time-lapse multiplier
-        if self.time_lapse_settings:
-            count *= self.time_lapse_settings.num_timepoints
-
-        # Position multiplier
-        if self.positions:
-            count *= len(self.positions)
-
-        # Channel multiplier
-        if self.channels:
-            count *= len(self.channels)
-
-        self.images_expected = count
-        return count
-
-    def estimate_duration(self, exposure_ms: float = 10.0) -> float:
-        """Estimate total workflow duration.
-
-        Args:
-            exposure_ms: Exposure time per image
-
-        Returns:
-            Estimated duration in seconds
-        """
-        base_time = self.calculate_total_images() * exposure_ms / 1000.0
-
-        # Add movement times
-        if self.stack_settings:
-            base_time += self.stack_settings.calculate_acquisition_time(exposure_ms)
-
-        if self.tile_settings:
-            # Rough estimate for stage movements
-            base_time += (
-                self.tile_settings.total_tiles
-                * self.tile_settings.stage_settle_time_ms
-                / 1000.0
-            )
-
-        if self.time_lapse_settings:
-            base_time = self.time_lapse_settings.calculate_total_duration()
-
-        return base_time
 
     def generate_steps(self) -> List[WorkflowStep]:
         """Generate execution steps for workflow.
@@ -583,16 +501,6 @@ class Workflow(ValidatedModel):
         self.state = WorkflowState.ERROR
         self.end_time = datetime.now()
         self.error_message = error
-
-    def get_progress(self) -> float:
-        """Get workflow progress percentage.
-
-        Returns:
-            Progress from 0-100
-        """
-        if self.images_expected == 0:
-            return 0.0
-        return (self.images_acquired / self.images_expected) * 100.0
 
     def get_current_step(self) -> Optional[WorkflowStep]:
         """Get currently executing step.

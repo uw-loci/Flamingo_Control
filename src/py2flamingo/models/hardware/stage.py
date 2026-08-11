@@ -187,23 +187,6 @@ class StageLimits:
             r_axis=AxisLimits(min=r_min, max=r_max, unit="degrees"),
         )
 
-    def get_axis_limits(self, axis: StageAxis) -> AxisLimits:
-        """Get limits for specific axis.
-
-        Args:
-            axis: Axis to get limits for
-
-        Returns:
-            AxisLimits for the specified axis
-        """
-        axis_map = {
-            StageAxis.X: self.x_axis,
-            StageAxis.Y: self.y_axis,
-            StageAxis.Z: self.z_axis,
-            StageAxis.R: self.r_axis,
-        }
-        return axis_map[axis]
-
     def is_position_valid(self, position: "Position", use_soft: bool = True) -> bool:
         """Check if a position is within all stage limits.
 
@@ -277,56 +260,6 @@ class Position(ValidatedModel):
         else:
             return math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    def offset_by(
-        self, dx: float = 0, dy: float = 0, dz: float = 0, dr: float = 0
-    ) -> "Position":
-        """Create a new position offset from this one.
-
-        Args:
-            dx: X offset in mm
-            dy: Y offset in mm
-            dz: Z offset in mm
-            dr: Rotation offset in degrees
-
-        Returns:
-            New Position with offsets applied
-        """
-        return Position(
-            x=self.x + dx,
-            y=self.y + dy,
-            z=self.z + dz,
-            r=self.r + dr,
-            name=None,  # Don't copy name for offset position
-            stage_limits=self.stage_limits,
-        )
-
-    def clamp_to_limits(self, limits: StageLimits, use_soft: bool = True) -> "Position":
-        """Create a new position clamped to stage limits.
-
-        Args:
-            limits: Stage limits to clamp to
-            use_soft: Whether to use soft limits
-
-        Returns:
-            New Position within limits
-        """
-        return Position(
-            x=limits.x_axis.clamp(self.x, use_soft),
-            y=limits.y_axis.clamp(self.y, use_soft),
-            z=limits.z_axis.clamp(self.z, use_soft),
-            r=limits.r_axis.clamp(self.r, use_soft),
-            name=self.name,
-            stage_limits=limits,
-        )
-
-    def to_list(self) -> List[float]:
-        """Convert to list format for backward compatibility.
-
-        Returns:
-            [x, y, z, r] coordinates
-        """
-        return [self.x, self.y, self.z, self.r]
-
     @classmethod
     def from_list(cls, coords: List[float], name: Optional[str] = None) -> "Position":
         """Create Position from list of coordinates.
@@ -362,27 +295,6 @@ class StageVelocity:
     z_velocity: float = 1.0  # mm/s
     r_velocity: float = 10.0  # degrees/s
 
-    def get_velocity(self, axis: StageAxis) -> float:
-        """Get velocity for specific axis."""
-        velocity_map = {
-            StageAxis.X: self.x_velocity,
-            StageAxis.Y: self.y_velocity,
-            StageAxis.Z: self.z_velocity,
-            StageAxis.R: self.r_velocity,
-        }
-        return velocity_map[axis]
-
-    def set_velocity(self, axis: StageAxis, velocity: float) -> None:
-        """Set velocity for specific axis."""
-        if axis == StageAxis.X:
-            self.x_velocity = velocity
-        elif axis == StageAxis.Y:
-            self.y_velocity = velocity
-        elif axis == StageAxis.Z:
-            self.z_velocity = velocity
-        elif axis == StageAxis.R:
-            self.r_velocity = velocity
-
 
 @dataclass
 class Stage(ValidatedModel):
@@ -410,40 +322,3 @@ class Stage(ValidatedModel):
                 raise ValidationError(
                     f"Home position {self.home_position} is outside stage limits"
                 )
-
-    def move_to(self, target: Position, validate: bool = True) -> None:
-        """Update current position to target.
-
-        Args:
-            target: Target position
-            validate: Whether to validate against limits
-
-        Raises:
-            ValidationError: If target is outside limits
-        """
-        if validate and self.limits:
-            if not self.limits.is_position_valid(target):
-                raise ValidationError(
-                    f"Target position {target} is outside stage limits"
-                )
-
-        self.current_position = target
-        self.update()  # Update timestamp
-
-    def get_movement_time(self, target: Position) -> float:
-        """Estimate time required to move to target position.
-
-        Args:
-            target: Target position
-
-        Returns:
-            Estimated movement time in seconds
-        """
-        # Calculate time for each axis and return maximum
-        times = [
-            abs(target.x - self.current_position.x) / self.velocity.x_velocity,
-            abs(target.y - self.current_position.y) / self.velocity.y_velocity,
-            abs(target.z - self.current_position.z) / self.velocity.z_velocity,
-            abs(target.r - self.current_position.r) / self.velocity.r_velocity,
-        ]
-        return max(times)

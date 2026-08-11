@@ -167,44 +167,6 @@ class AcquisitionTimingService:
 
         return (corrected, self._history.learned_factors.sample_count)
 
-    def get_learned_factors(self) -> LearnedOverheadComponents:
-        """Get current learned overhead factors."""
-        return self._history.learned_factors
-
-    def get_statistics(self, workflow_type: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Get timing statistics.
-
-        Args:
-            workflow_type: Optional filter by workflow type
-
-        Returns:
-            Dictionary with statistics
-        """
-        if workflow_type:
-            records = self._history.get_records_by_type(workflow_type)
-        else:
-            records = self._history.records
-
-        if not records:
-            return {
-                "sample_count": 0,
-                "mean_overhead_s": 0,
-                "std_overhead_s": 0,
-                "min_overhead_s": 0,
-                "max_overhead_s": 0,
-            }
-
-        overheads = [r.overhead_s for r in records]
-
-        return {
-            "sample_count": len(records),
-            "mean_overhead_s": statistics.mean(overheads),
-            "std_overhead_s": statistics.stdev(overheads) if len(overheads) > 1 else 0,
-            "min_overhead_s": min(overheads),
-            "max_overhead_s": max(overheads),
-        }
-
     def _update_learned_factors(self) -> None:
         """
         Update learned overhead factors using regression analysis.
@@ -277,17 +239,3 @@ class AcquisitionTimingService:
             f"settle_per_plane={self._history.learned_factors.settle_correction_per_plane_s:.4f}s, "
             f"z_per_mm={self._history.learned_factors.z_overhead_per_mm_s:.4f}s"
         )
-
-    def clear_history(self) -> None:
-        """Clear all timing history (for testing/reset)."""
-        self._history = TimingHistory(max_records=self._max_records)
-        self._save_history()
-        self.logger.warning("Cleared all timing history")
-
-    def get_record_count(self) -> int:
-        """Get number of timing records."""
-        return len(self._history.records)
-
-    def get_recent_records(self, count: int = 10) -> List[AcquisitionTimingRecord]:
-        """Get most recent timing records."""
-        return self._history.records[:count]

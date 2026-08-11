@@ -1359,12 +1359,6 @@ class WorkflowView(QWidget):
         # Gate Start on connection + validation (shows blockers when disabled).
         self._update_start_enabled()
 
-    def update_progress(self, progress: float, message: str = "") -> None:
-        """Update progress bar and status."""
-        self._progress_bar.setValue(int(progress))
-        if message:
-            self._status_label.setText(message)
-
     def update_acquisition_progress(self, acquired: int, expected: int) -> None:
         """Drive the progress bar from the microscope's image-count callback.
 

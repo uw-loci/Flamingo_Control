@@ -469,14 +469,6 @@ class WorkflowExecutor:
 
     # ==================== State and Statistics ====================
 
-    def get_state(self) -> ExecutionState:
-        """Get current execution state.
-
-        Returns:
-            Current execution state
-        """
-        return self._state
-
     def is_executing(self) -> bool:
         """Check if currently executing.
 
@@ -494,26 +486,6 @@ class WorkflowExecutor:
         if self._current_context:
             return self._current_context.workflow
         return None
-
-    def get_statistics(self) -> Dict[str, Any]:
-        """Get execution statistics.
-
-        Returns:
-            Statistics dictionary
-        """
-        return self._statistics.copy()
-
-    def reset_statistics(self):
-        """Reset execution statistics."""
-        self._statistics = {
-            "workflows_executed": 0,
-            "workflows_completed": 0,
-            "workflows_failed": 0,
-            "total_steps_executed": 0,
-            "total_execution_time": 0.0,
-            "last_execution_time": None,
-        }
-        logger.info("Reset execution statistics")
 
     def reset(self):
         """Reset executor to initial state."""
@@ -537,48 +509,6 @@ class WorkflowExecutor:
         logger.info("Executor reset to initial state")
 
     # ==================== Advanced Features ====================
-
-    def execute_single_step(self, step: WorkflowStep, dry_run: bool = False) -> bool:
-        """Execute a single workflow step.
-
-        Args:
-            step: Step to execute
-            dry_run: If True, simulate execution
-
-        Returns:
-            True if step executed successfully
-        """
-        try:
-            context = ExecutionContext(
-                workflow=None, dry_run=dry_run  # No parent workflow
-            )
-
-            self._execute_step(context, step, 0)
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to execute single step: {e}")
-            return False
-
-    def estimate_remaining_time(self) -> Optional[float]:
-        """Estimate remaining execution time.
-
-        Returns:
-            Estimated seconds remaining or None
-        """
-        if not self._current_context:
-            return None
-
-        workflow = self._current_context.workflow
-
-        if workflow.images_expected > 0 and workflow.images_acquired > 0:
-            # Estimate based on current progress
-            elapsed = time.time() - workflow.start_time.timestamp()
-            rate = workflow.images_acquired / elapsed
-            remaining_images = workflow.images_expected - workflow.images_acquired
-            return remaining_images / rate if rate > 0 else None
-
-        return None
 
     # ==================== Singleton Support ====================
 

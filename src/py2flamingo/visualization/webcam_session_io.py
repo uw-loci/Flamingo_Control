@@ -106,21 +106,3 @@ def load_webcam_session(folder_path: Path) -> WebcamSession:
         f"Webcam session loaded: {folder_path} " f"({len(session.views)} views)"
     )
     return session
-
-
-def load_webcam_session_metadata(folder_path: Path) -> Optional[dict]:
-    """Load only the metadata (no images) for quick inspection.
-
-    Returns:
-        Session metadata dict, or None on error.
-    """
-    try:
-        from py2flamingo.visualization.zarr_2d_session import (
-            load_2d_zarr_session_lazy,
-        )
-
-        metadata, _ = load_2d_zarr_session_lazy(folder_path)
-        return metadata.get("session_metadata", metadata)
-    except Exception as e:
-        logger.error(f"Error loading webcam session metadata: {e}")
-        return None

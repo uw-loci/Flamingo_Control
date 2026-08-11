@@ -331,6 +331,3 @@ class PipelineGraphScene(QGraphicsScene):
         """Reset all nodes to idle status."""
         for item in self._node_items.values():
             item.set_status("idle")
-
-    def get_node_item(self, node_id: str) -> Optional[NodeItem]:
-        return self._node_items.get(node_id)

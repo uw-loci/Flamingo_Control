@@ -829,16 +829,6 @@ class PixelCalibrationService:
             "full_sensor_fov_y_mm": sensor_h * measured / 1000.0,
         }
 
-    def calibrate_z(self, *args, **kwargs):  # pragma: no cover - deferred
-        """TODO: Z (axial) pixel-size calibration.
-
-        Harder than XY: a lateral stage move produces an in-plane image shift,
-        but an axial move mostly changes focus, not position. Candidate
-        approaches: through-focus sharpness vs. known Z steps, or an oblique
-        fiducial. Deferred per project decision.
-        """
-        raise NotImplementedError("Z calibration not yet implemented")
-
     # ================================================================
     # Persistence
     # ================================================================

@@ -29,34 +29,6 @@ class EllipseParameters:
     semi_minor: float
     rotation: float = 0.0
 
-    def point_at_angle(self, angle_deg: float) -> Tuple[float, float]:
-        """
-        Calculate point on ellipse at given angle.
-
-        Args:
-            angle_deg: Angle in degrees from ellipse center
-
-        Returns:
-            Tuple of (x, y) coordinates
-        """
-        # Convert to radians
-        angle_rad = np.radians(angle_deg)
-        rotation_rad = np.radians(self.rotation)
-
-        # Calculate point on unrotated ellipse
-        x_ellipse = self.semi_major * np.cos(angle_rad)
-        y_ellipse = self.semi_minor * np.sin(angle_rad)
-
-        # Apply rotation
-        x_rotated = x_ellipse * np.cos(rotation_rad) - y_ellipse * np.sin(rotation_rad)
-        y_rotated = x_ellipse * np.sin(rotation_rad) + y_ellipse * np.cos(rotation_rad)
-
-        # Translate to center
-        x_final = x_rotated + self.center_x
-        y_final = y_rotated + self.center_y
-
-        return (x_final, y_final)
-
     def area(self) -> float:
         """Calculate ellipse area."""
         return np.pi * self.semi_major * self.semi_minor
@@ -96,77 +68,6 @@ class EllipseModel:
     bottom_ellipse: Optional[EllipseParameters] = None
     fit_quality: float = 0.0
     num_points: int = 0
-
-    def predict_bounds_at_angle(
-        self, angle_deg: float
-    ) -> Optional[Tuple[Tuple[float, float], Tuple[float, float]]]:
-        """
-        Predict top and bottom bounds at given angle.
-
-        Args:
-            angle_deg: Angle in degrees
-
-        Returns:
-            Tuple of (top_point, bottom_point) or None
-        """
-        if not self.top_ellipse or not self.bottom_ellipse:
-            return None
-
-        top_point = self.top_ellipse.point_at_angle(angle_deg)
-        bottom_point = self.bottom_ellipse.point_at_angle(angle_deg)
-
-        return (top_point, bottom_point)
-
-    def get_center_trajectory(
-        self, angles: List[float]
-    ) -> List[Tuple[float, float, float]]:
-        """
-        Calculate center trajectory for given angles.
-
-        Args:
-            angles: List of angles in degrees
-
-        Returns:
-            List of (x, y, z) center positions
-        """
-        trajectory = []
-
-        for angle in angles:
-            bounds = self.predict_bounds_at_angle(angle)
-            if bounds:
-                top, bottom = bounds
-                center_x = (top[0] + bottom[0]) / 2
-                center_y = 0  # Assuming Y doesn't change with rotation
-                center_z = (top[1] + bottom[1]) / 2
-                trajectory.append((center_x, center_y, center_z))
-
-        return trajectory
-
-    def validate_fit(self) -> bool:
-        """
-        Validate ellipse fit quality.
-
-        Returns:
-            True if fit is acceptable
-        """
-        if not self.top_ellipse or not self.bottom_ellipse:
-            return False
-
-        # Check eccentricity is reasonable
-        if self.top_ellipse.eccentricity() > 0.99:
-            return False
-        if self.bottom_ellipse.eccentricity() > 0.99:
-            return False
-
-        # Check fit quality
-        if self.fit_quality < 0.5:
-            return False
-
-        # Check sufficient points
-        if self.num_points < 5:
-            return False
-
-        return True
 
     def to_dict(self) -> dict:
         """Convert to dictionary representation."""

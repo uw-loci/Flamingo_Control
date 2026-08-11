@@ -365,63 +365,6 @@ class ProtocolDecoder:
             "valid": valid,
         }
 
-    def extract_string_from_buffer(self, buffer: bytes) -> str:
-        """
-        Extract null-terminated string from buffer field.
-
-        Args:
-            buffer: 72-byte buffer from decoded command
-
-        Returns:
-            String with trailing nulls removed and decoded as UTF-8
-
-        Example:
-            >>> response = decoder.decode_command(data)
-            >>> laser_power = decoder.extract_string_from_buffer(response['buffer'])
-            >>> print(laser_power)  # "11.49"
-        """
-        # Find first null byte
-        null_index = buffer.find(b"\x00")
-        if null_index >= 0:
-            buffer = buffer[:null_index]
-
-        # Decode to string
-        return buffer.decode("utf-8", errors="replace").strip()
-
-    def extract_multi_axis_positions(self, buffer: bytes) -> Dict[int, float]:
-        """
-        Extract multi-axis positions from buffer field.
-
-        The buffer contains positions in format: "1=X\\n2=Y\\n3=Z\\n"
-
-        Args:
-            buffer: 72-byte buffer from decoded command
-
-        Returns:
-            Dictionary mapping axis number to position value
-
-        Example:
-            >>> response = decoder.decode_command(data)
-            >>> positions = decoder.extract_multi_axis_positions(response['buffer'])
-            >>> print(positions)  # {1: 7.635, 2: 3.141, 3: 18.839}
-        """
-        positions = {}
-        text = self.extract_string_from_buffer(buffer)
-
-        for line in text.split("\n"):
-            line = line.strip()
-            if "=" in line:
-                try:
-                    axis_str, pos_str = line.split("=", 1)
-                    axis = int(axis_str.strip())
-                    position = float(pos_str.strip())
-                    positions[axis] = position
-                except (ValueError, IndexError):
-                    # Skip malformed lines
-                    continue
-
-        return positions
-
     def validate_command(self, data: bytes) -> tuple[bool, str]:
         """
         Validate a command without full decoding.

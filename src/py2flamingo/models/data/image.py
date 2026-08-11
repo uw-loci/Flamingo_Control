@@ -49,24 +49,6 @@ class PixelCalibration:
     z_um: Optional[float] = None  # Z-step for stacks
     unit: str = "um"  # Calibration unit
 
-    def get_voxel_volume(self) -> Optional[float]:
-        """Calculate voxel volume for 3D data.
-
-        Returns:
-            Voxel volume in cubic micrometers, or None for 2D
-        """
-        if self.z_um is not None:
-            return self.x_um * self.y_um * self.z_um
-        return None
-
-    def get_pixel_area(self) -> float:
-        """Calculate pixel area.
-
-        Returns:
-            Pixel area in square micrometers
-        """
-        return self.x_um * self.y_um
-
 
 @dataclass
 class ImageMetadata(BaseModel):
@@ -111,23 +93,6 @@ class ImageMetadata(BaseModel):
     experiment_id: Optional[str] = None
     user_comment: Optional[str] = None
     software_version: Optional[str] = None
-
-    def get_physical_size(self, width_px: int, height_px: int) -> Tuple[float, float]:
-        """Calculate physical size of image.
-
-        Args:
-            width_px: Image width in pixels
-            height_px: Image height in pixels
-
-        Returns:
-            Tuple of (width_um, height_um)
-        """
-        if not self.pixel_calibration:
-            raise ValueError("Pixel calibration required for physical size")
-
-        width_um = width_px * self.pixel_calibration.x_um
-        height_um = height_px * self.pixel_calibration.y_um
-        return (width_um, height_um)
 
 
 @dataclass
@@ -236,81 +201,6 @@ class ImageData(ValidatedModel):
             return self.data.shape[t_idx]
         return 1
 
-    def get_channel(self, channel: int) -> np.ndarray:
-        """Extract single channel from multi-channel image.
-
-        Args:
-            channel: Channel index
-
-        Returns:
-            Array with channel dimension removed
-        """
-        c_idx = self.dimension_order.find("C")
-        if c_idx < 0:
-            if channel == 0:
-                return self.data
-            else:
-                raise ValueError(f"No channel dimension, cannot get channel {channel}")
-
-        if channel >= self.data.shape[c_idx]:
-            raise ValueError(
-                f"Channel {channel} out of range (0-{self.data.shape[c_idx]-1})"
-            )
-
-        return np.take(self.data, channel, axis=c_idx)
-
-    def get_z_plane(self, z: int) -> np.ndarray:
-        """Extract single Z plane from stack.
-
-        Args:
-            z: Z plane index
-
-        Returns:
-            Array with Z dimension removed
-        """
-        z_idx = self.dimension_order.find("Z")
-        if z_idx < 0:
-            if z == 0:
-                return self.data
-            else:
-                raise ValueError(f"No Z dimension, cannot get plane {z}")
-
-        if z >= self.data.shape[z_idx]:
-            raise ValueError(f"Z plane {z} out of range (0-{self.data.shape[z_idx]-1})")
-
-        return np.take(self.data, z, axis=z_idx)
-
-    def get_max_projection(self, axis: str = "Z") -> np.ndarray:
-        """Create maximum intensity projection.
-
-        Args:
-            axis: Axis to project along ('Z', 'T', etc.)
-
-        Returns:
-            Maximum projection array
-        """
-        axis_idx = self.dimension_order.find(axis.upper())
-        if axis_idx < 0:
-            return self.data  # No axis to project
-
-        return np.max(self.data, axis=axis_idx)
-
-    def get_statistics(self) -> Dict[str, float]:
-        """Calculate basic image statistics.
-
-        Returns:
-            Dictionary with min, max, mean, std, etc.
-        """
-        return {
-            "min": float(np.min(self.data)),
-            "max": float(np.max(self.data)),
-            "mean": float(np.mean(self.data)),
-            "std": float(np.std(self.data)),
-            "median": float(np.median(self.data)),
-            "sum": float(np.sum(self.data)),
-            "non_zero_pixels": int(np.count_nonzero(self.data)),
-        }
-
     def save(self, path: Path, format: str = "tiff") -> None:
         """Save image to file.
 
@@ -401,28 +291,3 @@ class ImageStack(BaseModel):
         if not (0 <= index < len(self.images)):
             raise IndexError(f"Index {index} out of range (0-{len(self.images)-1})")
         return self.images[index]
-
-    def to_array(self) -> np.ndarray:
-        """Convert stack to single numpy array.
-
-        Returns:
-            Stacked array with additional dimension
-        """
-        if not self.images:
-            raise ValueError("Cannot convert empty stack to array")
-
-        arrays = [img.data for img in self.images]
-        return np.stack(arrays)
-
-    def get_max_projection(self) -> np.ndarray:
-        """Create maximum intensity projection of stack.
-
-        Returns:
-            Maximum projection array
-        """
-        if not self.images:
-            raise ValueError("Cannot project empty stack")
-
-        arrays = [img.data for img in self.images]
-        stacked = np.stack(arrays)
-        return np.max(stacked, axis=0)

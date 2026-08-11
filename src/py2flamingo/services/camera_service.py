@@ -706,15 +706,6 @@ class CameraService(MicroscopeCommandService):
 
         self.logger.info("Stopped data receiver (no LIVE_VIEW_STOP sent)")
 
-    def is_streaming(self) -> bool:
-        """
-        Check if live view streaming is active.
-
-        Returns:
-            True if streaming, False otherwise
-        """
-        return self._streaming
-
     def get_frame_rate(self) -> float:
         """
         Get current frame rate in FPS.
@@ -817,24 +808,6 @@ class CameraService(MicroscopeCommandService):
                 self._frame_buffer.append(f)
             for f in existing:
                 self._frame_buffer.append(f)
-
-    def get_buffer_size(self) -> int:
-        """
-        Get current number of frames in buffer.
-
-        Returns:
-            Number of buffered frames
-        """
-        with self._frame_buffer_lock:
-            return len(self._frame_buffer)
-
-    def clear_frame_buffer(self) -> None:
-        """Clear all buffered frames."""
-        with self._frame_buffer_lock:
-            count = len(self._frame_buffer)
-            self._frame_buffer.clear()
-            if count > 0:
-                self.logger.info(f"Cleared {count} frames from buffer")
 
     def set_tile_mode_buffer(self, enabled: bool) -> None:
         """Switch to larger buffer for tile workflows where every frame matters.

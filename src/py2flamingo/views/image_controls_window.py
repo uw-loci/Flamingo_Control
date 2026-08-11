@@ -458,38 +458,6 @@ class ImageControlsWindow(QWidget):
 
     # ===== Getters =====
 
-    def get_rotation(self) -> int:
-        """Get current rotation angle."""
-        return self._rotation
-
-    def get_flip_horizontal(self) -> bool:
-        """Get horizontal flip state."""
-        return self._flip_h
-
-    def get_flip_vertical(self) -> bool:
-        """Get vertical flip state."""
-        return self._flip_v
-
-    def get_colormap(self) -> str:
-        """Get current color map name."""
-        return self._colormap
-
-    def get_auto_scale(self) -> bool:
-        """Get auto-scale state."""
-        return self._auto_scale
-
-    def get_intensity_range(self) -> tuple:
-        """Get intensity range as (min, max)."""
-        return (self._min_intensity, self._max_intensity)
-
-    def get_zoom(self) -> float:
-        """Get zoom as percentage (1.0 = 100%)."""
-        return self._zoom
-
-    def get_crosshair(self) -> bool:
-        """Get crosshair visibility."""
-        return self._show_crosshair
-
     def showEvent(self, event: QShowEvent) -> None:
         """Handle window show event - restore geometry and log."""
         super().showEvent(event)

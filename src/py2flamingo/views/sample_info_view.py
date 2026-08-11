@@ -485,24 +485,6 @@ class SampleInfoView(QWidget):
 
     # Public methods for accessing current values
 
-    def get_sample_name(self) -> str:
-        """
-        Get current sample name.
-
-        Returns:
-            Current sample name string
-        """
-        return self._sample_name
-
-    def get_save_path(self) -> str:
-        """
-        Get current subdirectory path (relative).
-
-        Returns:
-            Current subdirectory path string
-        """
-        return self._save_path
-
     def get_network_path(self) -> str:
         """
         Get full network path that will be sent to microscope.
@@ -542,39 +524,3 @@ class SampleInfoView(QWidget):
             return str(base / self._save_path)
         else:
             return str(base)
-
-    def set_sample_name(self, name: str):
-        """
-        Set sample name programmatically.
-
-        Args:
-            name: Sample name to set
-        """
-        self.sample_name_input.setText(name)
-
-    def set_save_path(self, path: str):
-        """
-        Set subdirectory path programmatically.
-
-        Args:
-            path: Subdirectory path to set
-        """
-        self.save_path_input.setText(path)
-
-    def set_network_share_base(self, share_path: str):
-        """
-        Set network share base path programmatically.
-
-        Args:
-            share_path: Network share base path (UNC format)
-        """
-        self.network_share_input.setText(share_path)
-
-    def set_local_mount_point(self, mount_path: str):
-        """
-        Set local mount point programmatically.
-
-        Args:
-            mount_path: Local mount point path
-        """
-        self.local_mount_input.setText(mount_path)

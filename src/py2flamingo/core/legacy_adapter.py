@@ -50,11 +50,3 @@ def clear_all_events_queues():
 
 
 # For code that expects to import the managers directly
-def get_queue_manager():
-    """Get the global queue manager instance."""
-    return _queue_manager
-
-
-def get_event_manager():
-    """Get the global event manager instance."""
-    return _event_manager

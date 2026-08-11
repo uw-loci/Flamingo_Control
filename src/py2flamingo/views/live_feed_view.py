@@ -610,31 +610,6 @@ class LiveFeedView(QWidget):
         if self._last_image is not None:
             self._display_image(self._last_image)
 
-    def start_updates(self) -> None:
-        """Start polling for images (if not already started)."""
-        if not self.timer.isActive():
-            self.timer.start(self.update_interval_ms)
-            self._logger.info("LiveFeedView updates started")
-
-    def stop_updates(self) -> None:
-        """Stop polling for images."""
-        if self.timer.isActive():
-            self.timer.stop()
-            self._logger.info("LiveFeedView updates stopped")
-
-    def set_update_interval(self, interval_ms: int) -> None:
-        """
-        Change the update polling interval.
-
-        Args:
-            interval_ms: New interval in milliseconds
-        """
-        self.update_interval_ms = interval_ms
-        if self.timer.isActive():
-            self.timer.stop()
-            self.timer.start(interval_ms)
-            self._logger.info(f"Update interval changed to {interval_ms}ms")
-
     # Stage control methods
     def _move_relative(self, axis: str, delta: float) -> None:
         """
@@ -726,29 +701,6 @@ class LiveFeedView(QWidget):
         self.r_spinbox.setValue(position.r)
         self._update_position_display()
 
-    def request_position_update(self) -> None:
-        """
-        Request position update from microscope.
-
-        This method should be called after connection is established
-        to initialize the position display with actual microscope position.
-        """
-        if self.position_controller is None:
-            self._logger.warning(
-                "Cannot request position: position_controller not available"
-            )
-            return
-
-        try:
-            position = self.position_controller.get_current_position()
-            if position:
-                self.update_position(position)
-                self._logger.info(f"Position updated from microscope: {position}")
-            else:
-                self._logger.warning("Could not retrieve position from microscope")
-        except Exception as e:
-            self._logger.error(f"Error requesting position update: {e}")
-
     # Laser control methods
     def _on_laser_changed(self, laser_channel: str) -> None:
         """
@@ -773,15 +725,6 @@ class LiveFeedView(QWidget):
         # Emit signal
         self.laser_power_changed.emit(power)
         self._logger.debug(f"Laser power changed to: {power}%")
-
-    def get_laser_settings(self) -> tuple:
-        """
-        Get current laser settings from UI.
-
-        Returns:
-            Tuple of (laser_channel, laser_power)
-        """
-        return (self.laser_combo.currentText(), self.power_spinbox.value())
 
     # Image acquisition methods
     def _on_snapshot_clicked(self) -> None:
@@ -855,35 +798,3 @@ class LiveFeedView(QWidget):
                 f"color: {ERROR_COLOR}; font-style: italic;"
             )
             self.sync_settings_btn.setEnabled(True)
-
-    def set_controls_enabled(self, enabled: bool) -> None:
-        """
-        Enable or disable all control widgets.
-
-        Args:
-            enabled: True to enable controls, False to disable
-        """
-        # Stage controls
-        self.x_spinbox.setEnabled(enabled)
-        self.y_spinbox.setEnabled(enabled)
-        self.z_spinbox.setEnabled(enabled)
-        self.r_spinbox.setEnabled(enabled)
-        self.x_minus_btn.setEnabled(enabled)
-        self.x_plus_btn.setEnabled(enabled)
-        self.y_minus_btn.setEnabled(enabled)
-        self.y_plus_btn.setEnabled(enabled)
-        self.z_minus_btn.setEnabled(enabled)
-        self.z_plus_btn.setEnabled(enabled)
-        self.r_minus_btn.setEnabled(enabled)
-        self.r_plus_btn.setEnabled(enabled)
-        self.move_to_position_btn.setEnabled(enabled)
-
-        # Laser controls
-        self.laser_combo.setEnabled(enabled)
-        self.power_spinbox.setEnabled(enabled)
-        self.power_slider.setEnabled(enabled)
-
-        # Acquisition controls
-        self.snapshot_btn.setEnabled(enabled)
-        self.brightfield_btn.setEnabled(enabled)
-        self.sync_settings_btn.setEnabled(enabled)

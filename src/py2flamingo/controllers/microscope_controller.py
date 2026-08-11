@@ -76,17 +76,6 @@ class MicroscopeController:
         with self._lock:
             self._observers.append(callback)
 
-    def unsubscribe(self, callback: Callable):
-        """
-        Unsubscribe from model updates.
-
-        Args:
-            callback: Function to remove from observers
-        """
-        with self._lock:
-            if callback in self._observers:
-                self._observers.remove(callback)
-
     def _notify_observers(self):
         """Notify all observers of model changes."""
         with self._lock:

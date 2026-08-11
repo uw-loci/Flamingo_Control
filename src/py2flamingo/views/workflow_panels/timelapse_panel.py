@@ -300,9 +300,3 @@ class TimeLapsePanel(QWidget):
             _set(self._interval_mins, intv[2])
             _set(self._interval_secs, intv[3])
         self._update_calculations() if hasattr(self, "_update_calculations") else None
-
-    def get_timepoints(self) -> int:
-        """Get calculated number of timepoints."""
-        duration_secs = self._get_duration_seconds()
-        interval_secs = self._get_interval_seconds()
-        return max(1, duration_secs // interval_secs + 1) if interval_secs > 0 else 1

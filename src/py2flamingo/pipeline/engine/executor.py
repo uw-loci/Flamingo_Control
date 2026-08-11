@@ -54,10 +54,6 @@ class PipelineExecutor(QThread):
         self._context = context
         self._runners = runners or {}
 
-    def register_runner(self, node_type: NodeType, runner: AbstractNodeRunner) -> None:
-        """Register a runner for a node type."""
-        self._runners[node_type] = runner
-
     @property
     def context(self) -> ExecutionContext:
         return self._context

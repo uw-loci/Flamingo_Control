@@ -67,6 +67,23 @@ class TestTheCheckItselfWorks:
         assert "__init__" not in out.stdout
         assert "test_something" not in out.stdout
 
+    def test_a_name_that_is_only_imported_counts_as_live(self, tmp_path):
+        """The bug that broke 18 modules on 2026-08-11.
+
+        `from mod import helper` binds the name without ever producing a Name
+        node for it in the importing module's expressions. The scanner did not
+        visit Import/ImportFrom, called `dict_comment` dead, and the sweep
+        removed it out from under `image_acquisition_service`.
+        """
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "lib.py").write_text("def helper():\n    return 1\n", encoding="utf-8")
+        (pkg / "user.py").write_text("from .lib import helper\n", encoding="utf-8")
+        out = _run(str(pkg))
+        assert (
+            "helper" not in out.stdout
+        ), "an imported name is a used name; deleting it breaks the importer"
+
     def test_a_name_used_only_in_a_string_counts_as_live(self, tmp_path):
         """getattr/registry dispatch must not be reported. Over-report is worse."""
         pkg = tmp_path / "pkg"

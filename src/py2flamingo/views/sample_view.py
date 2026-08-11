@@ -4413,10 +4413,6 @@ class SampleView(QWidget):
         """Update sample holder position (delegated to manager)."""
         self._chamber_viz.update_stage_geometry(x_mm, y_mm, z_mm)
 
-    def _update_xy_focus_frame(self):
-        """Update XY focus frame (delegated to manager)."""
-        self._chamber_viz.update_focus_frame()
-
     def reload_chamber_profile(self, yaml_path: str) -> bool:
         """Switch the 3D viewer's STEP chamber profile live (no restart).
 
@@ -4925,10 +4921,6 @@ class SampleView(QWidget):
             self.logger.error(f"Error applying viz results: {e}", exc_info=True)
         finally:
             self._viz_update_in_progress = False
-
-    def _reset_viewer_camera(self) -> None:
-        """Reset the napari viewer camera zoom (delegated to manager)."""
-        self._chamber_viz.reset_camera()
 
     # ========== Live View Control ==========
 

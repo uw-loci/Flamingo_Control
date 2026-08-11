@@ -927,18 +927,3 @@ class WebcamOverviewResultWindow(PersistentWidget):
             return None
 
     # ========== Future TODO ==========
-
-    def _reconstruct_3d_from_angles(self):
-        """TODO: 3D surface reconstruction from multi-angle webcam captures.
-
-        Approach:
-        1. Capture N views at small angular increments (e.g., every 5-10 degrees)
-        2. Silhouette extraction from each view
-        3. Shape-from-silhouette or visual hull reconstruction
-        4. Generate 3D mesh/point cloud of the sample
-        5. Display in napari 3D viewer alongside microscopy data
-        6. Use for 3D acquisition region planning
-
-        Libraries: OpenCV (feature matching), trimesh (mesh), scipy (hull)
-        """
-        raise NotImplementedError("3D reconstruction not yet implemented")

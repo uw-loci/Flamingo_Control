@@ -237,15 +237,6 @@ class CameraController(QObject):
             f"Exposure time set to {exposure_us} µs ({exposure_us/1000:.2f} ms)"
         )
 
-    def get_exposure_time(self) -> int:
-        """
-        Get current exposure time setting.
-
-        Returns:
-            Exposure time in microseconds
-        """
-        return self._exposure_us
-
     def set_active_tile_position(self, position: dict):
         """Activate tile workflow mode for Sample View integration.
 
@@ -390,15 +381,6 @@ class CameraController(QObject):
             self._display_timer.setInterval(self._display_timer_interval_ms)
 
         self.logger.info(f"Max display FPS set to {fps}")
-
-    def get_buffered_frames(self) -> list:
-        """
-        Get list of buffered frames.
-
-        Returns:
-            List of (image_array, header) tuples
-        """
-        return list(self._frame_buffer)
 
     def clear_buffer(self) -> None:
         """Clear the frame buffer."""
@@ -569,19 +551,6 @@ class CameraController(QObject):
         except Exception as e:
             self.logger.error(f"Error in display frame: {e}")
 
-    def get_image_dimensions(self) -> Optional[tuple]:
-        """
-        Get camera image dimensions.
-
-        Returns:
-            Tuple of (width, height) or None if not available
-        """
-        try:
-            return self.camera_service.get_image_size()
-        except Exception as e:
-            self.logger.error(f"Failed to get image dimensions: {e}")
-            return None
-
     def get_latest_frame(self) -> Optional[tuple]:
         """
         Get the most recent buffered frame.
@@ -594,89 +563,6 @@ class CameraController(QObject):
         if len(self._frame_buffer) > 0:
             return self._frame_buffer[-1]
         return None
-
-    def take_snapshot_and_save(
-        self, sample_name: str, save_directory: str
-    ) -> Optional[str]:
-        """
-        Take a snapshot and save it with auto-incrementing filename.
-
-        This method reuses the existing data socket connection (if live view is active)
-        or temporarily connects to capture the snapshot. It does NOT duplicate any
-        communication infrastructure.
-
-        Args:
-            sample_name: Sample name for filename
-            save_directory: Directory to save snapshot
-
-        Returns:
-            Path to saved file, or None if failed
-
-        Example:
-            >>> path = controller.take_snapshot_and_save("sample_01", "/data/snapshots")
-            >>> print(f"Saved to {path}")
-        """
-        try:
-            # Check if we need to temporarily connect data socket
-            was_streaming = self._state == CameraState.LIVE_VIEW
-
-            if not was_streaming:
-                # Not in live view, need to connect data socket temporarily
-                self.logger.info("Connecting data socket for snapshot...")
-                self.camera_service.start_live_view_streaming()
-                import time
-
-                time.sleep(0.5)  # Give socket time to connect
-
-            # Set flag to capture next frame
-            self._capture_next_frame = True
-            self._captured_snapshot = None
-
-            # Send snapshot command (reuses existing communication)
-            self.logger.info("Sending snapshot command...")
-            self.camera_service.take_snapshot()
-
-            # Wait for image to arrive (via existing callback mechanism)
-            import time
-
-            timeout = 5.0  # 5 second timeout
-            start_time = time.time()
-
-            while (
-                self._captured_snapshot is None and (time.time() - start_time) < timeout
-            ):
-                time.sleep(0.1)
-
-            if self._captured_snapshot is None:
-                raise RuntimeError("Timeout waiting for snapshot image")
-
-            # Save the captured image
-            image, header = self._captured_snapshot
-            filename = self._generate_snapshot_filename(sample_name, save_directory)
-
-            self._save_image(image, filename)
-            self.logger.info(f"Snapshot saved to {filename}")
-
-            # Clean up temporary connection if needed
-            if not was_streaming:
-                self.logger.info("Disconnecting temporary data socket...")
-                self.camera_service.stop_live_view_streaming()
-
-            return filename
-
-        except Exception as e:
-            error_msg = f"Failed to capture snapshot: {e}"
-            self.logger.error(error_msg)
-            self.error_occurred.emit(error_msg)
-
-            # Clean up on error
-            if not was_streaming and self.camera_service._streaming:
-                try:
-                    self.camera_service.stop_live_view_streaming()
-                except:
-                    pass
-
-            return None
 
     def _generate_snapshot_filename(self, sample_name: str, save_directory: str) -> str:
         """

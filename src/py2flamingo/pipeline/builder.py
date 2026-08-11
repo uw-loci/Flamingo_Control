@@ -90,10 +90,6 @@ class PipelineBuilder:
             source_node_id, src_port.id, target_node_id, tgt_port.id
         )
 
-    def set_config(self, node_id: str, **config: Any) -> None:
-        """Merge extra config into an already-added node."""
-        self._require_node(node_id).config.update(config)
-
     def set_input_required(self, node_id: str, port_name: str, required: bool) -> None:
         """Mark an input port as (not) required.
 

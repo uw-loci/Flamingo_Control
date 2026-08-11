@@ -75,14 +75,6 @@ class BaseModel:
 
         return cls(**filtered_data)
 
-    def to_json(self) -> str:
-        """Convert model to JSON string.
-
-        Returns:
-            JSON string representation
-        """
-        return json.dumps(self.to_dict(), default=str)
-
     @classmethod
     def from_json(cls: Type[T], json_str: str) -> T:
         """Create model instance from JSON string.
@@ -212,20 +204,3 @@ def validate_range(
         raise ValidationError(
             f"Value {value} is above maximum {max_val}", field=field_name, value=value
         )
-
-
-def validate_not_empty(value: Any, field_name: str = "value") -> None:
-    """Utility function to validate non-empty values.
-
-    Args:
-        value: Value to validate
-        field_name: Name of field for error messages
-
-    Raises:
-        ValidationError: If value is None or empty
-    """
-    if value is None:
-        raise ValidationError(f"Value cannot be None", field=field_name, value=value)
-
-    if hasattr(value, "__len__") and len(value) == 0:
-        raise ValidationError(f"Value cannot be empty", field=field_name, value=value)

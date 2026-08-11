@@ -97,11 +97,6 @@ class InMemoryVoxelStorage:
             return None
         return self._volumes.get(ch)
 
-    def set_volume(self, channel, volume: np.ndarray) -> None:
-        ch = self._coerce(channel)
-        if ch is not None:
-            self._volumes[ch] = volume
-
 
 # ---------------------------------------------------------------------------
 # Stub workflow facade
@@ -414,23 +409,3 @@ def run_pipeline_headless(
 # ---------------------------------------------------------------------------
 # Convenience: load + run from a JSON path
 # ---------------------------------------------------------------------------
-
-
-def run_pipeline_file(
-    pipeline_path: Path,
-    services: Optional[Dict[str, Any]] = None,
-    *,
-    skip_node_types: Optional[Iterable[NodeType]] = None,
-    raise_on_error: bool = True,
-) -> HeadlessPipelineRun:
-    """Load a pipeline JSON from disk and run it headlessly."""
-    import json
-
-    data = json.loads(Path(pipeline_path).read_text())
-    pipeline = Pipeline.from_dict(data)
-    return run_pipeline_headless(
-        pipeline,
-        services=services,
-        skip_node_types=skip_node_types,
-        raise_on_error=raise_on_error,
-    )

@@ -271,47 +271,6 @@ class AcquisitionSettings(ValidatedModel):
             self.black_level, min_val=0.0, max_val=100.0, field_name="black_level"
         )
 
-    def get_effective_resolution(self) -> Tuple[int, int]:
-        """Get effective image resolution after binning.
-
-        Returns:
-            Tuple of (width, height) in pixels
-        """
-        effective_width = self.roi.width // self.binning.x
-        effective_height = self.roi.height // self.binning.y
-        return (effective_width, effective_height)
-
-    def get_pixel_size_um(self, sensor_pixel_size_um: float) -> float:
-        """Calculate effective pixel size after binning.
-
-        Args:
-            sensor_pixel_size_um: Physical pixel size on sensor
-
-        Returns:
-            Effective pixel size in micrometers
-        """
-        return sensor_pixel_size_um * self.binning.x
-
-    def estimate_data_rate_mbps(self) -> float:
-        """Estimate data rate for current settings.
-
-        Returns:
-            Estimated data rate in megabits per second
-        """
-        width, height = self.get_effective_resolution()
-        bytes_per_pixel = self.bit_depth / 8
-        bytes_per_frame = width * height * bytes_per_pixel
-
-        # Use frame rate or estimate from exposure
-        if self.frame_rate_hz:
-            fps = self.frame_rate_hz
-        else:
-            # Estimate from exposure time
-            fps = min(1000.0 / self.exposure.exposure_time_ms, 100.0)
-
-        bits_per_second = bytes_per_frame * fps * 8
-        return bits_per_second / 1_000_000  # Convert to Mbps
-
 
 @dataclass
 class CameraCalibration:
@@ -369,28 +328,6 @@ class Camera(ValidatedModel):
         """Mark camera as not acquiring."""
         self.is_acquiring = False
         self.update()
-
-    def get_field_of_view_mm(self, magnification: float) -> Tuple[float, float]:
-        """Calculate field of view in millimeters.
-
-        Args:
-            magnification: Objective magnification
-
-        Returns:
-            Tuple of (width_mm, height_mm)
-        """
-        if not self.calibration:
-            raise ValueError("Camera calibration required for FOV calculation")
-
-        pixel_size_um = self.acquisition_settings.get_pixel_size_um(
-            self.calibration.pixel_size_um
-        )
-        width_px, height_px = self.acquisition_settings.get_effective_resolution()
-
-        width_mm = (width_px * pixel_size_um) / (magnification * 1000)
-        height_mm = (height_px * pixel_size_um) / (magnification * 1000)
-
-        return (width_mm, height_mm)
 
     @classmethod
     def create_default(cls) -> "Camera":

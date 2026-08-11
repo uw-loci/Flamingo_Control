@@ -824,32 +824,6 @@ class SessionManager:
 
         return channel_data, metadata
 
-    def save_session_fast(
-        self,
-        voxel_storage,
-        session_name: str,
-        description: str = "",
-        channel_names: Optional[List[str]] = None,
-    ) -> Path:
-        """Convenience method: runs async save in an event loop.
-
-        Use this from synchronous code to get async performance benefits.
-        """
-        return asyncio.run(
-            self.save_session_async(
-                voxel_storage, session_name, description, channel_names
-            )
-        )
-
-    def load_session_fast(
-        self, session_path: Path
-    ) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
-        """Convenience method: runs async load in an event loop.
-
-        Use this from synchronous code to get async performance benefits.
-        """
-        return asyncio.run(self.load_session_async(session_path))
-
     def load_session(
         self, session_path: Path
     ) -> Tuple[Dict[int, np.ndarray], SessionMetadata]:
@@ -949,61 +923,6 @@ class SessionManager:
 
         logger.info(f"Session restored to storage: {metadata.session_name}")
         return metadata
-
-    def list_sessions(self) -> List[Dict[str, Any]]:
-        """List all available sessions.
-
-        Returns:
-            List of session info dicts with keys: path, name, timestamp, size_mb
-        """
-        sessions = []
-
-        for item in self.session_dir.iterdir():
-            if item.is_dir() and item.suffix == ".zarr":
-                session_info = {
-                    "path": item,
-                    "name": item.stem,
-                    "size_mb": self._get_dir_size(item) / 1024 / 1024,
-                }
-
-                # Try to load metadata
-                if ZARR_AVAILABLE:
-                    try:
-                        store = _create_zarr_store(str(item))
-                        root = zarr.open_group(store=store, mode="r")
-                        metadata = root.attrs.get("session_metadata", {})
-                        session_info["session_name"] = metadata.get(
-                            "session_name", item.stem
-                        )
-                        session_info["timestamp"] = metadata.get("timestamp", "")
-                        session_info["description"] = metadata.get("description", "")
-                        session_info["total_voxels"] = metadata.get("total_voxels", 0)
-                    except Exception as e:
-                        logger.debug(f"Could not read metadata from {item}: {e}")
-
-                sessions.append(session_info)
-
-        # Sort by modification time (newest first)
-        sessions.sort(key=lambda s: s["path"].stat().st_mtime, reverse=True)
-        return sessions
-
-    def delete_session(self, session_path: Path) -> bool:
-        """Delete a session.
-
-        Args:
-            session_path: Path to the session to delete
-
-        Returns:
-            True if deleted successfully
-        """
-        import shutil
-
-        session_path = Path(session_path)
-        if session_path.exists() and session_path.suffix == ".zarr":
-            shutil.rmtree(session_path)
-            logger.info(f"Deleted session: {session_path}")
-            return True
-        return False
 
     def _get_dir_size(self, path: Path) -> int:
         """Get total size of a directory in bytes."""

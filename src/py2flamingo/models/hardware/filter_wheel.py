@@ -76,42 +76,6 @@ class FilterSpectrum:
                 field_name="optical_density",
             )
 
-    def get_transmission_factor(self) -> float:
-        """Get transmission as a factor (0-1).
-
-        Returns:
-            Transmission factor
-        """
-        if self.optical_density is not None:
-            # For ND filters, use OD
-            return 10 ** (-self.optical_density)
-        else:
-            # For other filters, use transmission percentage
-            return self.transmission_percent / 100.0
-
-    def is_wavelength_transmitted(self, wavelength_nm: float) -> bool:
-        """Check if wavelength is transmitted by filter.
-
-        Args:
-            wavelength_nm: Wavelength to check
-
-        Returns:
-            True if wavelength is transmitted
-        """
-        if self.center_wavelength_nm and self.bandwidth_nm:
-            # Bandpass filter
-            lower = self.center_wavelength_nm - self.bandwidth_nm / 2
-            upper = self.center_wavelength_nm + self.bandwidth_nm / 2
-            return lower <= wavelength_nm <= upper
-
-        if self.cutoff_wavelength_nm:
-            # Long/short pass filter (assuming context determines type)
-            # This is simplified - actual implementation would need filter type
-            return True  # Placeholder
-
-        # Default to transmitting if no spectral data
-        return True
-
 
 @dataclass
 class Filter(ValidatedModel):
@@ -249,43 +213,6 @@ class FilterWheel(ValidatedModel):
                     f"expected {i}, got {pos.position_index}"
                 )
 
-    def get_current_filter(self) -> Optional[Filter]:
-        """Get currently selected filter.
-
-        Returns:
-            Current filter or None if empty
-        """
-        if 0 <= self.current_position < len(self.positions):
-            return self.positions[self.current_position].filter
-        return None
-
-    def get_filter_at_position(self, position: int) -> Optional[Filter]:
-        """Get filter at specific position.
-
-        Args:
-            position: Position index
-
-        Returns:
-            Filter at position or None
-        """
-        if 0 <= position < len(self.positions):
-            return self.positions[position].filter
-        return None
-
-    def find_filter_position(self, filter_name: str) -> Optional[int]:
-        """Find position of filter by name.
-
-        Args:
-            filter_name: Name of filter to find
-
-        Returns:
-            Position index or None if not found
-        """
-        for pos in self.positions:
-            if pos.filter and pos.filter.name.lower() == filter_name.lower():
-                return pos.position_index
-        return None
-
     def move_to_position(self, position: int) -> bool:
         """Move to specified position.
 
@@ -310,34 +237,6 @@ class FilterWheel(ValidatedModel):
 
         self.update()
         return True
-
-    def get_movement_time(self, target_position: int) -> float:
-        """Estimate time to move to target position.
-
-        Args:
-            target_position: Target position index
-
-        Returns:
-            Estimated movement time in seconds
-        """
-        if not self.is_motorized or target_position == self.current_position:
-            return 0.0
-
-        # Calculate shortest path (forward or backward)
-        forward_steps = (target_position - self.current_position) % self.num_positions
-        backward_steps = (self.current_position - target_position) % self.num_positions
-        steps = min(forward_steps, backward_steps)
-
-        # Estimate based on rotation speed
-        # Assume equal angular spacing
-        angle_per_position = 360.0 / self.num_positions
-        total_angle = steps * angle_per_position
-
-        # Add time for acceleration/deceleration
-        rotation_time = (total_angle / 360.0) * (60.0 / self.speed_rpm)
-        overhead = 0.5  # seconds for accel/decel
-
-        return rotation_time + overhead
 
     @classmethod
     def create_default(cls, num_positions: int = 6) -> "FilterWheel":

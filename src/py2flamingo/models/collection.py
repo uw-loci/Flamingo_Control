@@ -112,49 +112,16 @@ class MultiAngleCollection:
             if angle not in self.angle_data:
                 self.angle_data[angle] = AngleData(angle=angle)
 
-    def mark_angle_complete(self, angle: float, data: AngleData):
-        """
-        Mark an angle as complete with its data.
-
-        Args:
-            angle: Completed angle
-            data: Data collected at this angle
-        """
-        if angle not in self.completed_angles:
-            self.completed_angles.append(angle)
-
-        self.angle_data[angle] = data
-        self.total_images += data.num_tiles * data.num_z_planes
-
     def progress_percent(self) -> float:
         """Calculate completion percentage."""
         if not self.angles:
             return 0.0
         return len(self.completed_angles) / len(self.angles) * 100
 
-    def is_complete(self) -> bool:
-        """Check if collection is complete."""
-        return len(self.completed_angles) == len(self.angles)
-
     def duration_seconds(self) -> Optional[float]:
         """Calculate total collection duration."""
         if self.start_time and self.end_time:
             return (self.end_time - self.start_time).total_seconds()
-        return None
-
-    def average_angle_time(self) -> Optional[float]:
-        """Calculate average time per angle."""
-        completed = len(self.completed_angles)
-        if completed > 0 and self.duration_seconds():
-            return self.duration_seconds() / completed
-        return None
-
-    def estimated_time_remaining(self) -> Optional[float]:
-        """Estimate remaining time in seconds."""
-        avg_time = self.average_angle_time()
-        if avg_time:
-            remaining_angles = len(self.angles) - len(self.completed_angles)
-            return avg_time * remaining_angles
         return None
 
     def to_dict(self) -> dict:

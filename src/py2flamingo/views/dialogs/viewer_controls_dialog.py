@@ -860,20 +860,6 @@ class ViewerControlsDialog(PersistentDialog):
             return ["rail_mount_bolt_left", "rail_mount_bolt_right"]
         return [role]
 
-    def _role_to_layer_name(self, overlay, role: str):
-        """Resolve a single role to its napari layer name (first match).
-
-        The chamber_cavity role doesn't carry a layer_name in the YAML; it
-        always renders to "STEP Cavity Wireframe" + back/bottom walls. We
-        return the wireframe name so the dialog can probe its current state.
-        """
-        if role == "chamber_cavity":
-            return "STEP Cavity Wireframe"
-        for f in overlay._features_data.get("features", []):
-            if f.get("role") in self._expand_role(role):
-                return f.get("layer_name")
-        return None
-
     def _on_axes_visibility_changed(self, visible: bool) -> None:
         """Toggle coordinate axes visibility.
 

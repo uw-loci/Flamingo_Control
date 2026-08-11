@@ -124,18 +124,6 @@ class SettingsController:
             self.logger.error(f"Failed to set home position: {e}")
             raise RuntimeError(f"Failed to set home position: {e}")
 
-    def set_home_from_xyzr(self, xyzr: list) -> None:
-        """
-        Set home position from XYZR list (backward compatibility).
-
-        Args:
-            xyzr: List of [x, y, z, r] coordinates
-        """
-        position = Position(
-            x=float(xyzr[0]), y=float(xyzr[1]), z=float(xyzr[2]), r=float(xyzr[3])
-        )
-        self.set_home_position(position)
-
     def _load_current_settings(self) -> None:
         """Load current settings from microscope."""
         self.logger.debug("Loading settings from microscope")

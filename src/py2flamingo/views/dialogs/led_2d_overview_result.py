@@ -1631,22 +1631,6 @@ class LED2DOverviewResultWindow(PersistentWidget):
             logger.error(f"Error saving rotation image: {e}")
             QMessageBox.critical(self, "Error", f"Failed to save image:\n{e}")
 
-    def update_tile(self, rotation_idx: int, tile_idx: int, image: np.ndarray):
-        """Update a single tile during scanning.
-
-        Args:
-            rotation_idx: Which rotation (0 or 1)
-            tile_idx: Which tile
-            image: Tile image
-        """
-        # This method allows updating tiles as they're captured
-        # during a scan, for live preview
-        panel = self.left_panel if rotation_idx == 0 else self.right_panel
-
-        # For now, just redraw the full image
-        # A more efficient implementation would update just the tile
-        pass
-
     def _save_session(self):
         """Save all scan results (Zarr if available, TIFF fallback)."""
         import json

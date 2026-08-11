@@ -24,48 +24,6 @@ from PyQt5.QtGui import QImage, QPainter, QPen
 # -------------------------
 
 
-def save_png(image_data: np.ndarray, image_title: str) -> None:
-    """
-    Save a 16-bit (or float) 2D numpy array as a downsized PNG image.
-
-    - Clips to the 2.5–97.5 percentile window
-    - Normalizes to [0, 1]
-    - Converts to 8-bit
-    - Resizes to 512×512
-    - Writes to output_png/{image_title}.png
-    """
-    # Ensure numpy array (zero-copy view if already ndarray)
-    img = np.asarray(image_data)
-
-    # Combined percentile call - single O(n) pass instead of two
-    # NumPy 2.x optimizes this with SIMD operations
-    lo, hi = np.percentile(img, [2.5, 97.5])
-
-    # Avoid divide-by-zero
-    if hi <= lo:
-        lo, hi = float(img.min()), float(img.max())
-        if hi <= lo:  # fully constant image
-            hi = lo + 1.0
-
-    # Clip + normalize
-    img_clipped = np.clip(img, lo, hi)
-    img_norm = (img_clipped - lo) / (hi - lo)
-
-    # 8-bit
-    img_u8 = (img_norm * 255.0).astype(np.uint8)
-
-    # Downsample to 512×512 with bilinear
-    pil = Image.fromarray(img_u8)
-    pil_resized = pil.resize((512, 512), resample=Image.BILINEAR)
-
-    # Ensure output dir
-    out_dir = "output_png"
-    os.makedirs(out_dir, exist_ok=True)
-
-    # Save
-    pil_resized.save(os.path.join(out_dir, f"{image_title}.png"), "PNG")
-
-
 # -------------------------
 # QImage conversion
 # -------------------------

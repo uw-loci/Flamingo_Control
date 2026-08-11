@@ -213,71 +213,6 @@ class WindowGeometryManager:
             logger.error(f"Error restoring geometry for '{window_id}': {e}")
             return False
 
-    def save_splitter_state(
-        self, window_id: str, splitter_id: str, splitter: QSplitter
-    ) -> None:
-        """Save a splitter's sizes to storage.
-
-        Args:
-            window_id: Unique identifier for the parent window
-            splitter_id: Unique identifier for the splitter within the window
-            splitter: The QSplitter to save state from
-        """
-        try:
-            window_data = self._get_window_data(window_id)
-            splitters = window_data.setdefault("splitters", {})
-
-            # Save splitter sizes as list of integers
-            sizes = splitter.sizes()
-            splitters[splitter_id] = sizes
-
-            logger.debug(f"Saved splitter '{splitter_id}' for '{window_id}': {sizes}")
-
-        except Exception as e:
-            logger.error(f"Error saving splitter state: {e}")
-
-    def restore_splitter_state(
-        self, window_id: str, splitter_id: str, splitter: QSplitter
-    ) -> bool:
-        """Restore a splitter's sizes from storage.
-
-        Args:
-            window_id: Unique identifier for the parent window
-            splitter_id: Unique identifier for the splitter within the window
-            splitter: The QSplitter to restore state to
-
-        Returns:
-            True if state was restored, False if no saved data exists
-        """
-        try:
-            windows = self._data.get("windows", {})
-            if window_id not in windows:
-                return False
-
-            window_data = windows[window_id]
-            splitters = window_data.get("splitters", {})
-
-            if splitter_id not in splitters:
-                logger.debug(f"No saved state for splitter '{splitter_id}'")
-                return False
-
-            sizes = splitters[splitter_id]
-            if sizes and len(sizes) == splitter.count():
-                splitter.setSizes(sizes)
-                logger.debug(f"Restored splitter '{splitter_id}': {sizes}")
-                return True
-            else:
-                logger.warning(
-                    f"Splitter size mismatch for '{splitter_id}': "
-                    f"saved {len(sizes) if sizes else 0}, "
-                    f"current {splitter.count()}"
-                )
-                return False
-
-        except Exception as e:
-            logger.error(f"Error restoring splitter state: {e}")
-            return False
-
     def save_dialog_state(self, window_id: str, state: Dict[str, Any]) -> None:
         """Save custom dialog state to storage.
 
@@ -334,25 +269,6 @@ class WindowGeometryManager:
         self._save_to_json()
         logger.info("Saved all window geometry data")
 
-    def get_registered_windows(self) -> List[str]:
-        """Get list of all windows with saved geometry.
-
-        Returns:
-            List of window IDs
-        """
-        return list(self._data.get("windows", {}).keys())
-
-    def clear_window(self, window_id: str) -> None:
-        """Clear saved geometry for a specific window.
-
-        Args:
-            window_id: Unique identifier for the window
-        """
-        windows = self._data.get("windows", {})
-        if window_id in windows:
-            del windows[window_id]
-            logger.info(f"Cleared geometry for '{window_id}'")
-
     def clear_all(self) -> None:
         """Clear all saved geometry data."""
         self._data = {"version": "1.0", "windows": {}}
@@ -395,33 +311,6 @@ class GeometryPersistenceMixin:
         self._window_id = window_id
         self._geometry_restored = False
         self._splitters = splitters or {}
-
-    def _restore_geometry_on_show(self) -> None:
-        """Restore geometry if not already done. Call from showEvent."""
-        if self._geometry_manager and self._window_id and not self._geometry_restored:
-            self._geometry_manager.restore_geometry(self._window_id, self)
-
-            # Restore splitter states
-            for splitter_id, splitter in self._splitters.items():
-                self._geometry_manager.restore_splitter_state(
-                    self._window_id, splitter_id, splitter
-                )
-
-            self._geometry_restored = True
-
-    def _save_geometry_on_close(self) -> None:
-        """Save geometry. Call from closeEvent."""
-        if self._geometry_manager and self._window_id:
-            self._geometry_manager.save_geometry(self._window_id, self)
-
-            # Save splitter states
-            for splitter_id, splitter in self._splitters.items():
-                self._geometry_manager.save_splitter_state(
-                    self._window_id, splitter_id, splitter
-                )
-
-            # Persist to disk immediately
-            self._geometry_manager.save_all()
 
 
 class PersistentDialog(QDialog):

@@ -205,145 +205,6 @@ class PositionController:
             self.logger.error(f"Error initializing position: {e}")
             self._current_position = Position(x=0.0, y=0.0, z=0.0, r=0.0)
 
-    def go_to_position(
-        self,
-        position: Position,
-        validate: bool = True,
-        callback: Optional[Callable[[str], None]] = None,
-    ) -> None:
-        """
-        Move microscope to specified position.
-
-        This method uses a lock to prevent concurrent movement commands.
-        After successful movement, it updates the tracked position.
-
-        Args:
-            position: Target position
-            validate: Whether to validate position before movement
-            callback: Optional callback for progress updates
-
-        Raises:
-            ValueError: If position is invalid or wrong type
-            RuntimeError: If not connected, movement in progress, or movement fails
-        """
-        # Validate position parameter type
-        if not isinstance(position, Position):
-            error_msg = f"position must be Position instance, got {type(position)}"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
-
-        # Try to acquire movement lock (non-blocking)
-        if not self._movement_lock.acquire(blocking=False):
-            error_msg = "Movement already in progress - cannot send concurrent position commands"
-            self.logger.warning(error_msg)
-            raise RuntimeError(error_msg)
-
-        # Save original position for rollback
-        original_position = self._current_position
-        movement_started = False
-
-        try:
-            # Check connection
-            if not self.connection.is_connected():
-                error_msg = "Not connected to microscope"
-                self.logger.error(error_msg)
-                raise RuntimeError(error_msg)
-
-            # Validate position if requested
-            if validate:
-                try:
-                    self._validate_position(position)
-                except ValueError as e:
-                    self.logger.error(f"Position validation failed: {e}")
-                    raise
-
-            self.logger.info(
-                f"Moving to position: X={position.x:.3f}, Y={position.y:.3f}, "
-                f"Z={position.z:.3f}, R={position.r:.1f}°"
-            )
-
-            movement_started = True
-
-            # Send movement commands for each axis
-            # Track which axes succeeded for rollback
-            moved_axes = []
-            try:
-                self._move_axis(self.axis.X, position.x, "X-axis")
-                moved_axes.append("X")
-
-                self._move_axis(self.axis.Z, position.z, "Z-axis")
-                moved_axes.append("Z")
-
-                self._move_axis(self.axis.R, position.r, "Rotation")
-                moved_axes.append("R")
-
-                self._move_axis(
-                    self.axis.Y, position.y, "Y-axis"
-                )  # Y-axis last as in original
-                moved_axes.append("Y")
-
-            except Exception as e:
-                self.logger.error(
-                    f"Movement failed on or after {moved_axes[-1] if moved_axes else 'start'}: {e}"
-                )
-                self.logger.warning(
-                    f"Position tracking may be inconsistent. Successfully moved axes: {moved_axes}"
-                )
-                # Don't update position - leave at original or partially moved state
-                raise RuntimeError(f"Movement failed: {e}") from e
-
-            # Wait for movement to complete
-            # TODO: Replace with actual position confirmation from hardware
-            import time
-
-            time.sleep(0.5)
-
-            # Only update position if all movements succeeded
-            self._current_position = position
-            self.logger.info(
-                f"Movement complete. Position updated to: X={position.x:.3f}, "
-                f"Y={position.y:.3f}, Z={position.z:.3f}, R={position.r:.1f}°"
-            )
-
-            # Call callback if provided (catch errors to prevent lock issues)
-            if callback:
-                try:
-                    callback("Movement complete")
-                except Exception as e:
-                    self.logger.error(f"Callback error (movement still succeeded): {e}")
-
-        except Exception as e:
-            # Log the error with context
-            if movement_started:
-                self.logger.error(
-                    f"Movement error - position may be inconsistent: {e}", exc_info=True
-                )
-            else:
-                self.logger.error(f"Movement failed before starting: {e}")
-            raise
-
-        finally:
-            # Always release the lock
-            self._movement_lock.release()
-
-    def go_to_xyzr(self, xyzr: List[float], **kwargs) -> None:
-        """
-        Move to position specified as list (backward compatibility).
-
-        This method provides backward compatibility with the original
-        go_to_XYZR function from microscope_connect.py.
-
-        Args:
-            xyzr: List of [x, y, z, r] coordinates
-            **kwargs: Additional arguments passed to go_to_position
-        """
-        # Original comment from microscope_connect.py:
-        # Unpack the provided XYZR coordinates, r is in degrees, other values are in mm
-        x, y, z, r = xyzr
-
-        position = Position(x=float(x), y=float(y), z=float(z), r=float(r))
-        self.go_to_position(position, **kwargs)
-
     def set_motion_complete_callback(self, callback: Callable) -> None:
         """
         Register a callback to be called when motion completes.
@@ -891,39 +752,6 @@ class PositionController:
             f"Added position to history (total: {len(self._position_history)})"
         )
 
-    def undo_position(self) -> Optional[Position]:
-        """
-        Go back to previous position in history.
-
-        Returns:
-            The previous position we moved to, or None if no history
-
-        Raises:
-            RuntimeError: If not connected or movement fails
-        """
-        if not self._position_history:
-            self.logger.warning("No position history available for undo")
-            return None
-
-        # Get previous position (last item in history)
-        previous_position = self._position_history.pop()
-
-        self.logger.info(
-            f"Undoing to position: X={previous_position.x:.3f}, "
-            f"Y={previous_position.y:.3f}, Z={previous_position.z:.3f}, "
-            f"R={previous_position.r:.2f}"
-        )
-
-        # Move to previous position (without adding to history to avoid cycles)
-        # We'll use the full move_to_position method
-        try:
-            self.move_to_position(previous_position, validate=False)
-            return previous_position
-        except Exception as e:
-            # Put position back in history if move failed
-            self._position_history.append(previous_position)
-            raise
-
     def get_position_history(self) -> List[Position]:
         """
         Get position history.
@@ -932,15 +760,6 @@ class PositionController:
             List of positions in history (most recent last)
         """
         return list(self._position_history)
-
-    def has_position_history(self) -> bool:
-        """
-        Check if there is position history available for undo.
-
-        Returns:
-            True if history is available
-        """
-        return len(self._position_history) > 0
 
     def get_home_position(self) -> Optional[Position]:
         """
@@ -1111,15 +930,6 @@ class PositionController:
         else:
             self.logger.debug("Emergency stop already clear")
 
-    def is_emergency_stopped(self) -> bool:
-        """
-        Check if emergency stop is active.
-
-        Returns:
-            True if emergency stop is active
-        """
-        return self._emergency_stop_active
-
     def wait_for_movement_complete(self, timeout: float = 15.0) -> bool:
         """
         Block until the current movement completes.
@@ -1165,18 +975,6 @@ class PositionController:
             f"wait_for_movement_complete: Timeout after {timeout}s - movement may still be in progress"
         )
         return False
-
-    def is_movement_in_progress(self) -> bool:
-        """
-        Check if a movement is currently in progress.
-
-        Returns:
-            True if movement is in progress (lock is held)
-        """
-        if self._movement_lock.acquire(blocking=False):
-            self._movement_lock.release()
-            return False
-        return True
 
     def _query_position_after_move(
         self, moved_axes: Optional[List[int]], target_position: Position
@@ -1518,22 +1316,6 @@ class PositionController:
             )
 
         return (len(errors) == 0, errors)
-
-    def _validate_position(self, position: Position) -> None:
-        """
-        Validate that position is within stage limits.
-
-        Args:
-            position: Position to validate
-
-        Raises:
-            ValueError: If position is outside limits
-        """
-        is_valid, errors = self.is_position_within_bounds(position)
-
-        if not is_valid:
-            error_msg = "Position out of bounds:\n" + "\n".join(errors)
-            raise ValueError(error_msg)
 
     def get_current_position(self) -> Optional[Position]:
         """

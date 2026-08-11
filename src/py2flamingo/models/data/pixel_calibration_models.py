@@ -101,16 +101,6 @@ class PixelCalibration:
         lo = min(a, b)
         return float(max(a, b) / lo) if lo > 1e-12 else float("inf")
 
-    def stage_delta_to_pixel(self, dx_mm: float, dy_mm: float) -> Tuple[float, float]:
-        """Predict the image shift (px) for a stage delta (mm)."""
-        out = self.stage_to_pixel @ np.array([dx_mm, dy_mm], dtype=np.float64)
-        return float(out[0]), float(out[1])
-
-    def pixel_delta_to_stage(self, du_px: float, dv_px: float) -> Tuple[float, float]:
-        """Convert an image shift (px) to a stage delta (mm)."""
-        out = self.pixel_to_stage @ np.array([du_px, dv_px], dtype=np.float64)
-        return float(out[0]), float(out[1])
-
     def to_dict(self) -> dict:
         return {
             "stage_to_pixel": np.asarray(self.stage_to_pixel).tolist(),

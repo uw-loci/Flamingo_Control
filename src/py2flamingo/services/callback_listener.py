@@ -50,30 +50,6 @@ class CallbackListener:
         # Queue for callbacks (optional - for testing/debugging)
         self._callback_queue: Queue = Queue()
 
-    def register_handler(self, command_code: int, handler: Callable) -> None:
-        """
-        Register a handler function for a specific callback command.
-
-        Args:
-            command_code: Command code to handle (e.g., 24592 for motion stopped)
-            handler: Callable that takes parsed response dict
-        """
-        self._handlers[command_code] = handler
-        self.logger.info(
-            f"Registered handler for command 0x{command_code:04X} ({command_code})"
-        )
-
-    def unregister_handler(self, command_code: int) -> None:
-        """
-        Unregister a handler for a command code.
-
-        Args:
-            command_code: Command code to unregister
-        """
-        if command_code in self._handlers:
-            del self._handlers[command_code]
-            self.logger.info(f"Unregistered handler for command {command_code}")
-
     def start(self) -> None:
         """Start the callback listener thread."""
         if self._listener_thread and self._listener_thread.is_alive():

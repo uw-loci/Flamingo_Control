@@ -523,35 +523,7 @@ class IlluminationPanel(QWidget):
                 options_dict["Run stack with multiple lasers on"].lower() == "true"
             )
 
-    def get_enabled_laser_count(self) -> int:
-        """Get the number of enabled lasers."""
-        return sum(1 for row in self._laser_rows if row.is_enabled())
-
-    def get_enabled_source_count(self) -> int:
-        """Get the total number of enabled illumination sources."""
-        count = self.get_enabled_laser_count()
-        if self._led_enable.isChecked():
-            count += 1
-        return count
-
     # Advanced settings accessors
-    def get_advanced_settings(self) -> Dict[str, Any]:
-        """Get advanced illumination settings."""
-        return {
-            "multi_laser_mode": self._multi_laser_mode,
-            "led_color_index": self._led_color_index,
-            "led_dac_percent": self._led_dac_percent,
-        }
-
-    def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
-        """Set advanced illumination settings."""
-        if "multi_laser_mode" in settings:
-            self._multi_laser_mode = settings["multi_laser_mode"]
-        if "led_color_index" in settings:
-            self._led_color_index = settings["led_color_index"]
-        if "led_dac_percent" in settings:
-            self._led_dac_percent = settings["led_dac_percent"]
-
     def get_ui_state(self) -> Dict[str, Any]:
         """
         Get UI state for persistence.

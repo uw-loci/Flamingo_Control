@@ -379,67 +379,8 @@ class CameraPanel(QWidget):
         self._update_detected_display()
         self._aoi_info.setText(f"AOI: {self._aoi_width}x{self._aoi_height}")
 
-    def get_exposure_us(self) -> float:
-        """Get exposure time in microseconds."""
-        return self._exposure_us
-
     def get_frame_rate(self) -> float:
         """Get frame rate (capped at 40 fps)."""
         return self._frame_rate
 
-    def set_exposure(self, exposure_us: float) -> None:
-        """Set exposure time."""
-        self._exposure_us = exposure_us
-        # Recalculate frame rate
-        if exposure_us > 0:
-            exposure_s = exposure_us / 1_000_000.0
-            self._frame_rate = min(1.0 / exposure_s, self._max_frame_rate())
-        self._update_detected_display()
-
-    def set_aoi(self, width: int, height: int) -> None:
-        """Set AOI dimensions."""
-        self._aoi_width = width
-        self._aoi_height = height
-        self._aoi_info.setText(f"AOI: {width}x{height}")
-
-    def set_camera_capture(
-        self,
-        cam1_percentage: int = 100,
-        cam1_mode: int = 0,
-        cam2_percentage: int = 100,
-        cam2_mode: int = 0,
-    ) -> None:
-        """Set camera capture settings."""
-        self._cam1_percentage = cam1_percentage
-        self._cam1_mode = cam1_mode
-        self._cam2_percentage = cam2_percentage
-        self._cam2_mode = cam2_mode
-
     # Advanced settings accessors
-    def get_advanced_settings(self) -> Dict[str, Any]:
-        """Get advanced camera settings."""
-        return {
-            "aoi_width": self._aoi_width,
-            "aoi_height": self._aoi_height,
-            "cam1_capture_percentage": self._cam1_percentage,
-            "cam1_capture_mode": self._cam1_mode,
-            "cam2_capture_percentage": self._cam2_percentage,
-            "cam2_capture_mode": self._cam2_mode,
-        }
-
-    def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
-        """Set advanced camera settings."""
-        if "aoi_width" in settings:
-            self._aoi_width = settings["aoi_width"]
-        if "aoi_height" in settings:
-            self._aoi_height = settings["aoi_height"]
-        if "cam1_capture_percentage" in settings:
-            self._cam1_percentage = settings["cam1_capture_percentage"]
-        if "cam1_capture_mode" in settings:
-            self._cam1_mode = settings["cam1_capture_mode"]
-        if "cam2_capture_percentage" in settings:
-            self._cam2_percentage = settings["cam2_capture_percentage"]
-        if "cam2_capture_mode" in settings:
-            self._cam2_mode = settings["cam2_capture_mode"]
-        # Update display
-        self._aoi_info.setText(f"AOI: {self._aoi_width}x{self._aoi_height}")

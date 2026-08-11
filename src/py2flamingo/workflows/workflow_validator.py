@@ -581,28 +581,3 @@ class WorkflowValidator:
                 )
 
     # ==================== Utilities ====================
-
-    def update_constraints(self, constraints: HardwareConstraints):
-        """Update hardware constraints.
-
-        Args:
-            constraints: New constraints
-        """
-        self.constraints = constraints
-        logger.info("Updated hardware constraints")
-
-    def set_stage_limits(self, stage_limits: StageLimits):
-        """Set stage limits for validation.
-
-        Args:
-            stage_limits: Stage limits
-        """
-        self.constraints.stage_limits = stage_limits
-
-    def set_available_lasers(self, lasers: List[str]):
-        """Set available lasers.
-
-        Args:
-            lasers: List of laser names
-        """
-        self.constraints.available_lasers = lasers

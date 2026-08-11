@@ -159,10 +159,6 @@ class ScopeResolver:
         """
         return self._scopes[node_id]
 
-    def is_scoped(self, node_id: str) -> bool:
-        """Check if a node belongs to a ForEach/Conditional scope."""
-        return node_id in self._scoped_node_ids
-
     def get_body_sorted(self, scope_owner_id: str) -> List[str]:
         """Get body/branch nodes in topological order.
 

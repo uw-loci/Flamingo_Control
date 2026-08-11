@@ -760,65 +760,7 @@ class SavePanel(QWidget):
         """Set save directory."""
         self._save_directory.setText(directory)
 
-    def set_sample_name(self, name: str) -> None:
-        """Set sample name."""
-        self._sample_name.setText(name)
-
-    def set_region(self, region: str) -> None:
-        """Set region identifier."""
-        self._region = region
-
-    def set_comments(self, comments: str) -> None:
-        """Set comments text."""
-        self._comments = comments
-
-    def set_format(self, format_value: str) -> None:
-        """Set save format."""
-        for i, (_, value) in enumerate(SAVE_FORMATS):
-            if value == format_value:
-                self._format_combo.setCurrentIndex(i)
-                break
-
-    def set_save_mip(self, enabled: bool) -> None:
-        """Set save MIP option."""
-        self._save_mip.setChecked(enabled)
-
-    def set_display_mip(self, enabled: bool) -> None:
-        """Set display MIP option."""
-        self._display_mip.setChecked(enabled)
-
-    def set_save_subfolders(self, enabled: bool) -> None:
-        """Set save to subfolders option."""
-        self._save_subfolders = enabled
-
-    def set_live_view(self, enabled: bool) -> None:
-        """Set live view option."""
-        self._live_view = enabled
-
     # Advanced settings accessors
-    def get_advanced_settings(self) -> Dict[str, Any]:
-        """Get advanced save settings."""
-        return {
-            "save_drive": self._save_drive,
-            "region": self._region,
-            "save_subfolders": self._save_subfolders,
-            "live_view": self._live_view,
-            "comments": self._comments,
-        }
-
-    def set_advanced_settings(self, settings: Dict[str, Any]) -> None:
-        """Set advanced save settings."""
-        if "save_drive" in settings:
-            self.set_save_drive(settings["save_drive"])
-        if "region" in settings:
-            self._region = settings["region"]
-        if "save_subfolders" in settings:
-            self._save_subfolders = settings["save_subfolders"]
-        if "live_view" in settings:
-            self._live_view = settings["live_view"]
-        if "comments" in settings:
-            self._comments = settings["comments"]
-
     def set_app(self, app) -> None:
         """Set application reference for configuration access.
 

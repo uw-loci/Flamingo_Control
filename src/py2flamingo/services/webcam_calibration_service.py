@@ -251,51 +251,6 @@ class WebcamCalibrationService:
             raise ValueError(f"No calibration at R={angle_deg}")
         return cal.stage_to_pixel(h, v)
 
-    def pixel_to_stage_3d(
-        self,
-        u_at_0: float,
-        v_at_0: float,
-        u_at_90: float,
-        v_at_90: float,
-    ) -> Tuple[float, float, float]:
-        """Reconstruct 3D stage position from two orthogonal views.
-
-        Uses R=0 view for X and Y, R=90 view for Z and Y.
-        Y values from both views are averaged (should agree if
-        calibration is consistent).
-
-        Returns:
-            (X, Y, Z) in stage coordinates (mm)
-
-        Raises:
-            ValueError: If not calibrated at both R=0 and R=90.
-        """
-        cal_0 = self._calibrations.get(0.0)
-        cal_90 = self._calibrations.get(90.0)
-
-        if cal_0 is None or cal_90 is None:
-            missing = []
-            if cal_0 is None:
-                missing.append("R=0")
-            if cal_90 is None:
-                missing.append("R=90")
-            raise ValueError(
-                f"Need calibration at both R=0 and R=90. Missing: {', '.join(missing)}"
-            )
-
-        x, y_from_0 = cal_0.pixel_to_stage(u_at_0, v_at_0)
-        z, y_from_90 = cal_90.pixel_to_stage(u_at_90, v_at_90)
-        y = (y_from_0 + y_from_90) / 2.0
-
-        y_disagreement = abs(y_from_0 - y_from_90)
-        if y_disagreement > 0.5:
-            logger.warning(
-                f"Y disagreement between views: {y_disagreement:.3f} mm. "
-                f"Calibration may be stale."
-            )
-
-        return (x, y, z)
-
     def pixel_to_full_stage(
         self, u: float, v: float, angle_deg: float, current_z: float = 0.0
     ) -> Tuple[float, float, float]:
@@ -432,32 +387,3 @@ class WebcamCalibrationService:
             self._points = {}
 
     # ========== Future TODO ==========
-
-    def auto_align_webcam_to_live_view(
-        self,
-        webcam_frame: np.ndarray,
-        live_frame: np.ndarray,
-        stage_pos: Tuple[float, float, float, float],
-    ) -> Optional[WebcamCalibration]:
-        """TODO: Automatic webcam-to-live alignment using sample edge detection.
-
-        Approach:
-        1. Capture webcam frame and microscope live view simultaneously
-        2. Detect sample edges in both (Canny / adaptive threshold)
-        3. Match edge features between webcam and live view
-        4. Compute/refine calibration transform automatically
-        5. Could use the sample holder edges as natural fiducials
-
-        This would reduce or eliminate manual calibration point marking.
-        """
-        raise NotImplementedError("Webcam-Live alignment not yet implemented")
-
-    def auto_calibrate_from_holder(
-        self, image: np.ndarray
-    ) -> Optional[WebcamCalibration]:
-        """TODO: Automatic calibration using sample holder known dimensions.
-
-        The holder has known geometry (cylinder, mounting pins). Detecting
-        these features would enable calibration without user interaction.
-        """
-        raise NotImplementedError("Auto-calibration not yet implemented")

@@ -291,30 +291,6 @@ class TilingPanel(QWidget):
         """Get number of tiles in Y."""
         return self._tiles_y.value()
 
-    def get_total_tiles(self) -> int:
-        """Get total number of tiles."""
-        return self._tiles_x.value() * self._tiles_y.value()
-
-    def get_scan_area_mm(self) -> tuple:
-        """
-        Get calculated scan area in millimeters.
-
-        Returns:
-            Tuple of (scan_x_mm, scan_y_mm)
-        """
-        tiles_x = self._tiles_x.value()
-        tiles_y = self._tiles_y.value()
-        overlap = self._overlap.value() / 100.0
-
-        tile_size_um = self._current_tile_size_um()
-        effective_tile_x = tile_size_um * (1 - overlap)
-        effective_tile_y = tile_size_um * (1 - overlap)
-
-        scan_x_um = tile_size_um + (tiles_x - 1) * effective_tile_x
-        scan_y_um = tile_size_um + (tiles_y - 1) * effective_tile_y
-
-        return (scan_x_um / 1000.0, scan_y_um / 1000.0)
-
     # =========================================================================
     # Two-Point Mode (for DualPositionPanel integration)
     # =========================================================================

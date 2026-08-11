@@ -89,17 +89,6 @@ class MotionTracker:
             self._callback_registered = True
             self.logger.info("Registered async callback for STAGE_MOTION_STOPPED")
 
-    def _cleanup_async_callback(self) -> None:
-        """Unregister callback handler."""
-        if self._callback_registered and self.connection:
-            try:
-                self.connection.unregister_callback(
-                    self.STAGE_MOTION_STOPPED, self._on_motion_stopped_callback
-                )
-            except Exception:
-                pass
-            self._callback_registered = False
-
     def _on_motion_stopped_callback(self, message: "ParsedMessage") -> None:
         """
         Handle STAGE_MOTION_STOPPED callback from background reader.

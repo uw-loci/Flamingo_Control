@@ -98,6 +98,3 @@ class PortValue:
 
     port_type: PortType
     data: Any
-
-    def is_trigger(self) -> bool:
-        return self.port_type == PortType.TRIGGER

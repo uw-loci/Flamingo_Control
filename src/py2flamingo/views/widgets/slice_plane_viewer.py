@@ -170,16 +170,6 @@ class SlicePlaneViewer(QFrame):
         self.h_range = h_range
         self.v_range = v_range
 
-    def set_contrast_limits(self, limits: Tuple[int, int]):
-        """Set contrast limits for MIP display."""
-        self._contrast_limits = limits
-        self._update_display()
-
-    def set_mip_data(self, data: np.ndarray):
-        """Set the MIP data to display."""
-        self._mip_data = data
-        self._update_display()
-
     def set_holder_position(self, h: float, v: float):
         """Set the sample holder position (in physical coordinates)."""
         self._holder_pos = (h, v)
@@ -188,11 +178,6 @@ class SlicePlaneViewer(QFrame):
     def set_objective_position(self, h: float, v: float):
         """Set the objective position (in physical coordinates)."""
         self._objective_pos = (h, v)
-        self._update_display()
-
-    def set_frame_position(self, h1: float, v1: float, h2: float, v2: float):
-        """Set the viewing frame position (rectangle in physical coordinates)."""
-        self._frame_pos = (h1, v1, h2, v2)
         self._update_display()
 
     def set_multi_channel_mip(
@@ -249,16 +234,6 @@ class SlicePlaneViewer(QFrame):
         """Reset pan and zoom to default values."""
         self._zoom_level = 1.0
         self._pan_offset = (0.0, 0.0)
-        self._update_display()
-
-    def set_show_axis_labels(self, show: bool):
-        """Enable or disable axis min/max labels on display edges."""
-        self._show_axis_labels = show
-        self._update_display()
-
-    def set_show_coordinate_readout(self, show: bool):
-        """Enable or disable mouse position coordinate readout."""
-        self._show_coordinate_readout = show
         self._update_display()
 
     def _update_display(self):

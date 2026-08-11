@@ -41,19 +41,6 @@ class SampleBounds:
             r=self.angle,
         )
 
-    def get_dimensions(self) -> Tuple[float, float, float]:
-        """
-        Calculate the dimensions of the bounding box.
-
-        Returns:
-            Tuple[float, float, float]: Width (x), height (y), depth (z) in mm
-        """
-        return (
-            abs(self.top.x - self.bottom.x),
-            abs(self.top.y - self.bottom.y),
-            abs(self.top.z - self.bottom.z),
-        )
-
 
 @dataclass
 class Sample:
@@ -73,31 +60,3 @@ class Sample:
     located: bool = False
     fluorescence_channel: str = "Laser 3 488 nm"
     notes: str = ""
-
-    def add_bounds(self, bounds: SampleBounds) -> None:
-        """
-        Add a new bounding box measurement to the sample.
-
-        Args:
-            bounds: SampleBounds object to add
-        """
-        self.bounds_list.append(bounds)
-        self.located = True
-
-    def get_bounds_at_angle(
-        self, angle: float, tolerance: float = 1.0
-    ) -> Optional[SampleBounds]:
-        """
-        Retrieve bounds measured at or near a specific angle.
-
-        Args:
-            angle: Target angle in degrees
-            tolerance: Acceptable deviation from target angle
-
-        Returns:
-            Optional[SampleBounds]: Bounds at the specified angle, or None if not found
-        """
-        for bounds in self.bounds_list:
-            if abs(bounds.angle - angle) <= tolerance:
-                return bounds
-        return None

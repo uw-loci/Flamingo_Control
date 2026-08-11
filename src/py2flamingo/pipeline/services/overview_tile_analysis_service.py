@@ -242,39 +242,6 @@ class OverviewTileAnalysisService:
             metrics=metrics,
         )
 
-    def compute_all_metrics(
-        self, image: np.ndarray, tiles_x: int, tiles_y: int
-    ) -> Dict[str, np.ndarray]:
-        """Compute all available per-tile metrics.
-
-        Args:
-            image: 2D image
-            tiles_x: Number of tiles in X
-            tiles_y: Number of tiles in Y
-
-        Returns:
-            Dict mapping metric name to [tiles_y, tiles_x] array
-        """
-        from py2flamingo.views.dialogs.overview_thresholder_dialog import (
-            calculate_tile_dog_variance,
-            calculate_tile_edges,
-            calculate_tile_entropy,
-            calculate_tile_gradient_anisotropy,
-            calculate_tile_intensity,
-            calculate_tile_variance,
-        )
-
-        metrics = {}
-        metrics["variance"] = calculate_tile_variance(image, tiles_x, tiles_y)
-        metrics["edge"] = calculate_tile_edges(image, tiles_x, tiles_y)
-        metrics["intensity"] = calculate_tile_intensity(image, tiles_x, tiles_y)
-        metrics["entropy"] = calculate_tile_entropy(image, tiles_x, tiles_y)
-        metrics["gradient"] = calculate_tile_gradient_anisotropy(
-            image, tiles_x, tiles_y
-        )
-        metrics["dog"] = calculate_tile_dog_variance(image, tiles_x, tiles_y)
-        return metrics
-
     def _detect_tube(
         self,
         image: np.ndarray,

@@ -66,17 +66,6 @@ class EnhancedThreadManager:
         self._monitor_thread: Optional[threading.Thread] = None
         self._monitor_interval = 1.0  # seconds
 
-    def register_custom_target(self, name: str, target: Callable):
-        """
-        Register a custom thread target for testing or override.
-
-        Args:
-            name: Name identifier for the thread
-            target: Callable to run in the thread
-        """
-        self.custom_targets[name] = target
-        self.logger.debug(f"Registered custom target for thread: {name}")
-
     def start_thread(
         self,
         name: str,
@@ -362,39 +351,6 @@ class EnhancedThreadManager:
                     self.logger.error(f"Queue processor '{name}' error: {e}")
 
         return self.start_thread(name, queue_worker)
-
-    def start_periodic_task(
-        self, name: str, task: Callable, interval: float, run_immediately: bool = True
-    ) -> bool:
-        """
-        Start a thread that runs a task periodically.
-
-        Args:
-            name: Thread name
-            task: Function to run periodically
-            interval: Time between runs (seconds)
-            run_immediately: Whether to run task immediately
-
-        Returns:
-            True if started successfully
-        """
-
-        def periodic_worker():
-            if run_immediately:
-                try:
-                    task()
-                except Exception as e:
-                    self.logger.error(f"Periodic task '{name}' error: {e}")
-
-            while not self._stop_event.is_set():
-                if self._stop_event.wait(interval):
-                    break  # Stop event was set
-                try:
-                    task()
-                except Exception as e:
-                    self.logger.error(f"Periodic task '{name}' error: {e}")
-
-        return self.start_thread(name, periodic_worker)
 
     # Legacy compatibility methods
 
