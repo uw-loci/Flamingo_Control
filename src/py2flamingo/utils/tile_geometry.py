@@ -99,9 +99,12 @@ class PlannedTile:
     y_mm: float
     z_min_mm: float
     z_max_mm: float
-    #: How many overview tiles' footprints this tile overlaps. 0 means no
-    #: overview tile covered it and the Z range is a fallback, not a measurement.
+    #: How many overview tiles with a recorded Z depth this tile overlaps.
+    #: 0 means its Z range is a fallback, not a measurement.
     source_tiles: int = 0
+    #: How many overview tiles this tile overlaps at all, Z recorded or not.
+    #: 0 means it covers none of the selected region.
+    covers_tiles: int = 0
 
     @property
     def z_from_overview(self) -> bool:
@@ -128,6 +131,54 @@ def _tile_z(tile) -> Optional[Tuple[float, float]]:
     if hi < lo:
         lo, hi = hi, lo
     return (lo, hi) if hi > lo else None
+
+
+#: Overlap below this is float noise, not a shared field. Tile positions are
+#: reached by repeated subtraction of the step, so two footprints that meet
+#: exactly land a few ulp either side of touching — and a strict inequality
+#: then calls half of them overlapping. 1 nm is far above that accumulation and
+#: far below any overlap worth collecting a tile for.
+_TOUCHING_TOLERANCE_MM = 1e-6
+
+
+def _footprints_overlap(
+    x_mm: float,
+    y_mm: float,
+    ox_mm: float,
+    oy_mm: float,
+    half_x: float,
+    half_y: float,
+) -> bool:
+    """Do two tile footprints share area, rather than merely touch?"""
+    return (
+        half_x - abs(ox_mm - x_mm) > _TOUCHING_TOLERANCE_MM
+        and half_y - abs(oy_mm - y_mm) > _TOUCHING_TOLERANCE_MM
+    )
+
+
+def overlapping_overview_tiles(
+    x_mm: float,
+    y_mm: float,
+    acq_fov_x_mm: float,
+    acq_fov_y_mm: float,
+    overview_tiles: Sequence,
+    overview_fov_x_mm: float,
+    overview_fov_y_mm: float,
+) -> int:
+    """How many overview tile footprints this acquisition tile overlaps.
+
+    Purely geometric, and deliberately separate from :func:`inherit_z_range`:
+    an overview tile with no recorded Z still *covers* ground. Coverage decides
+    whether a tile is worth collecting; the Z range decides how deep.
+    """
+    half_x = (float(acq_fov_x_mm) + float(overview_fov_x_mm)) / 2.0
+    half_y = (float(acq_fov_y_mm) + float(overview_fov_y_mm)) / 2.0
+    n = 0
+    for tile in overview_tiles:
+        ox, oy = _tile_xy(tile)
+        if _footprints_overlap(x_mm, y_mm, ox, oy, half_x, half_y):
+            n += 1
+    return n
 
 
 def inherit_z_range(
@@ -160,7 +211,7 @@ def inherit_z_range(
         if span is None:
             continue
         ox, oy = _tile_xy(tile)
-        if abs(ox - x_mm) >= half_x or abs(oy - y_mm) >= half_y:
+        if not _footprints_overlap(x_mm, y_mm, ox, oy, half_x, half_y):
             continue
         n += 1
         lo = span[0] if lo is None else min(lo, span[0])
@@ -186,7 +237,22 @@ class AcquisitionPlan:
 
     @property
     def acquisition_tiles(self) -> int:
+        """Tiles that will actually be collected.
+
+        Not ``geometry.total_tiles``: with ``drop_uncovered`` the grid's own
+        rectangle is only a starting point, and the tiles falling outside the
+        selection are removed from it.
+        """
+        return len(self.tiles)
+
+    @property
+    def grid_tiles(self) -> int:
+        """Tiles in the full rectangle before any were dropped."""
         return self.geometry.total_tiles
+
+    @property
+    def dropped_tiles(self) -> int:
+        return self.grid_tiles - len(self.tiles)
 
     @property
     def tiles_without_overview_z(self) -> List[PlannedTile]:
@@ -199,12 +265,18 @@ class AcquisitionPlan:
 
     def describe(self) -> str:
         g = self.geometry
+        dropped = (
+            f" less {self.dropped_tiles} outside the selection"
+            if self.dropped_tiles
+            else ""
+        )
         return (
             f"{self.overview_tiles} overview tile(s) at "
             f"{self.overview_fov_x_mm:.4f}x{self.overview_fov_y_mm:.4f} mm cover "
             f"X {self.region_x_mm[0]:.3f}..{self.region_x_mm[1]:.3f}, "
             f"Y {self.region_y_mm[0]:.3f}..{self.region_y_mm[1]:.3f} mm -> "
-            f"{g.tiles_x}x{g.tiles_y} = {g.total_tiles} acquisition tile(s) at "
+            f"{g.tiles_x}x{g.tiles_y} = {self.acquisition_tiles} acquisition "
+            f"tile(s){dropped} at "
             f"{g.fov_x_mm:.4f}x{g.fov_y_mm:.4f} mm, "
             f"{g.x_overlap_percent:.1f}/{g.y_overlap_percent:.1f}% overlap "
             f"(step {g.step_x_mm:.4f}/{g.step_y_mm:.4f} mm)"
@@ -238,6 +310,7 @@ def plan_acquisition_from_overview(
     z_min_mm: float = 0.0,
     z_max_mm: float = 0.0,
     stage_limits: Optional[dict] = None,
+    drop_uncovered: bool = False,
 ) -> AcquisitionPlan:
     """Tile the region an overview selection covers, using the ACQUISITION field.
 
@@ -257,6 +330,15 @@ def plan_acquisition_from_overview(
     ``stage_limits`` is the ``{"x": {"min":…, "max":…}, "y": {…}}`` shape used
     by ``{name}_settings.json``; out-of-range tiles come back in
     ``geometry.violations`` rather than being silently dropped.
+
+    ``drop_uncovered`` removes tiles that overlap no overview tile at all. A
+    selection is rarely a rectangle — a sample in a tube, or an L-shaped one,
+    gets picked out tile by tile — but the grid generated over its bounding
+    region always is. Without this, re-tiling would silently collect the holes
+    the user deliberately left out, at full acquisition cost and with no
+    measured depth to collect them at. Tiles that overlap the selection even
+    partially are kept: covering the selected region needs every tile that
+    intersects it.
     """
     xy = [_tile_xy(t) for t in overview_centres]
     xs = [x for x, _y in xy]
@@ -309,6 +391,17 @@ def plan_acquisition_from_overview(
     fallback = (float(z_min_mm), float(z_max_mm))
     planned = []
     for x, y in geometry.positions:
+        covers = overlapping_overview_tiles(
+            x,
+            y,
+            geometry.fov_x_mm,
+            geometry.fov_y_mm,
+            overview_centres,
+            overview_fov_x_mm,
+            overview_fov_y_mm,
+        )
+        if drop_uncovered and covers == 0:
+            continue
         lo, hi, n = inherit_z_range(
             x,
             y,
@@ -321,7 +414,14 @@ def plan_acquisition_from_overview(
         if lo is None:
             lo, hi = fallback
         planned.append(
-            PlannedTile(x_mm=x, y_mm=y, z_min_mm=lo, z_max_mm=hi, source_tiles=n)
+            PlannedTile(
+                x_mm=x,
+                y_mm=y,
+                z_min_mm=lo,
+                z_max_mm=hi,
+                source_tiles=n,
+                covers_tiles=covers,
+            )
         )
 
     return AcquisitionPlan(

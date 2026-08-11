@@ -178,8 +178,14 @@ class TestPerTileZSurvivesARegeneratedGrid:
         # The union, not one of them and not an average: cutting the stack short
         # where two depths disagree loses data exactly where the sample changes,
         # and it cannot be recovered without re-running the sample.
+        #
+        # 50% overlap so a tile genuinely lands between the two overview
+        # centres. At 0% the acquisition tiles reproduce the overview grid
+        # exactly and nothing straddles anything -- an earlier version of this
+        # test only "found" straddlers because footprints meeting edge to edge
+        # counted as overlapping through float noise.
         result = plan(
-            self._tiles(), acq_x=OVERVIEW_FOV, acq_y=OVERVIEW_FOV, overlap=0.0
+            self._tiles(), acq_x=OVERVIEW_FOV, acq_y=OVERVIEW_FOV, overlap=50.0
         )
         straddlers = [t for t in result.tiles if t.source_tiles >= 2]
         assert straddlers, "expected at least one tile covering both overview tiles"
@@ -228,3 +234,127 @@ class TestPerTileZSurvivesARegeneratedGrid:
         assert result.tiles[0].z_min_mm == pytest.approx(3.0)
         assert result.tiles[0].z_max_mm == pytest.approx(9.0)
         assert result.tiles_without_overview_z == result.tiles
+
+
+class TestASparseSelectionStaysSparse:
+    """A grid over the bounding region is a rectangle; a selection rarely is.
+
+    Samples in tubes, L-shaped samples, anything the user picked out tile by
+    tile — the bounding rectangle of that selection contains ground they
+    deliberately left out. Filling it in collects the holes at full acquisition
+    cost, and at a depth nothing measured.
+    """
+
+    def _l_shape(self):
+        # Six of the nine tiles in a 3x3 block: the top-right corner removed.
+        pitch = OVERVIEW_FOV
+        keep = [(0, 0), (1, 0), (2, 0), (0, 1), (0, 2), (1, 1)]
+        return [
+            _OverviewTile(4.0 + i * pitch, 12.0 + j * pitch, 14.0, 18.0)
+            for i, j in keep
+        ]
+
+    def _plan(self, drop):
+        return plan_acquisition_from_overview(
+            self._l_shape(),
+            overview_fov_x_mm=OVERVIEW_FOV,
+            overview_fov_y_mm=OVERVIEW_FOV,
+            acquisition_fov_x_mm=OVERVIEW_FOV,
+            acquisition_fov_y_mm=OVERVIEW_FOV,
+            overlap_percent=0.0,
+            drop_uncovered=drop,
+        )
+
+    def test_tiles_over_the_hole_are_dropped(self):
+        assert self._plan(True).acquisition_tiles < self._plan(False).acquisition_tiles
+
+    def test_the_kept_tiles_all_cover_something_selected(self):
+        assert all(t.covers_tiles > 0 for t in self._plan(True).tiles)
+
+    def test_dropping_is_off_by_default(self):
+        # The rectangle is what the geometry produces; discarding part of it is
+        # a decision the caller makes, not a default.
+        result = plan_acquisition_from_overview(
+            self._l_shape(),
+            overview_fov_x_mm=OVERVIEW_FOV,
+            overview_fov_y_mm=OVERVIEW_FOV,
+            acquisition_fov_x_mm=OVERVIEW_FOV,
+            acquisition_fov_y_mm=OVERVIEW_FOV,
+            overlap_percent=0.0,
+        )
+        assert result.acquisition_tiles == result.grid_tiles
+
+    def test_the_count_reported_is_the_count_collected(self):
+        plan = self._plan(True)
+        assert plan.acquisition_tiles == len(plan.tiles)
+        assert plan.dropped_tiles == plan.grid_tiles - len(plan.tiles)
+
+    def test_a_full_rectangle_loses_nothing(self):
+        result = plan(_grid(3, 3))  # module-level helper: no drop requested
+        assert result.dropped_tiles == 0
+
+    def test_a_partially_overlapping_tile_is_kept(self):
+        # Covering the selected region needs every tile that touches it, not
+        # only the ones squarely inside.
+        tiles = [_OverviewTile(4.0, 12.0, 14.0, 18.0)]
+        result = plan_acquisition_from_overview(
+            tiles,
+            overview_fov_x_mm=OVERVIEW_FOV,
+            overview_fov_y_mm=OVERVIEW_FOV,
+            acquisition_fov_x_mm=OVERVIEW_FOV / 3,
+            acquisition_fov_y_mm=OVERVIEW_FOV / 3,
+            overlap_percent=0.0,
+            drop_uncovered=True,
+        )
+        assert result.acquisition_tiles >= 3
+        assert all(t.z_from_overview for t in result.tiles)
+
+    def test_coverage_does_not_require_a_recorded_depth(self):
+        # Plain centres carry no Z. They still cover ground, so dropping by
+        # coverage must not mistake "no depth" for "no sample" and delete the
+        # entire grid.
+        result = plan_acquisition_from_overview(
+            [(4.0, 12.0), (4.0 + OVERVIEW_FOV, 12.0)],
+            overview_fov_x_mm=OVERVIEW_FOV,
+            overview_fov_y_mm=OVERVIEW_FOV,
+            acquisition_fov_x_mm=OVERVIEW_FOV,
+            acquisition_fov_y_mm=OVERVIEW_FOV,
+            overlap_percent=0.0,
+            z_min_mm=3.0,
+            z_max_mm=9.0,
+            drop_uncovered=True,
+        )
+        assert result.acquisition_tiles >= 2
+        assert all(t.covers_tiles > 0 for t in result.tiles)
+        assert result.tiles_without_overview_z == result.tiles
+
+
+class TestFootprintsThatMerelyTouch:
+    """Edge-to-edge is not overlap, and float noise must not decide which.
+
+    Tile positions are reached by repeated subtraction of the step, so two
+    footprints that meet exactly land a few ulp either side of touching. With a
+    strict inequality roughly half of them read as overlapping -- which made a
+    tile inherit a depth from a neighbour it shares no ground with, and kept
+    tiles that cover nothing.
+    """
+
+    def test_a_tile_exactly_one_field_away_does_not_count(self):
+        from py2flamingo.utils.tile_geometry import overlapping_overview_tiles
+
+        n = overlapping_overview_tiles(0.0, 0.0, 2.0, 2.0, [(2.0, 0.0)], 2.0, 2.0)
+        assert n == 0
+
+    def test_a_tile_a_hair_inside_still_counts(self):
+        from py2flamingo.utils.tile_geometry import overlapping_overview_tiles
+
+        n = overlapping_overview_tiles(0.0, 0.0, 2.0, 2.0, [(1.999, 0.0)], 2.0, 2.0)
+        assert n == 1
+
+    def test_a_touching_neighbour_lends_no_depth(self):
+        from py2flamingo.utils.tile_geometry import inherit_z_range
+
+        lo, hi, n = inherit_z_range(
+            0.0, 0.0, 2.0, 2.0, [_OverviewTile(2.0, 0.0, 5.0, 9.0)], 2.0, 2.0
+        )
+        assert (lo, hi, n) == (None, None, 0)
