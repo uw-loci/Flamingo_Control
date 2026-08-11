@@ -4,17 +4,15 @@ Enhanced Movement Controller for Flamingo Microscope Stage Control.
 This controller provides complete stage movement functionality with:
 - Absolute and relative movement commands
 - Position monitoring and verification
-- N7 reference position management
+- Reference (recovery) position management, per microscope
 - Real-time position updates with Qt signals
 - Motion completion callbacks
 """
 
-import json
 import logging
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Dict, Optional
 
 from PyQt5.QtCore import QObject, pyqtSignal
@@ -52,29 +50,32 @@ class MovementController(QObject):
     position_verified = pyqtSignal(bool, str)  # success, message
     error_occurred = pyqtSignal(str)  # error message
 
-    def __init__(self, connection_service: ConnectionService, position_controller):
+    def __init__(
+        self,
+        connection_service: ConnectionService,
+        position_controller,
+        config_service=None,
+    ):
         """
         Initialize movement controller.
 
         Args:
             connection_service: Connection service for microscope communication
             position_controller: Existing PositionController instance
+            config_service: ConfigurationService, for the per-microscope
+                settings that hold the reference position. Optional so existing
+                two-argument callers keep working; without it the reference
+                position is simply unavailable rather than wrong.
         """
         super().__init__()
 
         self.connection = connection_service
         self.position_controller = position_controller
+        self.config_service = config_service
         self.logger = logging.getLogger(__name__)
 
         # Stage service for hardware position queries
         self.stage_service = StageService(connection_service)
-
-        # N7 reference position
-        self.n7_reference_file = (
-            Path("microscope_settings") / "n7_reference_position.json"
-        )
-        self.n7_reference: Optional[Position] = None
-        self._load_n7_reference()
 
         # Position verification tolerance
         self.tolerance = PositionTolerance()
@@ -101,75 +102,70 @@ class MovementController(QObject):
         self.logger.info("MovementController initialized")
 
     # ============================================================================
-    # N7 Reference Position Management
+    # Reference position — the recovery anchor
     # ============================================================================
+    #
+    # Where the stage is sent when something goes wrong: high and central, clear
+    # of the sample holder tip. Stored per microscope in {name}_settings.json,
+    # beside the stage limits that bound it, and set during microscope setup.
+    #
+    # This used to be `n7_reference_position.json` with a filename hardcoded in
+    # this file, so a second instrument would silently have read N7's position.
+    # The value is also deliberately NOT defaulted: see
+    # MicroscopeSettingsService.get_reference_position for why inventing one is
+    # unsafe.
 
-    def _load_n7_reference(self) -> None:
-        """Load N7 reference position from JSON file."""
-        try:
-            if self.n7_reference_file.exists():
-                with open(self.n7_reference_file, "r") as f:
-                    data = json.load(f)
-                    pos = data["position"]
-                    self.n7_reference = Position(
-                        x=pos["x_mm"], y=pos["y_mm"], z=pos["z_mm"], r=pos["r_degrees"]
-                    )
-                    self.logger.info(f"Loaded N7 reference: {self.n7_reference}")
-            else:
-                self.logger.warning(
-                    f"N7 reference file not found: {self.n7_reference_file}"
-                )
-        except Exception as e:
-            self.logger.error(f"Failed to load N7 reference: {e}")
+    def _microscope_settings(self):
+        """The per-microscope settings store, or None if unavailable."""
+        return getattr(self.config_service, "microscope_settings", None)
 
-    def save_n7_reference(self, position: Optional[Position] = None) -> bool:
+    def get_reference_position(self) -> Optional[Position]:
+        """The configured recovery position, or None if setup has not run."""
+        settings = self._microscope_settings()
+        if settings is None:
+            return None
+        raw = settings.get_reference_position()
+        if raw is None:
+            return None
+        return Position(x=raw["x"], y=raw["y"], z=raw["z"], r=raw["r"])
+
+    def go_to_reference_position(self) -> bool:
+        """Send the stage to the configured recovery position.
+
+        Returns False and does nothing when none is configured — the point of
+        this position is to be a KNOWN-safe place, and a guessed one is not.
+
+        Axis order is part of the safety, not an implementation detail. Y is the
+        vertical axis (the stage rotates about it), so Y moves FIRST to lift the
+        sample clear before anything travels laterally. Driving X/Z first would
+        sweep the sample sideways at whatever height it happens to be at, which
+        on a recovery path is exactly the height you do not trust. Rotation goes
+        last, once there is clearance.
         """
-        Save N7 reference position to JSON file.
-
-        Args:
-            position: Position to save, or None to use current position
-
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            if position is None:
-                position = self.get_position()
-                if position is None:
-                    self.logger.error("Cannot save N7 reference - no current position")
-                    return False
-
-            # Create directory if it doesn't exist
-            self.n7_reference_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Save to JSON
-            data = {
-                "microscope": "N7",
-                "description": "Reference starting position for N7 microscope",
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "position": {
-                    "x_mm": position.x,
-                    "y_mm": position.y,
-                    "z_mm": position.z,
-                    "r_degrees": position.r,
-                },
-                "notes": "This file stores the current/reference position of the N7 microscope. Update these values to match the actual microscope position when setting a new reference point.",
-            }
-
-            with open(self.n7_reference_file, "w") as f:
-                json.dump(data, f, indent=2)
-
-            self.n7_reference = position
-            self.logger.info(f"Saved N7 reference: {position}")
-            return True
-
-        except Exception as e:
-            self.logger.error(f"Failed to save N7 reference: {e}")
+        target = self.get_reference_position()
+        if target is None:
+            self.logger.error(
+                "No reference position is configured for this microscope. Run "
+                "microscope setup to record one; refusing to invent a target."
+            )
             return False
 
-    def get_n7_reference(self) -> Optional[Position]:
-        """Get N7 reference position."""
-        return self.n7_reference
+        self.logger.info(f"Moving to reference position: {target}")
+        ok = True
+        for axis, value in (
+            ("y", target.y),  # lift clear first
+            ("x", target.x),
+            ("z", target.z),
+            ("r", target.r),
+        ):
+            if not self.move_absolute(axis, value):
+                # Keep going: a recovery move that stops halfway can leave the
+                # stage worse placed than when it started. Report at the end.
+                self.logger.error(
+                    f"Reference move: {axis.upper()} to {value:.3f} failed"
+                )
+                ok = False
+        return ok
 
     # ============================================================================
     # Movement Commands

@@ -364,6 +364,26 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self._on_settings)
         edit_menu.addAction(settings_action)
 
+        edit_menu.addSeparator()
+
+        # Always enabled: the dialog handles a disconnected scope by letting you
+        # finish and record the hardware-dependent parts later. Gating it on a
+        # connection would hide the one screen that explains why an unconfigured
+        # microscope is running on placeholder stage limits.
+        self.microscope_setup_action = QAction("&Microscope Setup...", self)
+        self.microscope_setup_action.setStatusTip(
+            "Set stage limits and the safe reference position for this microscope"
+        )
+        self.microscope_setup_action.triggered.connect(self._on_microscope_setup)
+        edit_menu.addAction(self.microscope_setup_action)
+
+        self.go_to_reference_action = QAction("Go to &Reference Position", self)
+        self.go_to_reference_action.setStatusTip(
+            "Send the stage to the configured safe recovery position"
+        )
+        self.go_to_reference_action.triggered.connect(self._on_go_to_reference)
+        edit_menu.addAction(self.go_to_reference_action)
+
         # View menu
         view_menu = menubar.addMenu("&View")
 
@@ -628,6 +648,69 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
+    def _on_microscope_setup(self):
+        """Open first-run setup for whichever microscope is connected."""
+        from py2flamingo.views.dialogs.microscope_setup_dialog import (
+            MicroscopeSetupDialog,
+        )
+
+        dialog = MicroscopeSetupDialog(app=self.app, parent=self)
+        if dialog.exec_() == dialog.Accepted:
+            QMessageBox.information(
+                self,
+                "Microscope Setup",
+                f"Settings saved for '{dialog.data.microscope_name}'.",
+            )
+
+    def _on_go_to_reference(self):
+        """Send the stage to the configured recovery position.
+
+        Confirms first: this is a real multi-axis move, and the operator is
+        usually reaching for it precisely when the stage is somewhere unexpected.
+        """
+        mc = getattr(self.app, "movement_controller", None) if self.app else None
+        if mc is None:
+            QMessageBox.warning(
+                self,
+                "Not available",
+                "No movement controller — connect to a microscope first.",
+            )
+            return
+
+        target = mc.get_reference_position()
+        if target is None:
+            QMessageBox.warning(
+                self,
+                "No reference position",
+                "No safe reference position has been recorded for this "
+                "microscope.\n\nSet one from Edit ▸ Microscope Setup. Nothing "
+                "will be guessed — an invented 'safe' position is how a stage "
+                "gets driven into the sample.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Go to reference position",
+            f"Move the stage to the recovery position?\n\n"
+            f"X={target.x:.3f}  Y={target.y:.3f}  Z={target.z:.3f}  "
+            f"R={target.r:.1f}°\n\n"
+            f"Y (vertical) moves first so the sample lifts clear before "
+            f"anything travels sideways.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        if not mc.go_to_reference_position():
+            QMessageBox.warning(
+                self,
+                "Move incomplete",
+                "At least one axis did not reach the reference position. "
+                "Check the log for which one.",
+            )
+
     def _on_settings(self):
         """Open the application settings dialog."""
         try:
@@ -650,8 +733,13 @@ class MainWindow(QMainWindow):
             elif (
                 not hasattr(self, "_settings_service") or self._settings_service is None
             ):
-                # Try to get microscope name from connection view
-                microscope_name = "n7"  # Default
+                # The microscope name comes from the connected scope, via
+                # ScopeSettings.txt. It used to default to a hardcoded "n7",
+                # which on any other instrument silently loaded N7's stage
+                # limits. "default" is what ConfigurationService.get_microscope_name
+                # already falls back to, and it resolves to a settings file that
+                # does not exist — so the miss is visible instead of wrong.
+                microscope_name = "default"
                 if hasattr(self.connection_view, "get_current_microscope_name"):
                     name = self.connection_view.get_current_microscope_name()
                     if name:

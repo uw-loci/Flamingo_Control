@@ -177,7 +177,12 @@ def create_controllers_layer(
         connection_service, config_service=config_service
     )
 
-    movement_controller = MovementController(connection_service, position_controller)
+    # config_service carries the per-microscope settings that hold the reference
+    # (recovery) position, so MovementController can read/write it for whichever
+    # instrument is actually connected.
+    movement_controller = MovementController(
+        connection_service, position_controller, config_service=config_service
+    )
 
     # Laser/LED service and controller
     laser_led_service = LaserLEDService(connection_service, config_service)

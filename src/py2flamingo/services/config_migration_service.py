@@ -332,13 +332,21 @@ class ConfigMigrationService:
         # Look for microscope-specific JSON
         json_path = self.microscope_settings_dir / f"{microscope_name}_settings.json"
         if not json_path.exists():
-            # Try common names
-            for name in ["n7", "zion", "localhost"]:
-                test_path = self.microscope_settings_dir / f"{name}_settings.json"
-                if test_path.exists():
-                    json_path = test_path
-                    microscope_name = name
-                    break
+            # Fall back to whatever per-microscope settings files are actually
+            # on disk, rather than a hardcoded ["n7", "zion", "localhost"] that
+            # went stale the moment an instrument was renamed or retired — and
+            # that silently preferred n7 over the scope in front of you.
+            candidates = sorted(self.microscope_settings_dir.glob("*_settings.json"))
+            if candidates:
+                json_path = candidates[0]
+                microscope_name = json_path.name[: -len("_settings.json")]
+                if len(candidates) > 1:
+                    self.logger.warning(
+                        f"Several per-microscope settings files exist "
+                        f"({', '.join(p.name for p in candidates)}); migrating "
+                        f"'{microscope_name}'. Name the microscope explicitly to "
+                        f"choose a different one."
+                    )
 
         if json_path.exists():
             with open(json_path) as f:

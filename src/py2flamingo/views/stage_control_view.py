@@ -7,7 +7,6 @@ This view provides stage control including:
 - Relative movement controls (±0.1, ±1.0, ±10.0 mm)
 - Home buttons for each axis
 - Emergency stop button
-- N7 reference position management
 - Position verification status display
 - Map visualization with current/target position
 """

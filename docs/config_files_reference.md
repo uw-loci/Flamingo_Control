@@ -65,12 +65,11 @@ file.** `drive_mappings.json` likewise holds a dict of mappings.
 | File | Purpose | Mult. | In git | Missing ⇒ |
 |---|---|---|---|---|
 | `ScopeSettings.txt` | Downloaded from the scope. Type, **Microscope name**, stage limits, home | 1 (overwritten per connection) | yes | Name falls back to `"default"`, so `default_settings.json` is sought and stage limits are unknown |
-| `{name}_settings.json` | Stage soft limits, position-history sizing. `n7_settings.json` | **N** | yes | `MicroscopeSettingsService` reports NOT FOUND; stage limits unavailable |
+| `{name}_settings.json` | Stage soft limits, position-history sizing, **`reference_position`** (the recovery anchor). `n7_settings.json` | **N** | yes | Placeholder limits 0-26 mm are used — a guess, possibly WIDER than the instrument. Run Edit ▸ Microscope Setup |
 | `{name}_start_position.txt` | Per-scope start position | **N** | yes | `check_start_position()` creates `default_start_position.txt` |
 | `pixel_calibration.json` | XY Pixel Calibrator result (µm/px + the optics it was measured at) | 1 ⚠ | yes | Falls back to ScopeSettings/YAML optics |
 | `optics_guard.json` | Remembers optics config to detect a changed objective | 1 ⚠ | yes | No mismatch warning |
 | `position_presets.json` | Named stage positions | 1 ⚠ | yes | No presets |
-| `n7_reference_position.json` | Reference stage position | **1, hardcoded** ⚠⚠ | yes | Reference unavailable |
 | `led_2d_overview_settings.json` | LED overview dialog state (bbox, overlap, Z step) | 1 | yes | Dialog defaults |
 | `progress_timing_cache.json` | Learned per-phase timings for ETA | 1 | yes | ETA re-learns. Harmless |
 | `stitching_timing_cache.json` | Same, for stitching | 1 | no | Harmless |
@@ -132,7 +131,6 @@ values:
 
 | File | Why it is a problem |
 |---|---|
-| `n7_reference_position.json` | ⚠⚠ The **filename is hardcoded** in `movement_controller.py:74`, not built from the microscope name. A second scope reads N7's reference position |
 | `pixel_calibration.json` | µm/px is an optics property. A calibration measured on one scope would be applied to another. Partly mitigated: it records the optics it was measured at and is *ignored* when they no longer match |
 | `position_presets.json` | Stage coordinates are instrument-specific; presets from one scope may be unreachable or wrong on another |
 | `optics_guard.json` | Tracks one optics configuration |

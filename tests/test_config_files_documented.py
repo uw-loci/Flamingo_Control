@@ -52,12 +52,18 @@ class TestTheDocumentedMultiScopeGapsAreStillGaps:
     bug that was already fixed, or worse, stops them fixing it.
     """
 
-    def test_n7_reference_position_is_still_hardcoded(self):
+    def test_the_reference_position_is_no_longer_hardcoded(self):
+        """Fixed 2026-08-11: it moved into {name}_settings.json.
+
+        This assertion was inverted when the gap was closed, which is exactly
+        what the old version asked for. A stale "known limitation" sends the
+        next person hunting a bug that no longer exists.
+        """
         body = _src("controllers/movement_controller.py")
-        assert '"n7_reference_position.json"' in body, (
-            "n7_reference_position.json looks name-derived now — good. Update "
-            "the ⚠⚠ row in docs/config_files_reference.md"
+        code = "\n".join(
+            line for line in body.splitlines() if not line.strip().startswith("#")
         )
+        assert "n7_reference_position.json" not in code
 
     @pytest.mark.parametrize(
         "rel,name",

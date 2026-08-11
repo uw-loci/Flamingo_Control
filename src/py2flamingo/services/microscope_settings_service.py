@@ -54,6 +54,10 @@ class MicroscopeSettingsService:
             f"[MicroscopeSettingsService] Settings file exists: {self.settings_file.exists()}"
         )
 
+        # False when the settings file was absent and placeholders are standing
+        # in. Anything that drives hardware, and the setup dialog, both key off
+        # this rather than re-testing the file path.
+        self.is_configured: bool = self.settings_file.exists()
         self.settings = self._load_settings()
 
     def _load_settings(self) -> Dict[str, Any]:
@@ -121,14 +125,24 @@ class MicroscopeSettingsService:
             return self._get_default_settings()
 
     def _get_default_settings(self) -> Dict[str, Any]:
-        """Get default settings if file doesn't exist.
+        """Placeholder settings for a microscope that has never been set up.
 
-        Returns:
-            Dict with safe default values
+        These limits are NOT safe, despite the old docstring saying so. They are
+        a guess made in code, and on N7 the guess is WIDER than the instrument:
+        0-26 mm on X against a real envelope of 1.0-12.31. A permissive
+        fabricated limit is worse than none, because it silently authorises
+        moves the stage cannot make.
+
+        Kept only so the app can start and reach the setup dialog. ``is_configured``
+        is False here, and callers that drive hardware should refuse or warn
+        rather than trust these numbers.
         """
-        self.logger.warning(
-            f"[MicroscopeSettingsService] Using DEFAULT settings for '{self.microscope_name}' "
-            f"(stage limits will be 0-26 for all axes). Expected file: {self.settings_file}"
+        self.logger.error(
+            f"[MicroscopeSettingsService] No settings file for microscope "
+            f"'{self.microscope_name}' ({self.settings_file}). Falling back to "
+            f"PLACEHOLDER stage limits (0-26 mm), which are a guess and may be "
+            f"WIDER than the instrument allows. Run microscope setup before "
+            f"moving the stage."
         )
         return {
             "microscope_name": self.microscope_name,
@@ -189,6 +203,65 @@ class MicroscopeSettingsService:
             Number of visible positions in list
         """
         return self.settings.get("position_history", {}).get("display_count", 20)
+
+    # ------------------------------------------------------------------
+    # Reference position — the recovery anchor
+    # ------------------------------------------------------------------
+
+    REFERENCE_POSITION_KEY = "reference_position"
+
+    def get_reference_position(self) -> Optional[Dict[str, float]]:
+        """The safe recovery position for THIS microscope, or None if unset.
+
+        Where the stage is sent when something goes wrong: high and central,
+        clear of the sample holder tip. Set during microscope setup.
+
+        Returns None — never a fabricated position — when nothing has been
+        configured. There is no safe default: (0, 0, 0) is a real coordinate
+        that on N7 sits outside the stage's own soft limits (x starts at 1.0),
+        and inventing a "safe" place to drive the stage is how you drive it
+        into the sample. Callers must handle None by asking the user to run
+        setup, not by guessing.
+
+        Deliberately not position_presets.json (a user-editable list that can be
+        emptied) and not the scope's Home (writable by the vendor control
+        software without our knowledge). This lives in the per-microscope
+        settings file, beside the stage limits that bound it.
+        """
+        raw = self.get_setting(self.REFERENCE_POSITION_KEY)
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return {
+                "x": float(raw["x_mm"]),
+                "y": float(raw["y_mm"]),
+                "z": float(raw["z_mm"]),
+                "r": float(raw.get("r_degrees", 0.0)),
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            self.logger.warning(
+                f"{self.settings_file.name} has a malformed "
+                f"{self.REFERENCE_POSITION_KEY} ({exc}); treating it as unset "
+                f"rather than guessing. Re-run microscope setup."
+            )
+            return None
+
+    def set_reference_position(
+        self, x: float, y: float, z: float, r: float = 0.0, note: str = ""
+    ) -> None:
+        """Record the recovery position. Caller must still ``save_settings()``."""
+        self.update_setting(
+            self.REFERENCE_POSITION_KEY,
+            {
+                "x_mm": float(x),
+                "y_mm": float(y),
+                "z_mm": float(z),
+                "r_degrees": float(r),
+                "note": note
+                or "Safe recovery position: high and central, clear of the "
+                "sample holder tip.",
+            },
+        )
 
     def save_settings(self) -> None:
         """Save current settings back to JSON file.
