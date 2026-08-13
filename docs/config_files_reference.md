@@ -105,6 +105,8 @@ disuse here.
 
 - `~/.flamingo/pipelines/*.json` — saved pipelines. Shared.
 - `Workflow.txt` — generated per acquisition and sent to the scope. Not config.
+- `AcquisitionManifest.txt` — written by us into the acquisition's date folder when a tile collection finishes. A RECORD of what was collected and every setting used, not an input: nothing reads it back. See
+  `claude-reports/design/acquisition_folder_format.md`.
 
 ---
 
