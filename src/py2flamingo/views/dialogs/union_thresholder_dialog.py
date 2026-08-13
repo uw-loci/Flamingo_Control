@@ -748,6 +748,11 @@ class UnionThresholderDialog(PersistentDialog):
                 right_rotation=right_angle if right_angle is not None else 0.0,
                 app=self._app,
                 parent=None,
+                targeting_source=_targeting(
+                    "Union Thresholder",
+                    getattr(self, "_source_path", None),
+                    "tiles derived from a thresholded volume",
+                ),
             )
             dialog.show()
 
@@ -1034,3 +1039,15 @@ class UnionThresholderDialog(PersistentDialog):
 
         if cs:
             cs.set_thresholder_preset_path(os.path.dirname(path))
+
+
+def _targeting(kind, path, detail=""):
+    """Best-effort TargetingSource; never breaks opening the dialog."""
+    try:
+        from py2flamingo.utils.acquisition_manifest import TargetingSource
+
+        return TargetingSource(
+            kind=kind, path=str(path) if path else None, detail=detail
+        )
+    except Exception:
+        return None

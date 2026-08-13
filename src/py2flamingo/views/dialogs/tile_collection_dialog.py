@@ -168,6 +168,7 @@ class TileCollectionDialog(PersistentDialog):
         app=None,
         parent=None,
         local_base_folder: str = None,
+        targeting_source=None,
     ):
         """Initialize the dialog.
 
@@ -181,6 +182,10 @@ class TileCollectionDialog(PersistentDialog):
             parent: Parent widget
             local_base_folder: Local drive root path for auto-configuring
                 post-processing (e.g. from MIP Overview)
+            targeting_source: TargetingSource naming the overview/session these
+                tiles were picked off. Recorded in the acquisition manifest,
+                because which image the grid was aimed from is unrecoverable
+                from the acquisition folder afterwards.
         """
         super().__init__(parent)
 
@@ -191,6 +196,7 @@ class TileCollectionDialog(PersistentDialog):
         self._config = config
         self._app = app
         self._local_base_folder_hint = local_base_folder
+        self._targeting_source = targeting_source
         self._workflow_type = (
             WorkflowType.ZSTACK
         )  # Default to Z-Stack (user preference)
@@ -1465,6 +1471,7 @@ class TileCollectionDialog(PersistentDialog):
         # Get local path directly from save settings (configured via Browse button)
         self._local_path = save_settings.get("local_path")
         self._local_access_enabled = save_settings.get("local_access_enabled", False)
+        self._acquisition_started_at = datetime.now()
         # Logged at run START so a run that ends up flat can be diagnosed from
         # the log alone, without re-deriving which of the skip conditions hit.
         _preflight = self._reorganization_preflight(save_settings)
@@ -1827,6 +1834,198 @@ class TileCollectionDialog(PersistentDialog):
 
         logger.info(f"Folder reorganization: {result.summary()}")
         return result
+
+    def _write_acquisition_manifest(self, reorg) -> None:
+        """Record what was collected, in the folder the data landed in.
+
+        An acquisition folder otherwise arrives with nothing describing how it
+        was made: the server's per-tile Workflow.txt covers one tile's sweep,
+        and the settings that produced the SET — requested overlap, the pixel
+        size the grid was computed from, which overview it was aimed off — are
+        nowhere. A 97-tile run stepped a full field apart, giving 0.25% overlap
+        against 20% requested, and nothing on disk could say where that went
+        wrong.
+
+        Best-effort throughout. This runs from a Qt slot after the data is
+        already safely on disk; a manifest that failed to assemble must never
+        look like an acquisition that failed.
+        """
+        try:
+            from py2flamingo.utils.acquisition_manifest import (
+                AcquisitionManifest,
+                TargetingSource,
+                TileRecord,
+                overlap_check,
+                write_manifest,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"Acquisition manifest unavailable: {exc}")
+            return
+
+        try:
+            local_path = getattr(self, "_local_path", None)
+            base = getattr(self, "_base_save_directory", "") or ""
+            mapping = getattr(self, "_tile_folder_mapping", {}) or {}
+            date_folder = next(iter(mapping.values()))[0] if mapping else ""
+            # The reorganised root is the parent of the X..._Y... folders. If
+            # reorganization did not run, the tiles are still flat on the
+            # server and there is no single folder to describe — say so in the
+            # log rather than dropping the manifest somewhere misleading.
+            if not (local_path and base and date_folder) or getattr(
+                reorg, "skip_reason", None
+            ):
+                logger.info(
+                    "Acquisition manifest skipped: no local acquisition folder "
+                    f"({getattr(reorg, 'skip_reason', None) or 'local access off'})"
+                )
+                return
+            root = Path(local_path) / base / date_folder
+
+            manifest = AcquisitionManifest(
+                acquisition_dir=str(root),
+                save_drive=getattr(self, "_save_drive", "") or "",
+                save_directory=base,
+                targeting=getattr(self, "_targeting_source", None) or TargetingSource(),
+                started=self._format_time(
+                    getattr(self, "_acquisition_started_at", None)
+                ),
+                finished=self._format_time(datetime.now()),
+            )
+            self._fill_manifest_identity(manifest)
+            self._fill_manifest_optics_and_camera(manifest, overlap_check)
+            self._fill_manifest_tiles(manifest, TileRecord, mapping)
+
+            if getattr(reorg, "failed", None):
+                manifest.warnings.append(
+                    f"{len(reorg.failed)} tile folder(s) failed to move into "
+                    f"the nested layout; some data may still be flat."
+                )
+            if getattr(reorg, "unmatched", None):
+                manifest.warnings.append(
+                    f"{len(reorg.unmatched)} requested tile(s) had no folder on "
+                    f"disk — those tiles were not acquired."
+                )
+            write_manifest(root, manifest, logger=logger)
+        except Exception as exc:
+            logger.warning(f"Acquisition manifest not written: {exc}", exc_info=True)
+
+    @staticmethod
+    def _format_time(value) -> str:
+        try:
+            return value.strftime("%Y-%m-%d %H:%M:%S") if value else ""
+        except Exception:
+            return ""
+
+    def _fill_manifest_identity(self, manifest) -> None:
+        try:
+            from py2flamingo import __version__ as _version
+
+            manifest.software_version = _version
+        except Exception:
+            pass
+        try:
+            manifest.microscope = self._app.configuration_service.get_microscope_name()
+        except Exception:
+            pass
+
+    def _fill_manifest_optics_and_camera(self, manifest, overlap_check) -> None:
+        """Optics, camera, Z and tiling — including requested vs achieved overlap."""
+        fov_mm = None
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            hw = get_hardware_config()
+            fov_mm = float(hw.fov_mm)
+            manifest.optics = {
+                "Objective magnification": hw.objective_magnification,
+                "System magnification": getattr(hw, "system_magnification", None),
+                "Sensor pixel size (um)": hw.sensor_pixel_size_um,
+                "Effective pixel size (um)": hw.effective_pixel_size_um,
+                # WHERE the pixel size came from. A grid computed from one
+                # value and stitched with another is exactly how a requested
+                # overlap evaporates.
+                "Pixel size source": getattr(hw, "optics_source", "unknown"),
+                "Numerical aperture": getattr(hw, "numerical_aperture", None),
+                "Field of view X (mm)": round(fov_mm, 4),
+                "Field of view Y (mm)": round(float(hw.fov_height_mm), 4),
+            }
+        except Exception as exc:
+            manifest.notes.append(f"optics unavailable: {exc}")
+
+        try:
+            manifest.camera = dict(self._camera_panel.get_settings())
+        except Exception as exc:
+            manifest.notes.append(f"camera settings unavailable: {exc}")
+
+        try:
+            manifest.zstack = dict(self._zstack_panel.get_settings())
+        except Exception as exc:
+            manifest.notes.append(f"Z settings unavailable: {exc}")
+
+        try:
+            manifest.illumination = dict(self._illumination_panel.get_ui_state())
+        except Exception as exc:
+            manifest.notes.append(f"illumination unavailable: {exc}")
+
+        requested = None
+        try:
+            requested = float(getattr(self._config, "tile_overlap_percent", None))
+        except (TypeError, ValueError):
+            requested = None
+
+        step_mm = self._observed_tile_step_mm()
+        manifest.tiling = {
+            "Tiles requested": len(self._left_tiles or [])
+            + len(self._right_tiles or []),
+            "Left panel tiles": len(self._left_tiles or []),
+            "Right panel tiles": len(self._right_tiles or []),
+            "Left rotation (deg)": self._left_rotation,
+            "Right rotation (deg)": self._right_rotation,
+        }
+        manifest.tiling.update(overlap_check(fov_mm, step_mm, requested))
+        if "MISMATCH" in manifest.tiling:
+            manifest.warnings.append(manifest.tiling["MISMATCH"])
+
+    def _observed_tile_step_mm(self):
+        """Smallest distinct spacing between the tiles actually requested, mm.
+
+        Measured from the tile list rather than recomputed from the overlap
+        setting, so the manifest reports what was really stepped instead of
+        restating the intention.
+        """
+        try:
+            tiles = list(self._left_tiles or []) + list(self._right_tiles or [])
+            steps = []
+            for axis in ("x", "y"):
+                values = sorted({round(float(getattr(t, axis)), 4) for t in tiles})
+                gaps = [b - a for a, b in zip(values, values[1:]) if b - a > 1e-6]
+                if gaps:
+                    steps.append(min(gaps))
+            return min(steps) if steps else None
+        except Exception:
+            return None
+
+    def _fill_manifest_tiles(self, manifest, TileRecord, mapping) -> None:
+        try:
+            folders = {name: pair[1] for name, pair in mapping.items()}
+            ordered = sorted(folders.values())
+            tiles = list(self._left_tiles or []) + list(self._right_tiles or [])
+            for index, tile in enumerate(tiles):
+                folder = f"X{float(tile.x):.2f}_Y{float(tile.y):.2f}"
+                z_min, z_max = self._get_z_range_for_tile(tile)
+                manifest.tiles.append(
+                    TileRecord(
+                        index=index,
+                        folder=folder,
+                        x_mm=float(tile.x),
+                        y_mm=float(tile.y),
+                        z_min_mm=float(z_min),
+                        z_max_mm=float(z_max),
+                        note="" if folder in ordered else "no folder on disk",
+                    )
+                )
+        except Exception as exc:
+            manifest.notes.append(f"per-tile list unavailable: {exc}")
 
     def _configured_local_path(self) -> Optional[str]:
         """Local path the 3D build would read .raw files from, if any.
@@ -2288,6 +2487,7 @@ class TileCollectionDialog(PersistentDialog):
             # means a hiccup in any of that cosmetic work can no longer leave
             # the acquisition stranded in the server's flat layout.
             reorg = self._reorganize_after_collection()
+            self._write_acquisition_manifest(reorg)
 
             progress._overall_bar.setValue(100)
             progress._overall_label.setText(
@@ -2380,6 +2580,7 @@ class TileCollectionDialog(PersistentDialog):
             # them too. The glob simply finds nothing for the tiles that never
             # ran, so a partial run lands in the same layout as a full one.
             reorg = self._reorganize_after_collection()
+            self._write_acquisition_manifest(reorg)
 
             update_sample_view("Not Running", 0)
 
@@ -2597,6 +2798,7 @@ class TileCollectionDialog(PersistentDialog):
         # no equivalent, so a run that fell back to timing-based execution
         # silently left every folder flat.
         reorg = self._reorganize_after_collection()
+        self._write_acquisition_manifest(reorg)
 
         fallback_msg = (
             f"Executed {len(workflow_files)} workflows.\n\n"

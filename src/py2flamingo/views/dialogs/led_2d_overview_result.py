@@ -1416,6 +1416,12 @@ class LED2DOverviewResultWindow(PersistentWidget):
             config=self._config,
             app=self._app,
             parent=self,
+            targeting_source=_targeting(
+                "LED 2D Overview",
+                _led_session_path(self._app),
+                f"left {len(left_tiles)} / right {len(right_tiles)} tile(s), "
+                f"rotations {left_rotation:g} / {right_rotation:g} deg",
+            ),
         )
         dialog.exec_()
 
@@ -1908,3 +1914,23 @@ class LED2DOverviewResultWindow(PersistentWidget):
         window._session_folder = folder_path
         window._session_format = fmt
         return window
+
+
+def _targeting(kind, path, detail=""):
+    """Best-effort TargetingSource; never breaks opening the dialog."""
+    try:
+        from py2flamingo.utils.acquisition_manifest import TargetingSource
+
+        return TargetingSource(
+            kind=kind, path=str(path) if path else None, detail=detail
+        )
+    except Exception:
+        return None
+
+
+def _led_session_path(app):
+    """Folder of the saved LED overview session, if one was saved."""
+    try:
+        return app.config_service.get_led_2d_session_path()
+    except Exception:
+        return None

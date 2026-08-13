@@ -815,6 +815,11 @@ class WebcamOverviewResultWindow(PersistentWidget):
                 config=None,
                 app=self._app,
                 parent=self,
+                targeting_source=_targeting(
+                    "Webcam Overview",
+                    getattr(self._session, "folder_path", None),
+                    f"{len(self._session.views)} view(s)",
+                ),
             )
             dialog.exec_()
 
@@ -927,3 +932,15 @@ class WebcamOverviewResultWindow(PersistentWidget):
             return None
 
     # ========== Future TODO ==========
+
+
+def _targeting(kind, path, detail=""):
+    """Best-effort TargetingSource; never breaks opening the dialog."""
+    try:
+        from py2flamingo.utils.acquisition_manifest import TargetingSource
+
+        return TargetingSource(
+            kind=kind, path=str(path) if path else None, detail=detail
+        )
+    except Exception:
+        return None

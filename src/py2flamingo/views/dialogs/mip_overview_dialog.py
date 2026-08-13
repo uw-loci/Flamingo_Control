@@ -458,6 +458,10 @@ class MIPOverviewDialog(PersistentDialog):
             load_path = base_path / date_text
             date_folder = date_text
 
+        # Remember what is on screen: the manifest records which overview a
+        # tile grid was aimed off, and that is unrecoverable afterwards.
+        self._last_load_path = load_path
+
         # Determine layout type for this specific load path
         layout = detect_layout_type(load_path)
         if layout == "flat" or date_text.endswith(" (flat)"):
@@ -1112,6 +1116,12 @@ class MIPOverviewDialog(PersistentDialog):
             app=self._app,
             parent=self,
             local_base_folder=self._infer_local_drive_root(),
+            targeting_source=_targeting(
+                "MIP Overview",
+                getattr(self, "_last_load_path", None)
+                or self._infer_local_drive_root(),
+                f"{len(selected_tr)} tile(s) selected from the MIP grid",
+            ),
         )
 
         # Connect to completion signal to reload results
@@ -1507,3 +1517,15 @@ class MIPOverviewDialog(PersistentDialog):
 
         logger.info(f"Loaded MIP overview session from {folder}")
         return dialog
+
+
+def _targeting(kind, path, detail=""):
+    """Best-effort TargetingSource; never breaks opening the dialog."""
+    try:
+        from py2flamingo.utils.acquisition_manifest import TargetingSource
+
+        return TargetingSource(
+            kind=kind, path=str(path) if path else None, detail=detail
+        )
+    except Exception:
+        return None
