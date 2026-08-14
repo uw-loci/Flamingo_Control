@@ -202,8 +202,38 @@ class UnionThresholderDialog(PersistentDialog):
         self._buffer_spin.setValue(0.25)
         self._buffer_spin.setToolTip("Fraction of FOV to add as buffer around mask")
         row1.addWidget(self._buffer_spin)
+
+        # Tile overlap had no control here at all, so a value set anywhere else
+        # in the app could not reach this path: the generator stepped a full
+        # field of view regardless. That shipped a 97-tile acquisition at 0.25%
+        # overlap against 20% requested, which no amount of registration can
+        # rescue. Same range and default as the LED overview's control.
+        row1.addSpacing(12)
+        _overlap_label = QLabel("Tile overlap:")
+        _overlap_label.setStyleSheet("font-weight: bold;")
+        row1.addWidget(_overlap_label)
+        self._overlap_spin = QDoubleSpinBox()
+        self._overlap_spin.setRange(0.0, 50.0)
+        self._overlap_spin.setDecimals(1)
+        self._overlap_spin.setSingleStep(5.0)
+        self._overlap_spin.setSuffix(" %")
+        self._overlap_spin.setValue(10.0)
+        self._overlap_spin.setToolTip(
+            "Percent of a field of view that neighbouring tiles share.\n"
+            "Tiles step by FOV x (1 - overlap), so 0% butts them edge to edge:\n"
+            "the stitcher then has nothing to register on and any stage\n"
+            "repeatability error shows up as a seam. 10% is a sane default.\n\n"
+            "Below 5% the stitcher refuses to register at all — this is a\n"
+            "one-way door, since the acquired positions cannot be changed after."
+        )
+        self._overlap_spin.valueChanged.connect(self._update_overlap_warning)
+        row1.addWidget(self._overlap_spin)
+        self._overlap_warning = QLabel("")
+        self._overlap_warning.setStyleSheet("color: #c62828; font-weight: bold;")
+        row1.addWidget(self._overlap_warning)
         row1.addStretch()
         profile_layout.addLayout(row1)
+        self._update_overlap_warning(self._overlap_spin.value())
 
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("Angles:"))
@@ -587,6 +617,25 @@ class UnionThresholderDialog(PersistentDialog):
                     pass
         return angles if angles else [0.0]
 
+    def _update_overlap_warning(self, value: float) -> None:
+        """Say plainly when the chosen overlap makes the data unstitchable.
+
+        A one-way door: the acquired stage positions cannot be changed
+        afterwards, and the stitcher refuses to register below 5%.
+        """
+        if value < 5.0:
+            self._overlap_warning.setText("(!!) too low to register")
+            self._overlap_warning.setToolTip(
+                "Below 5% the stitcher will not attempt registration — there is "
+                "not enough shared content for phase correlation, which returns "
+                "a confident wrong shift rather than failing. Tiles will be "
+                "placed by stage position alone and every seam will show each "
+                "frame's edge falloff. This cannot be fixed after acquiring."
+            )
+        else:
+            self._overlap_warning.setText("")
+            self._overlap_warning.setToolTip("")
+
     def _make_voxel_to_stage_fn(self):
         """Create a voxel→stage coordinate conversion function.
 
@@ -674,6 +723,7 @@ class UnionThresholderDialog(PersistentDialog):
                 buffer_fraction=buffer_fraction,
                 rotation_angles=angles,
                 tip_position=tip_pos,
+                overlap_percent=self._overlap_spin.value(),
             )
         except Exception as e:
             logger.error(f"Profile generation failed: {e}", exc_info=True)
@@ -689,7 +739,11 @@ class UnionThresholderDialog(PersistentDialog):
             )
             return
 
-        logger.info(f"Generated {len(profiles)} tile profiles")
+        logger.info(
+            f"Generated {len(profiles)} tile profiles at "
+            f"{self._overlap_spin.value():.1f}% tile overlap "
+            f"(FOV {fov_mm:.4f} mm)"
+        )
 
         # Convert to TileResults and open TileCollectionDialog
         self._open_tile_collection(profiles, angles)

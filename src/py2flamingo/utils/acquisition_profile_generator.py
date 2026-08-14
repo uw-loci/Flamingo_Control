@@ -13,7 +13,33 @@ from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
+from py2flamingo.utils.tile_geometry import (
+    OVERLAP_PERCENT_MAX,
+    OVERLAP_PERCENT_MIN,
+    tile_positions_1d,
+)
+
 logger = logging.getLogger(__name__)
+
+# Matches the rest of the application (tiling panel, ScanConfiguration,
+# TileSettings). A caller that forgets to pass one gets a usable grid rather
+# than the edge-to-edge one this module used to hardcode.
+DEFAULT_OVERLAP_PERCENT = 10.0
+
+
+def tile_step_mm(fov_mm: float, overlap_percent: float) -> float:
+    """Distance between adjacent tile centres, mm. THE definition, shared.
+
+    This module used to write ``step = fov_mm`` in two places, which is a 0%
+    overlap no matter what the user asked for — tiles butt edge to edge, the
+    stitcher has nothing to register on, and every stage repeatability error
+    becomes a visible seam. A 97-tile brain acquisition shipped that way
+    (measured 0.25% against 20% requested) because the overlap never reached
+    this arithmetic: the parameter did not exist.
+    """
+    overlap = min(max(float(overlap_percent), OVERLAP_PERCENT_MIN), OVERLAP_PERCENT_MAX)
+    step = float(fov_mm) * (1.0 - overlap / 100.0)
+    return step if step > 0 else float(fov_mm)
 
 
 @dataclass
@@ -127,6 +153,7 @@ def generate_tile_profile(
     buffer_fraction: float = 0.25,
     rotation_angles: Optional[List[float]] = None,
     tip_position: Optional[Tuple[float, float]] = None,
+    overlap_percent: float = DEFAULT_OVERLAP_PERCENT,
 ) -> List[TileProfile]:
     """Generate tile acquisition profiles from a 3D mask.
 
@@ -142,6 +169,9 @@ def generate_tile_profile(
         rotation_angles: List of rotation angles in degrees (default [0])
         tip_position: (tip_x_mm, tip_z_mm) for rotation center. Required if
                       rotation_angles contains non-zero values.
+        overlap_percent: Percent of a FOV that neighbouring tiles share. Tiles
+                      step by FOV x (1 - overlap/100), so 0 butts them edge to
+                      edge and leaves the stitcher nothing to register on.
 
     Returns:
         List of TileProfile objects for all angles
@@ -201,6 +231,7 @@ def generate_tile_profile(
                 voxel_size_mm=voxel_size_mm,
                 mask_shape=(nz, ny, nx),
                 rotation_angle=angle,
+                overlap_percent=overlap_percent,
             )
             all_profiles.extend(profiles)
             continue
@@ -222,6 +253,7 @@ def generate_tile_profile(
                 voxel_size_mm=voxel_size_mm,
                 mask_shape=(nz, ny, nx),
                 rotation_angle=0.0,
+                overlap_percent=overlap_percent,
             )
             all_profiles.extend(profiles)
         else:
@@ -263,6 +295,7 @@ def generate_tile_profile(
                 mask_shape=(nz, ny, nx),
                 rotation_angle=angle,
                 tip_position=tip_position,
+                overlap_percent=overlap_percent,
             )
             all_profiles.extend(profiles)
 
@@ -330,24 +363,14 @@ def _generate_tiles_for_angle(
     voxel_size_mm: float,
     mask_shape: Tuple[int, int, int],
     rotation_angle: float,
+    overlap_percent: float = DEFAULT_OVERLAP_PERCENT,
 ) -> List[TileProfile]:
     """Generate tiles for a single (non-rotated) angle."""
-    step = fov_mm
+    step = tile_step_mm(fov_mm, overlap_percent)
     profiles = []
 
-    # Generate X positions
-    x_positions = []
-    x = x_min_mm
-    while x <= x_max_mm + step / 2:
-        x_positions.append(x)
-        x += step
-
-    # Generate Y positions
-    y_positions = []
-    y = y_min_mm
-    while y <= y_max_mm + step / 2:
-        y_positions.append(y)
-        y += step
+    x_positions = tile_positions_1d(x_min_mm, x_max_mm, step)
+    y_positions = tile_positions_1d(y_min_mm, y_max_mm, step)
 
     # Serpentine pattern: X outer loop, Y inner loop
     for x_idx, x_pos in enumerate(x_positions):
@@ -416,6 +439,7 @@ def _generate_tiles_for_rotated_angle(
     mask_shape: Tuple[int, int, int],
     rotation_angle: float,
     tip_position: Tuple[float, float],
+    overlap_percent: float = DEFAULT_OVERLAP_PERCENT,
 ) -> List[TileProfile]:
     """Generate tiles for a rotated angle.
 
@@ -423,22 +447,13 @@ def _generate_tiles_for_rotated_angle(
     Each tile's Z range is determined by inverse-rotating the tile position back
     to the mask coordinate frame and checking the mask Z extent there.
     """
-    step = fov_mm
+    step = tile_step_mm(fov_mm, overlap_percent)
     tip_x, tip_z = tip_position
     profiles = []
 
-    # Generate tile positions in rotated frame
-    x_positions = []
-    x = tile_x_min
-    while x <= tile_x_max + step / 2:
-        x_positions.append(x)
-        x += step
-
-    y_positions = []
-    y = y_min_mm
-    while y <= y_max_mm + step / 2:
-        y_positions.append(y)
-        y += step
+    # Tile positions in the rotated frame, via the shared walk.
+    x_positions = tile_positions_1d(tile_x_min, tile_x_max, step)
+    y_positions = tile_positions_1d(y_min_mm, y_max_mm, step)
 
     # For Z range check, inverse-rotate tile center back to mask frame
     inverse_angle = -rotation_angle
