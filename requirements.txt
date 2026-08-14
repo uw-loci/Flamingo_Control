@@ -59,7 +59,7 @@ dask[array]>=2024.1.0,!=2025.12.0,!=2026.1.0,!=2026.1.1,!=2026.2.0,!=2026.3.0,<2
 # standalone app was at v0.10.0, so in-app stitching was six releases behind the
 # same code it claims to share — missing, among others, the multiview-stitcher
 # version guard and the per-tile-Z-range fix.
-flamingo-stitcher @ git+https://github.com/uw-loci/flamingo-stitcher.git@v0.10.2
+flamingo-stitcher @ git+https://github.com/uw-loci/flamingo-stitcher.git@v0.11.0
 
 # Stitching pipeline — preprocessing
 # pystripe installed separately (see update_and_run.bat) to avoid resolver backtracking
