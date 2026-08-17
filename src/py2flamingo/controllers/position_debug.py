@@ -25,6 +25,13 @@ class PositionDebugHelper:
     # Command codes
     COMMAND_CODES_STAGE_POSITION_GET = 24584
 
+    # Frame markers bracketing every 128-byte command/response
+    # (see core/protocol_encoder.py). A response is only trustworthy when BOTH
+    # are right: a good start with a bad end means a truncated or misaligned
+    # frame, and the status/command fields between them are then meaningless.
+    START_MARKER = 0xF321E654
+    END_MARKER = 0xFEDC4321
+
     def __init__(self, connection_service):
         """Initialize the debug helper.
 
@@ -517,28 +524,67 @@ class PositionDebugHelper:
                 ack = self._receive_full_bytes(command_socket, 128, timeout=5.0)
                 self.logger.info("Received acknowledgment")
 
-                # Parse acknowledgment
+                # Parse acknowledgment. All four checks matter: this call
+                # OVERWRITES the microscope's own settings file, so "it replied"
+                # is not the same as "it worked". Previously only the start
+                # marker was tested, which meant a scope that answered with an
+                # error status, echoed a different command, or sent a truncated
+                # frame was all reported as success.
                 start_marker = struct.unpack("<I", ack[0:4])[0]
                 response_code = struct.unpack("<I", ack[4:8])[0]
                 status_code = struct.unpack("<I", ack[8:12])[0]
+                end_marker = struct.unpack("<I", ack[124:128])[0]
 
-                self.logger.info(
-                    f"Acknowledgment: marker=0x{start_marker:08X}, "
-                    f"code={response_code}, status={status_code}"
+                detail = (
+                    f"marker=0x{start_marker:08X}, code={response_code}, "
+                    f"status={status_code}, end=0x{end_marker:08X}"
                 )
+                self.logger.info(f"Acknowledgment: {detail}")
 
-                if start_marker == 0xF321E654:
-                    return {
-                        "success": True,
-                        "message": f"Microscope acknowledged settings save.\n"
-                        f"Status code: {status_code}\n"
-                        f"Response code: {response_code}",
-                    }
-                else:
+                if start_marker != self.START_MARKER:
                     return {
                         "success": False,
-                        "error": f"Invalid response marker: 0x{start_marker:08X}",
+                        "error": f"Invalid response start marker: {detail}",
                     }
+                if end_marker != self.END_MARKER:
+                    # A good start marker with a bad end marker means the frame
+                    # is truncated or misaligned — the fields between them
+                    # cannot be trusted either.
+                    return {
+                        "success": False,
+                        "error": f"Malformed response frame (bad end marker): {detail}",
+                    }
+                if response_code != COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Scope answered a different command "
+                            f"({response_code}, expected "
+                            f"{COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE}): {detail}"
+                        ),
+                    }
+                if status_code != 0:
+                    # Byte 8-11 is documented as "Status/error code"
+                    # (core/protocol_encoder.py). Nothing in this codebase read
+                    # it until now, so a rejected save looked like a successful
+                    # one. Treated as failure and reported verbatim: if this
+                    # scope uses a non-zero status to mean something benign, the
+                    # value is right here to say so.
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Scope reported status {status_code} (non-zero = "
+                            f"error). Settings may NOT have been saved: {detail}"
+                        ),
+                    }
+                return {
+                    "success": True,
+                    "message": (
+                        f"Microscope acknowledged settings save.\n"
+                        f"Status code: {status_code}\n"
+                        f"Response code: {response_code}"
+                    ),
+                }
 
             except (socket.timeout, TimeoutError):
                 return {

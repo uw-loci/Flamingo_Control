@@ -1116,10 +1116,14 @@ class LED2DOverviewWorkflow(QObject):
         them; the polls timed out, the loop never saw an in-tolerance reading,
         and each plane burned the full ``settle_timeout_s``. At ~6 planes a tile
         that is ~18 s of pure waiting, and it is why the 2026-08-09 overview ran
-        at ~25 s/tile. The same flood produced the 0x6008 timeout cluster and the
-        "Overwriting pending request" warnings (POSITION_SET and POSITION_GET
-        share command code 24584, so a move ack and a position reply land in the
-        same single-slot pending-request queue).
+        at ~25 s/tile. The same flood produced the 0x6008 timeout cluster and
+        the "Overwriting pending request" warnings: back-to-back POSITION_GET
+        queries overwrite each other in the single-slot pending map, because a
+        second one is issued before the first reply lands. (An earlier version
+        of this docstring blamed POSITION_SET and POSITION_GET sharing code
+        24584. They do not — POSITION_GET is 24584, POSITION_SET 24580,
+        POSITION_SET_SLIDER 24581. The fix below was right regardless, but the
+        mechanism was not.)
 
         The stage already announces its own arrival: STAGE_MOTION_STOPPED
         (0x6010), unsolicited, no query needed. Those callbacks were arriving in
