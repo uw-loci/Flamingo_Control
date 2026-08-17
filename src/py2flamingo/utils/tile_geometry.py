@@ -92,6 +92,83 @@ class TileGeometry:
 
 
 @dataclass
+class PlannedTile:
+    """One acquisition tile, with the Z depth inherited from the overview."""
+
+    x_mm: float
+    y_mm: float
+    z_min_mm: float
+    z_max_mm: float
+    #: How many overview tiles' footprints this tile overlaps. 0 means no
+    #: overview tile covered it and the Z range is a fallback, not a measurement.
+    source_tiles: int = 0
+
+    @property
+    def z_from_overview(self) -> bool:
+        return self.source_tiles > 0
+
+
+def _tile_xy(tile) -> Tuple[float, float]:
+    """(x, y) from a (x, y) tuple or anything with .x/.y."""
+    if isinstance(tile, (tuple, list)):
+        return (float(tile[0]), float(tile[1]))
+    return (float(tile.x), float(tile.y))
+
+
+def _tile_z(tile) -> Optional[Tuple[float, float]]:
+    """(z_min, z_max) from a tile that carries one, else None."""
+    lo = getattr(tile, "z_stack_min", None)
+    hi = getattr(tile, "z_stack_max", None)
+    if lo is None or hi is None:
+        return None
+    try:
+        lo, hi = float(lo), float(hi)
+    except (TypeError, ValueError):
+        return None
+    if hi < lo:
+        lo, hi = hi, lo
+    return (lo, hi) if hi > lo else None
+
+
+def inherit_z_range(
+    x_mm: float,
+    y_mm: float,
+    acq_fov_x_mm: float,
+    acq_fov_y_mm: float,
+    overview_tiles: Sequence,
+    overview_fov_x_mm: float,
+    overview_fov_y_mm: float,
+) -> Tuple[Optional[float], Optional[float], int]:
+    """Z range for one acquisition tile, from the overview tiles it covers.
+
+    Returns ``(z_min, z_max, n_sources)``; ``(None, None, 0)`` when no overview
+    tile's footprint overlaps this one.
+
+    The UNION of the overlapping tiles' ranges, deliberately. Collect Tiles
+    gives every overview tile its own depth, so an acquisition tile straddling
+    two of them has to span both — taking one, or an average, would cut the
+    stack short exactly where two depths disagree, which is where the sample is
+    changing. Erring deep costs acquisition time; erring shallow loses data that
+    cannot be recovered without re-running the sample.
+    """
+    half_x = (float(acq_fov_x_mm) + float(overview_fov_x_mm)) / 2.0
+    half_y = (float(acq_fov_y_mm) + float(overview_fov_y_mm)) / 2.0
+    lo = hi = None
+    n = 0
+    for tile in overview_tiles:
+        span = _tile_z(tile)
+        if span is None:
+            continue
+        ox, oy = _tile_xy(tile)
+        if abs(ox - x_mm) >= half_x or abs(oy - y_mm) >= half_y:
+            continue
+        n += 1
+        lo = span[0] if lo is None else min(lo, span[0])
+        hi = span[1] if hi is None else max(hi, span[1])
+    return (lo, hi, n)
+
+
+@dataclass
 class AcquisitionPlan:
     """An acquisition grid derived from an overview, and how it was derived.
 
@@ -105,10 +182,20 @@ class AcquisitionPlan:
     overview_fov_x_mm: float
     overview_fov_y_mm: float
     geometry: "TileGeometry"  # the ACQUISITION grid
+    tiles: List[PlannedTile] = field(default_factory=list)
 
     @property
     def acquisition_tiles(self) -> int:
         return self.geometry.total_tiles
+
+    @property
+    def tiles_without_overview_z(self) -> List[PlannedTile]:
+        """Tiles no overview tile covered, so their Z range is a fallback.
+
+        Worth surfacing rather than counting: their depth was not measured, and
+        the Z edges are what the laser acquisition sweeps.
+        """
+        return [t for t in self.tiles if not t.z_from_overview]
 
     def describe(self) -> str:
         g = self.geometry
@@ -171,8 +258,9 @@ def plan_acquisition_from_overview(
     by ``{name}_settings.json``; out-of-range tiles come back in
     ``geometry.violations`` rather than being silently dropped.
     """
-    xs = [float(x) for x, _y in overview_centres]
-    ys = [float(y) for _x, y in overview_centres]
+    xy = [_tile_xy(t) for t in overview_centres]
+    xs = [x for x, _y in xy]
+    ys = [y for _x, y in xy]
     region_x = selection_region_mm(xs, overview_fov_x_mm)
     region_y = selection_region_mm(ys, overview_fov_y_mm)
 
@@ -214,6 +302,28 @@ def plan_acquisition_from_overview(
         hard_limit_min_y=_limit("y", "min"),
         hard_limit_max_y=_limit("y", "max"),
     )
+    # Carry each overview tile's measured Z depth onto the acquisition tiles
+    # that cover it. Without this, changing the AOI silently discards the
+    # per-tile depths — which is the entire product of Collect Tiles, and what
+    # the laser acquisition sweeps.
+    fallback = (float(z_min_mm), float(z_max_mm))
+    planned = []
+    for x, y in geometry.positions:
+        lo, hi, n = inherit_z_range(
+            x,
+            y,
+            geometry.fov_x_mm,
+            geometry.fov_y_mm,
+            overview_centres,
+            overview_fov_x_mm,
+            overview_fov_y_mm,
+        )
+        if lo is None:
+            lo, hi = fallback
+        planned.append(
+            PlannedTile(x_mm=x, y_mm=y, z_min_mm=lo, z_max_mm=hi, source_tiles=n)
+        )
+
     return AcquisitionPlan(
         region_x_mm=region_x,
         region_y_mm=region_y,
@@ -221,6 +331,7 @@ def plan_acquisition_from_overview(
         overview_fov_x_mm=float(overview_fov_x_mm),
         overview_fov_y_mm=float(overview_fov_y_mm),
         geometry=geometry,
+        tiles=planned,
     )
 
 

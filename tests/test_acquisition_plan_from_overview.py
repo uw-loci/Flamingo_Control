@@ -140,3 +140,91 @@ class TestTheDescription:
         assert "overview tile(s)" in text and "acquisition tile(s)" in text
         assert "2.1453x1.0726" in text  # the non-square acquisition field
         assert "20.0/20.0% overlap" in text
+
+
+class _OverviewTile:
+    """Duck-type of TileResult: position plus the depth Collect Tiles measured."""
+
+    def __init__(self, x, y, z_min, z_max):
+        self.x, self.y = x, y
+        self.z_stack_min, self.z_stack_max = z_min, z_max
+
+
+class TestPerTileZSurvivesARegeneratedGrid:
+    """Changing the AOI must not discard the depths the overview measured.
+
+    Per-tile Z ranges are the product of Collect Tiles, and the Z edges are what
+    the laser acquisition sweeps. A regenerated XY grid has none of the
+    overview's tile indices, so the depths have to be carried across by
+    footprint, not by index.
+    """
+
+    def _tiles(self):
+        # Two overview tiles side by side at different depths.
+        return [
+            _OverviewTile(4.0, 12.0, 14.0, 18.0),
+            _OverviewTile(4.0 + OVERVIEW_FOV, 12.0, 20.0, 26.0),
+        ]
+
+    def test_a_tile_inherits_the_depth_of_the_overview_tile_it_covers(self):
+        result = plan(
+            self._tiles(), acq_x=OVERVIEW_FOV, acq_y=OVERVIEW_FOV, overlap=0.0
+        )
+        leftmost = min(result.tiles, key=lambda t: t.x_mm)
+        assert leftmost.z_min_mm == pytest.approx(14.0)
+        assert leftmost.z_max_mm == pytest.approx(18.0)
+
+    def test_a_tile_straddling_two_depths_spans_both(self):
+        # The union, not one of them and not an average: cutting the stack short
+        # where two depths disagree loses data exactly where the sample changes,
+        # and it cannot be recovered without re-running the sample.
+        result = plan(
+            self._tiles(), acq_x=OVERVIEW_FOV, acq_y=OVERVIEW_FOV, overlap=0.0
+        )
+        straddlers = [t for t in result.tiles if t.source_tiles >= 2]
+        assert straddlers, "expected at least one tile covering both overview tiles"
+        for tile in straddlers:
+            assert tile.z_min_mm == pytest.approx(14.0)
+            assert tile.z_max_mm == pytest.approx(26.0)
+
+    def test_every_planned_tile_gets_a_depth(self):
+        result = plan(self._tiles())
+        assert len(result.tiles) == result.acquisition_tiles
+        assert all(t.z_max_mm > t.z_min_mm for t in result.tiles)
+
+    def test_a_finer_acquisition_grid_still_inherits(self):
+        # The real case: many small acquisition tiles under few overview tiles.
+        result = plan(self._tiles(), overlap=20.0)
+        assert all(t.z_from_overview for t in result.tiles)
+
+    def test_tiles_with_no_overview_coverage_are_flagged_not_hidden(self):
+        # Their depth is a fallback, not a measurement, and the Z edges drive
+        # the laser sweep — so they must be nameable, not just counted.
+        tiles = [_OverviewTile(4.0, 12.0, 14.0, 18.0)]
+        result = plan_acquisition_from_overview(
+            tiles,
+            overview_fov_x_mm=OVERVIEW_FOV,
+            overview_fov_y_mm=OVERVIEW_FOV,
+            acquisition_fov_x_mm=0.2,
+            acquisition_fov_y_mm=0.2,
+            overlap_percent=0.0,
+            z_min_mm=1.0,
+            z_max_mm=2.0,
+        )
+        assert all(t.z_from_overview for t in result.tiles)
+        assert result.tiles_without_overview_z == []
+
+    def test_plain_centres_without_depth_fall_back_to_the_given_range(self):
+        result = plan_acquisition_from_overview(
+            [(4.0, 12.0)],
+            overview_fov_x_mm=OVERVIEW_FOV,
+            overview_fov_y_mm=OVERVIEW_FOV,
+            acquisition_fov_x_mm=OVERVIEW_FOV,
+            acquisition_fov_y_mm=OVERVIEW_FOV,
+            overlap_percent=0.0,
+            z_min_mm=3.0,
+            z_max_mm=9.0,
+        )
+        assert result.tiles[0].z_min_mm == pytest.approx(3.0)
+        assert result.tiles[0].z_max_mm == pytest.approx(9.0)
+        assert result.tiles_without_overview_z == result.tiles
