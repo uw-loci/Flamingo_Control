@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 # Server tiling overlap clamp (PlatformIO/.../SystemLimits.h: TilingLimits).
 OVERLAP_PERCENT_MIN = 0.0
@@ -89,6 +89,139 @@ class TileGeometry:
     @property
     def has_limit_errors(self) -> bool:
         return bool(self.violations)
+
+
+@dataclass
+class AcquisitionPlan:
+    """An acquisition grid derived from an overview, and how it was derived.
+
+    Keeps the two grids' numbers side by side because they are different grids
+    and confusing them is the failure this type exists to prevent.
+    """
+
+    region_x_mm: Tuple[float, float]  # stage span the overview selection covers
+    region_y_mm: Tuple[float, float]
+    overview_tiles: int
+    overview_fov_x_mm: float
+    overview_fov_y_mm: float
+    geometry: "TileGeometry"  # the ACQUISITION grid
+
+    @property
+    def acquisition_tiles(self) -> int:
+        return self.geometry.total_tiles
+
+    def describe(self) -> str:
+        g = self.geometry
+        return (
+            f"{self.overview_tiles} overview tile(s) at "
+            f"{self.overview_fov_x_mm:.4f}x{self.overview_fov_y_mm:.4f} mm cover "
+            f"X {self.region_x_mm[0]:.3f}..{self.region_x_mm[1]:.3f}, "
+            f"Y {self.region_y_mm[0]:.3f}..{self.region_y_mm[1]:.3f} mm -> "
+            f"{g.tiles_x}x{g.tiles_y} = {g.total_tiles} acquisition tile(s) at "
+            f"{g.fov_x_mm:.4f}x{g.fov_y_mm:.4f} mm, "
+            f"{g.x_overlap_percent:.1f}/{g.y_overlap_percent:.1f}% overlap "
+            f"(step {g.step_x_mm:.4f}/{g.step_y_mm:.4f} mm)"
+        )
+
+
+def selection_region_mm(
+    centres_mm: Sequence[float], fov_mm: float
+) -> Tuple[float, float]:
+    """Stage span covered by tiles at `centres_mm`, each `fov_mm` wide.
+
+    Tile positions are CENTRES (the server's own convention — Position A/B are
+    corner-tile centres), so the imaged region runs half a field beyond the
+    outermost centre at each end. Getting this wrong shrinks the acquisition
+    region by one field, which quietly clips the edge of the sample.
+    """
+    if not centres_mm:
+        return (0.0, 0.0)
+    half = float(fov_mm) / 2.0
+    return (min(centres_mm) - half, max(centres_mm) + half)
+
+
+def plan_acquisition_from_overview(
+    overview_centres: Sequence[Tuple[float, float]],
+    *,
+    overview_fov_x_mm: float,
+    overview_fov_y_mm: float,
+    acquisition_fov_x_mm: float,
+    acquisition_fov_y_mm: float,
+    overlap_percent: float,
+    z_min_mm: float = 0.0,
+    z_max_mm: float = 0.0,
+    stage_limits: Optional[dict] = None,
+) -> AcquisitionPlan:
+    """Tile the region an overview selection covers, using the ACQUISITION field.
+
+    The overview and the acquisition do not see the same field of view. LED
+    transmission fills the whole sensor; the light sheet does not fill it
+    vertically, so the acquisition field is smaller and generally NOT square.
+    Re-imaging at the overview's tile centres therefore leaves gaps wherever the
+    acquisition field is smaller than the overview's — the tiles were spaced for
+    a field the laser cannot illuminate.
+
+    So the overview's tile centres are used only to bound a REGION, and the
+    acquisition grid is generated fresh over that region from its own field and
+    its own overlap. This is also the coupling that let a requested 20% overlap
+    reach the stage as 0.25%: the overview grid was a one-way door into
+    acquisition, and nothing re-derived the spacing.
+
+    ``stage_limits`` is the ``{"x": {"min":…, "max":…}, "y": {…}}`` shape used
+    by ``{name}_settings.json``; out-of-range tiles come back in
+    ``geometry.violations`` rather than being silently dropped.
+    """
+    xs = [float(x) for x, _y in overview_centres]
+    ys = [float(y) for _x, y in overview_centres]
+    region_x = selection_region_mm(xs, overview_fov_x_mm)
+    region_y = selection_region_mm(ys, overview_fov_y_mm)
+
+    # compute_tile_geometry takes corner-tile CENTRES, and it extends the ROI by
+    # half a field beyond each. The region above is already an edge-to-edge
+    # span, so hand it back the centres that reproduce it.
+    half_x = float(acquisition_fov_x_mm) / 2.0
+    half_y = float(acquisition_fov_y_mm) / 2.0
+    start_x, end_x = region_x[0] + half_x, region_x[1] - half_x
+    start_y, end_y = region_y[0] + half_y, region_y[1] - half_y
+    # A region narrower than one acquisition field collapses to a single tile at
+    # its centre rather than an inverted span.
+    if end_x < start_x:
+        start_x = end_x = (region_x[0] + region_x[1]) / 2.0
+    if end_y < start_y:
+        start_y = end_y = (region_y[0] + region_y[1]) / 2.0
+
+    limits = stage_limits or {}
+
+    def _limit(axis: str, key: str):
+        try:
+            return float(limits[axis][key])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    geometry = compute_tile_geometry(
+        start_x,
+        end_x,
+        start_y,
+        end_y,
+        z_min_mm,
+        z_max_mm,
+        acquisition_fov_x_mm,
+        acquisition_fov_y_mm,
+        overlap_percent,
+        overlap_percent,
+        hard_limit_min_x=_limit("x", "min"),
+        hard_limit_max_x=_limit("x", "max"),
+        hard_limit_min_y=_limit("y", "min"),
+        hard_limit_max_y=_limit("y", "max"),
+    )
+    return AcquisitionPlan(
+        region_x_mm=region_x,
+        region_y_mm=region_y,
+        overview_tiles=len(overview_centres),
+        overview_fov_x_mm=float(overview_fov_x_mm),
+        overview_fov_y_mm=float(overview_fov_y_mm),
+        geometry=geometry,
+    )
 
 
 def client_tile_count_1d(range_mm: float, fov_mm: float, overlap_percent: float) -> int:
