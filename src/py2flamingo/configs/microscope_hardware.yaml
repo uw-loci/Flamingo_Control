@@ -43,9 +43,17 @@ optics:
   # system magnification the scope reports and keep tube == reference (200) to
   # avoid double-counting the tube-lens factor.
   #
-  # n7 currently: scope reports 5.0x with tube=200 -> effective pixel
-  # = 6.5 / 5.0 = 1.30 um (validated against real stitching data).
-  objective_magnification: 6.3254
+  # KEEP THIS IN STEP WITH THE SCOPE. It has been wrong twice, and each time
+  # the symptom was geometric rather than obvious: tile spacing computed from
+  # one pixel size and stitched with another.
+  #   2026-06-19  5.0      a nominal figure, never measured
+  #   2026-07-23  6.3254   back-computed from the 2026-06-26 pixel calibration
+  #   2026-08-17  6.205    what the scope itself reports (CTLSM1)
+  # The 2026-06-26 calibration measured 1.0276 um/px, i.e. ~6.326x -- 1.9% off
+  # the scope, and nowhere near the 5.0x the config believed at the time. Its
+  # stored optics_signature recorded that stale 5.0, so the guard in
+  # config_loader now rejects it on a 19% label mismatch for a 2% real one.
+  objective_magnification: 6.205
 
   # Tube lens design focal length in mm. Keep equal to reference_tube_lens_mm
   # (200) unless a project genuinely changes the tube lens AND the scope reports

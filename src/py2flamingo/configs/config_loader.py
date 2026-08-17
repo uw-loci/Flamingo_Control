@@ -385,11 +385,31 @@ def _apply_optics_overlays(cfg: HardwareConfig) -> None:
             cfg.pixel_size_override_um = float(cal["mean_pixel_size_um"])
             cfg.optics_source = "calibration"
         else:
+            # Say what the calibration MEASURED, not just the label it carries.
+            # The signature records what the config *believed* the optics were
+            # at capture time, which can be a nominal value the calibration
+            # itself then disproved: the 2026-06-26 calibration was stamped
+            # "5.000" (the YAML fallback of the day) while measuring 1.0276
+            # um/px, i.e. ~6.33x. Comparing labels alone made a 1.9% real
+            # disagreement look like a 19% one, and read as an objective swap.
+            implied = ""
+            try:
+                measured = float(cal["mean_pixel_size_um"])
+                if measured > 0:
+                    implied = (
+                        f" It measured {measured:.4f} µm/px, implying "
+                        f"{cfg.sensor_pixel_size_um / measured:.3f}x — compare "
+                        f"that against the scope, not against the label."
+                    )
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                pass
             logger.warning(
-                "Ignoring pixel calibration: measured at optics %s but scope "
-                "now reports %s. Re-measure or accept the scope value.",
+                "Ignoring pixel calibration: recorded at optics %s (what the "
+                "config believed when it was taken) but the scope now reports "
+                "%s.%s Re-measure or accept the scope value.",
                 cal_sig,
                 cur_sig,
+                implied,
             )
 
     # Overlay the live camera AOI (crop) so the field of view tracks it. Pixel
