@@ -1278,6 +1278,10 @@ class LED2DOverviewWorkflow(QObject):
         ran. Same shape as the tile-step bug: two copies of one calculation, and
         the copy driving hardware was the one missing the guard.
 
+        **A single plane is taken at the CENTRE of the range, not at z_min** —
+        least worst-case defocus, and symmetric, so ``_tile_z_plan`` has nothing
+        to alternate between. See that method for the travel bug this caused.
+
         Pass ``max_planes=None`` to sweep every plane.
         """
         positions = []
@@ -1288,12 +1292,40 @@ class LED2DOverviewWorkflow(QObject):
         if not positions:
             positions = [z_min]
         if max_planes and len(positions) > max_planes:
-            # Subsample evenly so the pair still spans the full Z range.
-            idx = np.linspace(0, len(positions) - 1, max_planes, dtype=int)
-            positions = [positions[i] for i in idx]
+            if max_planes == 1:
+                # Centre plane: least worst-case defocus, and symmetric, so the
+                # serpentine has nothing to alternate between.
+                positions = [positions[len(positions) // 2]]
+            else:
+                # Subsample evenly so the set still spans the full Z range.
+                idx = np.linspace(0, len(positions) - 1, max_planes, dtype=int)
+                positions = [positions[i] for i in idx]
         if not ascending:
             positions.reverse()
         return positions
+
+    @staticmethod
+    def _tile_z_plan(z_min, z_max, z_step, ascending, max_planes):
+        """``(z_start, z_values)`` for one tile's sweep.
+
+        ``z_start`` is the sweep's own first position, never an assumed extreme
+        of the range. The caller used to compute ``z_min if ascending else
+        z_max`` separately, which is only correct while the sweep happens to
+        begin at an end of the box. With a single plane it does not: the sweep
+        is the centre, so alternate tiles were sent to z_max and then straight
+        back down to capture — 20 mm of travel on the measured 10 mm box, making
+        the fastest-looking setting on the spinbox the slowest thing the scan
+        could do.
+
+        Z travel is 61% of a tile (10.0 s of 16.28 s, measured over 140 tiles on
+        2026-08-17), so an accidental doubling here is the most expensive
+        mistake this file can make. One function returns both, so they cannot
+        disagree.
+        """
+        z_values = LED2DOverviewWorkflow._z_sweep_positions(
+            z_min, z_max, z_step, ascending, max_planes
+        )
+        return z_values[0], z_values
 
     def _scan_tiles_continuous(self):
         """Scan all tiles using continuous Z sweeps - much faster than step-by-step.
@@ -1424,9 +1456,17 @@ class LED2DOverviewWorkflow(QObject):
                 # into this one and producing duplicated/ghosted structure in the
                 # projection. X was commanded at the top of the column loop, Y and
                 # Z just now — wait for all three.
-                # Serpentine Z: start this tile's sweep at whichever end the
-                # previous tile finished on, so there is no full-stack Z reset.
-                z_start = z_min if z_sweep_up else z_max
+                # Serpentine Z: start this tile's sweep where the previous
+                # tile finished, so there is no full-stack Z reset. Both values
+                # come from _tile_z_plan so z_start cannot disagree with the
+                # sweep it is supposed to begin.
+                z_start, z_values = self._tile_z_plan(
+                    z_min,
+                    z_max,
+                    self._config.z_step_size,
+                    z_sweep_up,
+                    self._max_z_planes(),
+                )
 
                 # Seed the broadcast baseline so the settle poll below can stream
                 # the live X/Y/Z travel to the sliders without jerking any axis.
@@ -1462,10 +1502,8 @@ class LED2DOverviewWorkflow(QObject):
                 # (reversed on alternate tiles); the output is a Z-collapsed
                 # projection, so direction does not change it.
                 frames = []  # List of (z_approx, image, focus_score)
-                z_step = self._config.z_step_size
-                z_values = self._z_sweep_positions(
-                    z_min, z_max, z_step, z_sweep_up, self._max_z_planes()
-                )
+                # z_values came from _tile_z_plan above the move, so z_start is
+                # the sweep's own first position.
 
                 sweep_t0 = time.monotonic()
                 seen_frame_numbers = set()
