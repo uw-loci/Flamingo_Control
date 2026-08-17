@@ -118,9 +118,20 @@ class MicroscopeSettingsService:
                     )
                 return settings
         except Exception as e:
+            # The file exists but could not be read, so is_configured was
+            # already set True from its mere existence in __init__. Clear it:
+            # the placeholder limits substituted below are WIDER than the real
+            # instrument (0-26 mm on X against N7's 1.0-12.31), and every guard
+            # that protects the stage keys off is_configured. Leaving it True
+            # here silently authorises moves the stage cannot make, which is
+            # the exact hazard _get_default_settings' own docstring warns about.
+            self.is_configured = False
             print(f"[MicroscopeSettingsService] ✗ Error loading settings file: {e}")
             self.logger.error(
-                f"[MicroscopeSettingsService] Error loading settings file: {e}"
+                f"[MicroscopeSettingsService] Error loading settings file: {e}. "
+                f"Falling back to PLACEHOLDER limits and marking this microscope "
+                f"NOT CONFIGURED — run Edit > Microscope Setup, or fix "
+                f"{self.settings_file}, before moving the stage."
             )
             return self._get_default_settings()
 
