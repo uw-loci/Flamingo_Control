@@ -111,6 +111,25 @@ class LED2DOverviewWorkflow(QObject):
         # be reconstructed from timestamps.
         self._tile_time_totals = [0.0, 0.0, 0]
 
+        # Adaptive Z state. `_z_extents` maps (x_idx, y_idx) -> ContentExtent so
+        # a tile can be predicted from its GRID neighbours rather than from
+        # whichever tile the serpentine happened to visit last -- at a column
+        # turn that one is a whole column away and predicts nothing.
+        self._z_extents = {}
+        self._scan_peak_focus = 0.0
+        self._adaptive_tiles = 0
+        self._adaptive_resweeps = 0
+        self._adaptive_depths_mm = []
+        # Only tiles where a band was actually PREDICTED, and what they cost.
+        # A tile that swept the full range because no neighbour had anything to
+        # say is not evidence that prediction fails -- it is evidence of
+        # nothing, and counting it is how a scan starting on the empty margin of
+        # its bounding box switched adaptation off before ever reaching the
+        # sample.
+        self._adaptive_predicted_tiles = 0
+        self._adaptive_predicted_mm = 0.0
+        self._adaptive_z_abandoned = False
+
         # Live stage-position broadcast to the UI. The C++ GUI sliders track the
         # stage continuously while scanning; the overview drives the stage through
         # StageService directly (not movement_controller), so nothing else emits
@@ -717,6 +736,15 @@ class LED2DOverviewWorkflow(QObject):
             if self._config.fast_mode:
                 QTimer.singleShot(3000, self._scan_tiles_continuous)
             else:
+                if getattr(self._config, "adaptive_z", False):
+                    # Say so rather than let a ticked box do nothing. A setting
+                    # that silently no-ops is worse than one that is absent:
+                    # the run looks configured and is not.
+                    logger.warning(
+                        "Adaptive Z is on but fast mode is off. The step-by-"
+                        "step path sweeps the full Z range at every tile, so "
+                        "this scan will not narrow anything."
+                    )
                 QTimer.singleShot(3000, self._scan_next_tile)
 
         except Exception as e:
@@ -1327,6 +1355,216 @@ class LED2DOverviewWorkflow(QObject):
         )
         return z_values[0], z_values
 
+    # ------------------------------------------------------------------ #
+    # Adaptive Z band (optional) -- see utils/adaptive_z_band.py
+    # ------------------------------------------------------------------ #
+
+    def _adaptive_z_enabled(self) -> bool:
+        """Is the narrowed sweep active for this scan?
+
+        Off unless the user asked for it, and switched off mid-scan when the
+        re-sweep rate says the prediction does not fit this sample.
+        """
+        return bool(getattr(self._config, "adaptive_z", False)) and not (
+            self._adaptive_z_abandoned
+        )
+
+    def _band_for_tile(self, x_idx: int, y_idx: int, z_min: float, z_max: float):
+        """The Z span to sweep for this tile."""
+        from py2flamingo.utils.adaptive_z_band import (
+            full_band,
+            neighbour_extents,
+            predict_band,
+        )
+
+        if not self._adaptive_z_enabled():
+            return full_band(z_min, z_max)
+        return predict_band(
+            neighbour_extents(self._z_extents, x_idx, y_idx),
+            z_min=z_min,
+            z_max=z_max,
+            margin_mm=float(getattr(self._config, "adaptive_z_margin_mm", 0.5)),
+        )
+
+    def _sweep_tile_band(
+        self, stage_service, camera_controller, x_pos, y_pos, band, ascending
+    ):
+        """Move onto the tile and sweep ``band``.
+
+        Returns ``(frames, move_s, sweep_s, z_values)``, or ``None`` if the scan
+        was cancelled part-way. Extracted so an adaptive re-sweep runs the
+        identical path rather than a second copy of it -- two copies of the
+        sweep is exactly how the tile-step calculation ended up shipping a 0.25%
+        overlap.
+        """
+        from py2flamingo.services.stage_service import AxisCode
+        from py2flamingo.utils.focus_detection import variance_of_laplacian
+
+        # Serpentine Z: start this tile's sweep where the previous tile
+        # finished, so there is no full-stack Z reset. Both values come from
+        # _tile_z_plan so z_start cannot disagree with the sweep it begins.
+        z_start, z_values = self._tile_z_plan(
+            band.z_min,
+            band.z_max,
+            self._config.z_step_size,
+            ascending,
+            self._max_z_planes(),
+        )
+
+        # Seed the broadcast baseline so the settle poll below can stream the
+        # live X/Y/Z travel to the sliders without jerking any axis.
+        self._last_xyz = [x_pos, y_pos, z_start]
+
+        tile_t0 = time.monotonic()
+
+        # X was already commanded at the top of the column loop; Y and Z go out
+        # from here, and _move_and_settle waits on the stage's own
+        # motion-stopped callback rather than interrogating it.
+        self._move_and_settle(
+            stage_service,
+            {AxisCode.Y_AXIS: y_pos, AxisCode.Z_AXIS: z_start},
+        )
+        # X confirmed separately: its move predates this tile, so it has had the
+        # whole Y/Z travel to arrive and normally settles on the first query.
+        self._wait_for_axes_settled(
+            stage_service, {AxisCode.X_AXIS: x_pos}, timeout_s=2.0
+        )
+        move_s = time.monotonic() - tile_t0
+
+        # Flush frames buffered before/during the move to this tile so the sweep
+        # below captures only fresh frames. The live buffer is small and
+        # perpetually full during the overview, so without this the first planes
+        # can carry over the previous tile's content.
+        camera_controller.clear_buffer()
+
+        # Grab frames during the Z sweep. Planes are visited in travel order
+        # (reversed on alternate tiles); the output is a Z-collapsed projection,
+        # so direction does not change it.
+        frames = []  # List of (z_approx, image, focus_score)
+        sweep_t0 = time.monotonic()
+        seen_frame_numbers = set()
+        reused = 0
+        for z_pos in z_values:
+            if self._cancelled:
+                return None
+            captured = self._capture_plane(stage_service, camera_controller, z_pos)
+            if captured is None:
+                continue
+            image, frame_number = captured
+            if frame_number in seen_frame_numbers:
+                # Same frame as an earlier plane: scoring it again would let a
+                # stale image win "best focus" for this tile.
+                reused += 1
+                continue
+            seen_frame_numbers.add(frame_number)
+            frames.append((z_pos, image.copy(), variance_of_laplacian(image)))
+        sweep_s = time.monotonic() - sweep_t0
+
+        if reused:
+            logger.warning(
+                f"Tile ({x_pos:.2f}, {y_pos:.2f}): {reused}/{len(z_values)} "
+                "planes reused an earlier frame and were dropped — the camera "
+                "is not keeping up with the Z sweep, so best-focus is chosen "
+                "from fewer planes than requested"
+            )
+        return frames, move_s, sweep_s, z_values
+
+    def _resweep_if_clipped(
+        self,
+        stage_service,
+        camera_controller,
+        x_pos,
+        y_pos,
+        x_idx,
+        y_idx,
+        band,
+        frames,
+        ascending,
+        z_min,
+        z_max,
+    ):
+        """Record this tile's Z extent, re-sweeping in full if the band clipped it.
+
+        Returns ``(band, frames, (move_s, sweep_s, z_values))``; the third element
+        is ``None`` when the scan was cancelled mid-re-sweep, and
+        ``(0.0, 0.0, None)`` when no re-sweep was needed.
+        """
+        from py2flamingo.utils.adaptive_z_band import (
+            adaptation_is_not_paying,
+            content_extent,
+            full_band,
+            should_resweep,
+        )
+
+        self._adaptive_tiles += 1
+        if not self._adaptive_z_enabled():
+            self._adaptive_depths_mm.append(band.depth_mm)
+            return band, frames, (0.0, 0.0, None)
+
+        scored = [(z, score) for z, _img, score in frames]
+        if scored:
+            self._scan_peak_focus = max(
+                self._scan_peak_focus, max(s for _z, s in scored)
+            )
+        extent = content_extent(scored, band, scan_peak_score=self._scan_peak_focus)
+        self._adaptive_depths_mm.append(band.depth_mm)
+        predicted = not band.full
+        if predicted:
+            self._adaptive_predicted_tiles += 1
+            self._adaptive_predicted_mm += band.depth_mm
+
+        extra = (0.0, 0.0, None)
+        if should_resweep(extent, band):
+            self._adaptive_resweeps += 1
+            logger.info(
+                f"Tile ({x_pos:.2f}, {y_pos:.2f}): sample reaches the edge of "
+                f"the {band.depth_mm:.2f} mm band "
+                f"({band.z_min:.3f}–{band.z_max:.3f}); re-sweeping the full "
+                f"{z_max - z_min:.2f} mm range so its Z extent is measured, not "
+                f"assumed."
+            )
+            band = full_band(z_min, z_max)
+            swept = self._sweep_tile_band(
+                stage_service, camera_controller, x_pos, y_pos, band, ascending
+            )
+            if swept is None:
+                return band, frames, None
+            frames, move_s, sweep_s, z_values = swept
+            extra = (move_s, sweep_s, z_values)
+            self._adaptive_depths_mm.append(band.depth_mm)
+            # The miss cost the narrow band AND this, and it was a prediction
+            # that failed -- so it counts against prediction, in full.
+            self._adaptive_predicted_mm += band.depth_mm
+            scored = [(z, score) for z, _img, score in frames]
+            if scored:
+                self._scan_peak_focus = max(
+                    self._scan_peak_focus, max(s for _z, s in scored)
+                )
+            extent = content_extent(scored, band, scan_peak_score=self._scan_peak_focus)
+
+        self._z_extents[(x_idx, y_idx)] = extent
+
+        if adaptation_is_not_paying(
+            self._adaptive_predicted_tiles,
+            self._adaptive_predicted_mm,
+            z_max - z_min,
+        ):
+            # Every re-swept tile paid for its narrow band AND the full range,
+            # so at this rate adaptation costs more than it saves. Stop rather
+            # than keep spending: a sample this heuristic does not fit should
+            # cost a little time, not the rest of the run.
+            self._adaptive_z_abandoned = True
+            logger.warning(
+                f"Adaptive Z: the {self._adaptive_predicted_tiles} tiles it "
+                f"predicted a band for cost {self._adaptive_predicted_mm:.1f} mm "
+                f"against {(z_max - z_min) * self._adaptive_predicted_tiles:.1f} "
+                f"mm for the full range ({self._adaptive_resweeps} re-sweeps). "
+                f"The neighbour prediction does not fit this sample, so "
+                f"adaptation is off for the rest of this scan and every "
+                f"remaining tile sweeps the full range."
+            )
+        return band, frames, extra
+
     def _scan_tiles_continuous(self):
         """Scan all tiles using continuous Z sweeps - much faster than step-by-step.
 
@@ -1456,88 +1694,47 @@ class LED2DOverviewWorkflow(QObject):
                 # into this one and producing duplicated/ghosted structure in the
                 # projection. X was commanded at the top of the column loop, Y and
                 # Z just now — wait for all three.
-                # Serpentine Z: start this tile's sweep where the previous
-                # tile finished, so there is no full-stack Z reset. Both values
-                # come from _tile_z_plan so z_start cannot disagree with the
-                # sweep it is supposed to begin.
-                z_start, z_values = self._tile_z_plan(
+                # Where this tile's sample is expected to be. The full range
+                # unless adaptive Z is on AND scanned neighbours give evidence.
+                band = self._band_for_tile(x_idx, y_idx, z_min, z_max)
+
+                swept = self._sweep_tile_band(
+                    stage_service,
+                    camera_controller,
+                    x_pos,
+                    y_pos,
+                    band,
+                    z_sweep_up,
+                )
+                if swept is None:
+                    self._finish_cancelled()
+                    return
+                frames, move_s, sweep_s, z_values = swept
+
+                # Content reaching the edge of a NARROWED band means the sample
+                # continues past where the sweep stopped, so its Z extent was
+                # not measured -- and the overview's Z edges become the laser
+                # acquisition's Z range. Sweep it again over the full range now,
+                # while the stage is still on this tile.
+                band, frames, extra = self._resweep_if_clipped(
+                    stage_service,
+                    camera_controller,
+                    x_pos,
+                    y_pos,
+                    x_idx,
+                    y_idx,
+                    band,
+                    frames,
+                    not z_sweep_up,
                     z_min,
                     z_max,
-                    self._config.z_step_size,
-                    z_sweep_up,
-                    self._max_z_planes(),
                 )
-
-                # Seed the broadcast baseline so the settle poll below can stream
-                # the live X/Y/Z travel to the sliders without jerking any axis.
-                self._last_xyz = [x_pos, y_pos, z_start]
-
-                tile_t0 = time.monotonic()
-
-                # X was already commanded at the top of the column loop; Y and Z
-                # go out from here, and _move_and_settle waits on the stage's own
-                # motion-stopped callback rather than interrogating it.
-                self._move_and_settle(
-                    stage_service,
-                    {
-                        AxisCode.Y_AXIS: y_pos,
-                        AxisCode.Z_AXIS: z_start,
-                    },
-                )
-                # X confirmed separately: its move predates this tile, so it has
-                # had the whole Y/Z travel to arrive and normally settles on the
-                # first query.
-                self._wait_for_axes_settled(
-                    stage_service, {AxisCode.X_AXIS: x_pos}, timeout_s=2.0
-                )
-                move_s = time.monotonic() - tile_t0
-
-                # Flush frames buffered before/during the move to this tile so the
-                # sweep below captures only fresh frames. The live buffer is small
-                # and perpetually full during the overview, so without this the
-                # first planes can carry over the previous tile's content.
-                camera_controller.clear_buffer()
-
-                # Grab frames during Z sweep. Planes are visited in travel order
-                # (reversed on alternate tiles); the output is a Z-collapsed
-                # projection, so direction does not change it.
-                frames = []  # List of (z_approx, image, focus_score)
-                # z_values came from _tile_z_plan above the move, so z_start is
-                # the sweep's own first position.
-
-                sweep_t0 = time.monotonic()
-                seen_frame_numbers = set()
-                reused = 0
-                for z_pos in z_values:
-                    # Check for cancellation during Z sweep
-                    if self._cancelled:
-                        self._finish_cancelled()
-                        return
-
-                    captured = self._capture_plane(
-                        stage_service, camera_controller, z_pos
-                    )
-                    if captured is None:
-                        continue
-                    image, frame_number = captured
-                    if frame_number in seen_frame_numbers:
-                        # Same frame as an earlier plane: scoring it again would
-                        # let a stale image win "best focus" for this tile.
-                        reused += 1
-                        continue
-                    seen_frame_numbers.add(frame_number)
-                    focus_score = variance_of_laplacian(image)
-                    frames.append((z_pos, image.copy(), focus_score))
-
-                sweep_s = time.monotonic() - sweep_t0
-
-                if reused:
-                    logger.warning(
-                        f"Tile ({x_pos:.2f}, {y_pos:.2f}): {reused}/{len(z_values)} "
-                        "planes reused an earlier frame and were dropped — the "
-                        "camera is not keeping up with the Z sweep, so best-focus "
-                        "is chosen from fewer planes than requested"
-                    )
+                if extra is None:
+                    self._finish_cancelled()
+                    return
+                move_s += extra[0]
+                sweep_s += extra[1]
+                z_values = extra[2] or z_values
 
                 # Where the time actually went. A scan that is "too slow" is not
                 # actionable; "1.2 s moving, 18.4 s sweeping 6 planes" is. This
@@ -1573,8 +1770,16 @@ class LED2DOverviewWorkflow(QObject):
                         rotation_angle=self._rotation_angles[
                             self._current_rotation_idx
                         ],
-                        z_stack_min=z_min,
-                        z_stack_max=z_max,
+                        # The band this tile actually swept, not the whole box.
+                        # With adaptive Z off they are the same. With it on this
+                        # is a MEASURED safe superset of where the sample is:
+                        # anything reaching the band edge was re-swept at full
+                        # range before getting here. Recording the box instead
+                        # would throw the result away exactly where it matters,
+                        # since Collect Tiles inherits these edges as the laser
+                        # acquisition's Z range.
+                        z_stack_min=band.z_min,
+                        z_stack_max=band.z_max,
                     )
                     rotation_result.tiles.append(tile_result)
 
@@ -1609,6 +1814,18 @@ class LED2DOverviewWorkflow(QObject):
                     return
 
         logger.info(f"Fast mode: Captured {len(rotation_result.tiles)} tiles")
+
+        if getattr(self._config, "adaptive_z", False):
+            from py2flamingo.utils.adaptive_z_band import describe_saving
+
+            logger.info(
+                describe_saving(
+                    z_max - z_min,
+                    self._adaptive_depths_mm,
+                    self._adaptive_tiles,
+                    self._adaptive_resweeps,
+                )
+            )
 
         move_total, sweep_total, counted = self._tile_time_totals
         if counted:

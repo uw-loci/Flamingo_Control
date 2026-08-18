@@ -96,6 +96,16 @@ class ScanConfiguration:
     # a hairline gap wherever the stage repeats imperfectly. Clamped to the
     # server's own [0, 50] tiling limit.
     tile_overlap_percent: float = 10.0
+    # Narrow each tile's Z sweep to where neighbouring tiles found the sample,
+    # instead of traversing the whole bounding box every time. Z travel is 61%
+    # of a tile (measured 2026-08-17), and the plane count does not affect it --
+    # the range does. OFF by default: it predicts from neighbours, which is a
+    # guess about sample shape, and samples in tubes or with sparse structure
+    # will not fit it. Nothing is lost when it is wrong -- a tile whose sample
+    # reaches the edge of its band is re-swept at full range immediately -- but
+    # a bad fit costs time, so it is opt-in and reports what it bought.
+    adaptive_z: bool = False
+    adaptive_z_margin_mm: float = 0.5
 
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
@@ -483,6 +493,32 @@ class LED2DOverviewDialog(PersistentDialog):
         # overwrote "Best Focus" with a focus composite, which made two result
         # options identical and threw away the single sharpest frame, the one
         # thing "Best Focus" is supposed to mean.)
+
+        # Adaptive Z. Deliberately below the Z controls it modifies, and
+        # deliberately off: it predicts each tile's Z band from its neighbours,
+        # which is a guess about sample shape. Nothing is lost when the guess is
+        # wrong -- a tile whose sample reaches the edge of its band is re-swept
+        # at full range there and then -- but a bad fit costs time, so the user
+        # opts in and the log reports what it bought.
+        self.adaptive_z_checkbox = QCheckBox(
+            "Narrow each tile's Z sweep to where neighbours found the sample"
+        )
+        self.adaptive_z_checkbox.setToolTip(
+            "Z travel is about 60% of a tile, and it is set by the RANGE, not\n"
+            "the plane count — a capped sweep still crosses the whole box.\n"
+            "This starts each tile from where its scanned neighbours found\n"
+            "sample, plus a margin.\n\n"
+            "Nothing is lost if the guess is wrong: a tile whose sample runs to\n"
+            "the edge of its band is re-swept over the full range immediately,\n"
+            "because these Z edges become the laser acquisition's Z range.\n"
+            "If too many tiles need that, adaptation switches itself off for\n"
+            "the rest of the scan.\n\n"
+            "Fast mode only. Leave off for samples where neighbouring tiles say\n"
+            "little about each other — tubes, sparse or discontinuous specimens."
+        )
+        self.adaptive_z_checkbox.setChecked(False)
+        self.adaptive_z_checkbox.toggled.connect(self._update_scan_info)
+        layout.addWidget(self.adaptive_z_checkbox, 3, 0, 1, 3)
 
         # Single-rotation (quick test) checkbox
         self.single_rotation_checkbox = QCheckBox(
@@ -1505,6 +1541,7 @@ class LED2DOverviewDialog(PersistentDialog):
             max_z_planes=self.max_z_planes.value(),
             single_rotation=self.single_rotation_checkbox.isChecked(),
             tile_overlap_percent=self.tile_overlap.value(),
+            adaptive_z=self.adaptive_z_checkbox.isChecked(),
         )
 
     def _load_previous_scan(self):
@@ -1645,7 +1682,12 @@ class LED2DOverviewDialog(PersistentDialog):
             f"        Z [{bbox.z_min:.2f} to {bbox.z_max:.2f}] mm\n\n"
             f"Tiles: {tiles_x} x {tiles_y} = {tiles_x * tiles_y} per rotation\n"
             f"Tile overlap: {config.tile_overlap_percent:.1f}%\n"
-            f"{rotation_text}\n\n"
+            + (
+                "Adaptive Z: on — tiles sweep only where neighbours found " "sample\n"
+                if config.adaptive_z
+                else ""
+            )
+            + f"{rotation_text}\n\n"
             f"Total: {total_tiles} tiles\n\n"
             "Continue?",
             QMessageBox.Yes | QMessageBox.No,
