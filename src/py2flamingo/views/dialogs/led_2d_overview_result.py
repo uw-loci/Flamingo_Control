@@ -9,12 +9,13 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 import numpy as np
-from PyQt5.QtCore import QPoint, QSize, Qt, pyqtSignal
+from PyQt5.QtCore import QPoint, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGroupBox,
@@ -26,6 +27,7 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -88,6 +90,9 @@ class ImagePanel(QWidget):
         self._tile_stride_y: Optional[int] = None  # Pixels between tile origins in Y
         self._tile_w: Optional[int] = None  # Actual tile width in pixels
         self._tile_h: Optional[int] = None  # Actual tile height in pixels
+        #: (x_mm, y_mm, w_mm, h_mm) rectangles showing where the ACQUISITION
+        #: will image, which is a different field from the overview's.
+        self._target_frames: List[tuple] = []
 
         # Contrast settings - slider values (0-1000 range for precision)
         self._contrast_min_slider = 0  # Maps to _image_min
@@ -726,7 +731,104 @@ class ImagePanel(QWidget):
         logger.info(
             f"_draw_selection_overlay: drew {selections_drawn}, skipped {selections_skipped}"
         )
+        self._draw_target_frames(painter)
         painter.end()
+
+    # ------------------------------------------------------------------ #
+    # Target acquisition frames
+    # ------------------------------------------------------------------ #
+
+    def set_target_frames(self, frames) -> None:
+        """Rectangles to draw over the overview, in STAGE mm.
+
+        ``frames`` is a sequence of ``(x_mm, y_mm, w_mm, h_mm)`` centred on each
+        planned acquisition tile. Pass an empty sequence to clear.
+        """
+        self._target_frames = list(frames or [])
+        self._redraw_overlay()
+
+    def _stage_to_px(self):
+        """``(fn_x, fn_y, px_per_mm_x, px_per_mm_y)`` or None if underdetermined.
+
+        Fitted from the tile coordinates the panel was given rather than
+        assumed. Sign is the thing: display X may be inverted, and the server
+        lays tile positions by stepping DOWNWARD from a start corner, so both
+        axes can run either way. A fit from real (mm, pixel) pairs gets every
+        combination right without encoding any of them.
+        """
+        if not self._tile_coords or self._tile_stride_x is None:
+            return None
+        stride_x, stride_y = self._tile_stride_x, self._tile_stride_y
+        tile_w = self._tile_w or stride_x
+        tile_h = self._tile_h or stride_y
+
+        xs, ys = {}, {}
+        for coord in self._tile_coords:
+            if len(coord) < 4:
+                continue
+            x_mm, y_mm, ix, iy = coord[0], coord[1], coord[2], coord[3]
+            display_ix = (self._tiles_x - 1 - ix) if self._invert_x else ix
+            xs.setdefault(float(x_mm), display_ix * stride_x + tile_w / 2.0)
+            ys.setdefault(float(y_mm), iy * stride_y + tile_h / 2.0)
+
+        def _fit(pairs):
+            """(px_per_mm, px_at_zero_mm) from >= 2 distinct mm values."""
+            if len(pairs) < 2:
+                return None
+            mms = sorted(pairs)
+            lo, hi = mms[0], mms[-1]
+            if hi == lo:
+                return None
+            scale = (pairs[hi] - pairs[lo]) / (hi - lo)
+            return scale, pairs[lo] - scale * lo
+
+        fx, fy = _fit(xs), _fit(ys)
+        # A single row or column determines only one axis. Pixels are square
+        # here, so the axis that WAS measured stands in for the one that was
+        # not -- better than refusing to draw anything at all.
+        if fx is None and fy is None:
+            return None
+        if fx is None:
+            scale = -abs(fy[0]) if self._invert_x else abs(fy[0])
+            only_mm, only_px = next(iter(xs.items()))
+            fx = (scale, only_px - scale * only_mm)
+        if fy is None:
+            scale = abs(fx[0])
+            only_mm, only_px = next(iter(ys.items()))
+            fy = (scale, only_px - scale * only_mm)
+        return fx, fy
+
+    def _draw_target_frames(self, painter) -> None:
+        """Outline where the ACQUISITION will image, over the overview it came from.
+
+        Drawn in the acquisition's own field, which is generally not the
+        overview's: the light sheet does not fill the sensor vertically. Seeing
+        the two together is the point -- a grid that looks right in tile counts
+        can still miss the sample once the shorter field is applied.
+        """
+        frames = getattr(self, "_target_frames", None)
+        if not frames or self._pixmap is None:
+            return
+        fit = self._stage_to_px()
+        if fit is None:
+            return
+        (sx, bx), (sy, by) = fit
+        ds = self._display_scale
+
+        pen = QPen(QColor(255, 140, 0, 220))  # orange: not the cyan of selection
+        pen.setWidth(
+            max(2, int(min(self._pixmap.width(), self._pixmap.height()) / 400))
+        )
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for x_mm, y_mm, w_mm, h_mm in frames:
+            cx = (bx + sx * float(x_mm)) / ds
+            cy = (by + sy * float(y_mm)) / ds
+            w_px = abs(sx) * float(w_mm) / ds
+            h_px = abs(sy) * float(h_mm) / ds
+            painter.drawRect(
+                int(cx - w_px / 2.0), int(cy - h_px / 2.0), int(w_px), int(h_px)
+            )
 
     def get_image(self) -> Optional[np.ndarray]:
         """Get the current image."""
@@ -839,6 +941,10 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         info_layout.addStretch()
         layout.addLayout(info_layout)
+
+        # Acquisition tiling — chosen HERE, over the image it applies to, and
+        # verified before anything is collected.
+        layout.addWidget(self._create_acquisition_tiling_panel())
 
         # Button row
         button_layout = QHBoxLayout()
@@ -1293,13 +1399,43 @@ class LED2DOverviewResultWindow(PersistentWidget):
         dialog.exec_()
 
     def _on_selection_changed(self):
-        """Handle tile selection change - update UI state."""
+        """Handle tile selection change - update UI state.
+
+        Changing the selection changes the grid, so it also drops verification:
+        a tick made against a different set of tiles is not a check of this one.
+        """
         left_count = self.left_panel.get_selected_tile_count()
         right_count = self.right_panel.get_selected_tile_count()
         total = left_count + right_count
 
         self.selection_label.setText(f"{total} tiles selected")
-        self.collect_btn.setEnabled(total > 0)
+        if getattr(self, "_verify_cb", None) is not None and total:
+            self._on_tiling_changed()
+        else:
+            self._update_collect_button()
+
+    def _update_collect_button(self) -> None:
+        """Collect is available only with tiles selected AND settings verified.
+
+        The gate is here rather than in the collection dialog because the AOI
+        and overlap fix the grid the run images; confirming them afterwards
+        would be confirming something already decided.
+        """
+        total = (
+            self.left_panel.get_selected_tile_count()
+            + self.right_panel.get_selected_tile_count()
+        )
+        verified = self._tiling_is_verified()
+        self.collect_btn.setEnabled(total > 0 and verified)
+        if total and not verified:
+            self.collect_btn.setToolTip(
+                "Tick “I have checked the acquisition AOI and overlap” first — "
+                "those settings fix the tile grid this run will image."
+            )
+        elif not total:
+            self.collect_btn.setToolTip("Select at least one tile.")
+        else:
+            self.collect_btn.setToolTip("Create workflows for selected tiles")
 
     def _on_tile_right_clicked(self, tile_x_idx: int, tile_y_idx: int, panel: str):
         """Handle tile right-click - move stage to tile position (X, Y, center Z).
@@ -1450,6 +1586,430 @@ class LED2DOverviewResultWindow(PersistentWidget):
         )
         return fov
 
+    # ------------------------------------------------------------------ #
+    # Acquisition tiling — decided here, over the image, and verified
+    # ------------------------------------------------------------------ #
+
+    #: Where the AOI/overlap choice is remembered between runs.
+    TILING_STATE_ID = "LED2DOverviewAcquisitionTiling"
+
+    #: Sensible acquisition AOIs. The light sheet does not fill the sensor
+    #: vertically and the height that IS filled is adjustable, so this is a
+    #: list of common choices, not a hardware constant — the user picks.
+    AOI_CHOICES = [
+        (2048, 2048),
+        (2048, 1024),
+        (2048, 512),
+        (1024, 1024),
+        (1024, 512),
+    ]
+
+    def _create_acquisition_tiling_panel(self) -> QGroupBox:
+        """Choose the ACQUISITION field and overlap, before anything is collected.
+
+        These live here, not in the collection dialog, because this is the only
+        place the choice can be seen against the sample it applies to — the
+        target frames are drawn over the overview as the numbers change. And
+        because it must not be changed afterwards: the grid these produce is
+        what the run images, so a later edit in another window would silently
+        put the plan and the acquisition out of step. The collection dialog
+        shows them read-only.
+        """
+        group = QGroupBox("Acquisition tiling — verify before collecting")
+        self._tiling_group = group
+        outer = QVBoxLayout()
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Acquisition AOI:"))
+        self._aoi_combo = QComboBox()
+        for width, height in self.AOI_CHOICES:
+            # Stored as "WxH" rather than a tuple: QComboBox.findData does not
+            # reliably match a Python tuple through the QVariant round trip, so
+            # a restored size silently fell back to the default -- collecting a
+            # different frame than the one the user last chose.
+            self._aoi_combo.addItem(f"{width} x {height} px", f"{width}x{height}")
+        self._aoi_combo.setToolTip(
+            "The frame the LASER acquisition will collect.\n"
+            "It is NOT the overview's frame: LED transmission fills the sensor,\n"
+            "the light sheet does not fill it vertically, so re-imaging at the\n"
+            "overview's tile positions would leave gaps."
+        )
+        self._aoi_combo.currentIndexChanged.connect(self._on_tiling_changed)
+        row.addWidget(self._aoi_combo)
+
+        overlap_label = QLabel("Tile overlap:")
+        self._overlap_spin = QDoubleSpinBox()
+        self._overlap_spin.setRange(0.0, 50.0)  # the server's own clamp
+        self._overlap_spin.setDecimals(1)
+        self._overlap_spin.setSingleStep(1.0)
+        self._overlap_spin.setSuffix(" %")
+        self._overlap_spin.setToolTip(
+            "Percent of a field neighbouring tiles share.\n"
+            "The stitcher needs real overlap to register on; below about 5%\n"
+            "it cannot, and that cannot be fixed after the run."
+        )
+        self._overlap_spin.valueChanged.connect(self._on_tiling_changed)
+        overlap_label.setBuddy(self._overlap_spin)
+        row.addWidget(overlap_label)
+        row.addWidget(self._overlap_spin)
+
+        self._show_frames_cb = QCheckBox("Show target frames")
+        self._show_frames_cb.setChecked(True)
+        self._show_frames_cb.setToolTip(
+            "Outline every acquisition tile on the overview, in the "
+            "acquisition's own field."
+        )
+        self._show_frames_cb.toggled.connect(self._refresh_target_frames)
+        row.addWidget(self._show_frames_cb)
+        row.addStretch()
+        outer.addLayout(row)
+
+        self._tiling_plan_label = QLabel()
+        self._tiling_plan_label.setWordWrap(True)
+        self._tiling_plan_label.setStyleSheet("color: #555; font-size: 11px;")
+        outer.addWidget(self._tiling_plan_label)
+
+        # The gate. Unticked, "Collect tiles" does not work -- and any change
+        # to the settings above unticks it again, because verifying settings
+        # you then changed is not verification.
+        self._verify_cb = QCheckBox(
+            "I have checked the acquisition AOI and overlap above"
+        )
+        self._verify_cb.setToolTip(
+            "Required. These settings fix the tile grid the run images, and "
+            "cannot be changed once collection starts."
+        )
+        self._verify_cb.toggled.connect(self._on_verify_toggled)
+        outer.addWidget(self._verify_cb)
+
+        group.setLayout(outer)
+
+        # Blink while unverified, so an unchecked box cannot be mistaken for a
+        # finished dialog. Stops the moment it is ticked.
+        self._blink_on = False
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(600)
+        self._blink_timer.timeout.connect(self._blink_tiling_panel)
+
+        self._restore_tiling_state()
+        QTimer.singleShot(0, self._on_tiling_changed)
+        return group
+
+    def _acquisition_aoi_px(self):
+        return self._parse_aoi(self._aoi_combo.currentData()) or (2048, 1024)
+
+    @staticmethod
+    def _parse_aoi(value):
+        """(width, height) from a "WxH" item payload, or None."""
+        try:
+            width, height = str(value).lower().split("x")
+            return (int(width), int(height))
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    def _select_aoi(self, width: int, height: int) -> None:
+        """Select this AOI, adding it if this build does not list it.
+
+        Scans the items rather than trusting findData, and never substitutes a
+        size the user did not choose: the hardware accepted it once, and a
+        silent substitution changes what gets collected.
+        """
+        wanted = f"{int(width)}x{int(height)}"
+        for index in range(self._aoi_combo.count()):
+            if self._aoi_combo.itemData(index) == wanted:
+                self._aoi_combo.setCurrentIndex(index)
+                return
+        self._aoi_combo.addItem(f"{int(width)} x {int(height)} px", wanted)
+        self._aoi_combo.setCurrentIndex(self._aoi_combo.count() - 1)
+
+    def _acquisition_overlap_percent(self) -> float:
+        return float(self._overlap_spin.value())
+
+    def _tiling_is_verified(self) -> bool:
+        return bool(getattr(self, "_verify_cb", None) and self._verify_cb.isChecked())
+
+    def _on_tiling_changed(self, *_args) -> None:
+        """Replan, redraw the frames, and drop any previous verification."""
+        if getattr(self, "_verify_cb", None) is not None:
+            self._verify_cb.blockSignals(True)
+            self._verify_cb.setChecked(False)
+            self._verify_cb.blockSignals(False)
+        self._update_tiling_plan_label()
+        self._refresh_target_frames()
+        self._save_tiling_state()
+        self._on_verify_toggled()
+
+    def _on_verify_toggled(self, *_args) -> None:
+        """Start or stop the blink, and gate the Collect button."""
+        verified = self._tiling_is_verified()
+        timer = getattr(self, "_blink_timer", None)
+        if timer is not None:
+            if verified:
+                timer.stop()
+                self._blink_on = False
+                self._paint_tiling_panel(alert=False)
+            elif not timer.isActive():
+                timer.start()
+        self._save_tiling_state()
+        self._update_collect_button()
+
+    def _blink_tiling_panel(self) -> None:
+        self._blink_on = not self._blink_on
+        self._paint_tiling_panel(alert=self._blink_on)
+
+    def _paint_tiling_panel(self, alert: bool) -> None:
+        group = getattr(self, "_tiling_group", None)
+        if group is None:
+            return
+        if alert:
+            group.setStyleSheet(
+                "QGroupBox { border: 2px solid #e67e22; border-radius: 4px; "
+                "margin-top: 6px; background-color: #fdf2e3; } "
+                "QGroupBox::title { color: #d35400; font-weight: bold; "
+                "subcontrol-origin: margin; left: 8px; }"
+            )
+        else:
+            group.setStyleSheet(
+                "QGroupBox { border: 1px solid #bbb; border-radius: 4px; "
+                "margin-top: 6px; } "
+                "QGroupBox::title { subcontrol-origin: margin; left: 8px; }"
+            )
+
+    def _acquisition_plan_for(self, tiles):
+        """The acquisition grid for one view's SELECTED tiles, or None."""
+        if not tiles:
+            return None
+        overview_fov = self._overview_fov_mm()
+        if overview_fov is None:
+            return None
+        pixel_um = self._effective_pixel_size_um()
+        if pixel_um is None:
+            return None
+        from py2flamingo.utils.tile_geometry import plan_acquisition_from_overview
+
+        aoi_w, aoi_h = self._acquisition_aoi_px()
+        z_lo = min((getattr(t, "z_stack_min", 0.0) for t in tiles), default=0.0)
+        z_hi = max((getattr(t, "z_stack_max", 0.0) for t in tiles), default=0.0)
+        try:
+            return plan_acquisition_from_overview(
+                tiles,
+                overview_fov_x_mm=overview_fov[0],
+                overview_fov_y_mm=overview_fov[1],
+                acquisition_fov_x_mm=aoi_w * pixel_um / 1000.0,
+                acquisition_fov_y_mm=aoi_h * pixel_um / 1000.0,
+                overlap_percent=self._acquisition_overlap_percent(),
+                z_min_mm=z_lo,
+                z_max_mm=z_hi,
+                stage_limits=self._stage_limits(),
+                drop_uncovered=True,
+            )
+        except Exception:
+            logger.error("Could not plan the acquisition grid", exc_info=True)
+            return None
+
+    def _effective_pixel_size_um(self):
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            value = float(get_hardware_config().effective_pixel_size_um)
+        except Exception:
+            logger.debug("Effective pixel size unavailable", exc_info=True)
+            return None
+        return value if value > 0 else None
+
+    def _stage_limits(self):
+        """Hard stage limits, or None when this microscope is not configured.
+
+        None rather than a guess: the placeholder limits are WIDER than the
+        instrument, so "no violations" against them is worse than silence.
+        """
+        settings = (
+            getattr(self._app, "microscope_settings", None) if self._app else None
+        )
+        if settings is None or not getattr(settings, "is_configured", False):
+            return None
+        try:
+            return settings.get_stage_limits()
+        except Exception:
+            logger.debug("Stage limits unavailable", exc_info=True)
+            return None
+
+    def _update_tiling_plan_label(self) -> None:
+        label = getattr(self, "_tiling_plan_label", None)
+        if label is None:
+            return
+        pixel_um = self._effective_pixel_size_um()
+        aoi_w, aoi_h = self._acquisition_aoi_px()
+        if pixel_um is None:
+            label.setStyleSheet("color: #c0392b; font-size: 11px;")
+            label.setText(
+                "No pixel size available, so the acquisition field cannot be "
+                "sized. Collection will use the overview's own tile positions."
+            )
+            return
+
+        fov_x = aoi_w * pixel_um / 1000.0
+        fov_y = aoi_h * pixel_um / 1000.0
+        lines = [
+            f"Acquisition field {fov_x:.4f} x {fov_y:.4f} mm "
+            f"({aoi_w} x {aoi_h} px at {pixel_um:.4f} µm/px)."
+        ]
+        warned = False
+        selected = 0
+        for panel, angle in (
+            (self.left_panel, self._rotation_label(0)),
+            (self.right_panel, self._rotation_label(1)),
+        ):
+            tiles = panel.get_selected_tiles()
+            if not tiles:
+                continue
+            selected += len(tiles)
+            plan = self._acquisition_plan_for(tiles)
+            if plan is None:
+                lines.append(f"{angle}: could not plan a grid for this selection.")
+                warned = True
+                continue
+            g = plan.geometry
+            lines.append(
+                f"{angle}: {len(tiles)} selected → {plan.acquisition_tiles} "
+                f"acquisition tile(s) ({g.tiles_x} x {g.tiles_y} grid), step "
+                f"{g.step_x_mm:.4f} x {g.step_y_mm:.4f} mm."
+            )
+            no_z = plan.tiles_without_overview_z
+            if no_z:
+                shown = ", ".join(f"X{t.x_mm:.2f}/Y{t.y_mm:.2f}" for t in no_z[:3])
+                lines.append(
+                    f"   ⚠ {len(no_z)} tile(s) have no measured depth ({shown})."
+                )
+                warned = True
+            if g.violations:
+                lines.append(
+                    f"   ⚠ {len(g.violations)} tile position(s) outside the "
+                    f"stage limits: {g.violations[0].describe()}"
+                )
+                warned = True
+
+        if not selected:
+            lines.append("Select tiles to see the grid this will produce.")
+        if self._acquisition_overlap_percent() < 5.0:
+            lines.append(
+                "   ⚠ Below about 5% overlap the stitcher has nothing to "
+                "register on, and that cannot be fixed after the run."
+            )
+            warned = True
+
+        label.setStyleSheet(
+            "color: #c0392b; font-size: 11px;"
+            if warned
+            else "color: #555; font-size: 11px;"
+        )
+        label.setText("\n".join(lines))
+
+    def _rotation_label(self, index: int) -> str:
+        try:
+            return f"R={self._results[index].rotation_angle:g}°"
+        except (IndexError, TypeError, AttributeError):
+            return "R=0°" if index == 0 else "R=90°"
+
+    def _refresh_target_frames(self, *_args) -> None:
+        """Draw (or clear) the acquisition frames on both panels."""
+        show = bool(
+            getattr(self, "_show_frames_cb", None) and self._show_frames_cb.isChecked()
+        )
+        for panel in (self.left_panel, self.right_panel):
+            if not show:
+                panel.set_target_frames([])
+                continue
+            plan = self._acquisition_plan_for(panel.get_selected_tiles())
+            if plan is None:
+                panel.set_target_frames([])
+                continue
+            g = plan.geometry
+            panel.set_target_frames(
+                [(t.x_mm, t.y_mm, g.fov_x_mm, g.fov_y_mm) for t in plan.tiles]
+            )
+
+    def _save_tiling_state(self) -> None:
+        manager = self._tiling_manager()
+        if manager is None:
+            return
+        try:
+            manager.save_dialog_state(
+                self.TILING_STATE_ID,
+                {
+                    "aoi_px": list(self._acquisition_aoi_px()),
+                    "overlap_percent": self._acquisition_overlap_percent(),
+                    "show_frames": bool(self._show_frames_cb.isChecked()),
+                },
+            )
+            manager.save_all()
+        except Exception:
+            logger.debug("Could not save acquisition tiling state", exc_info=True)
+
+    def _restore_tiling_state(self) -> None:
+        """Bring back the last AOI and overlap. Verification is NOT restored.
+
+        The settings persist because retyping them every run invites a typo;
+        the tick does not, because it is a statement about this run.
+        """
+        manager = self._tiling_manager()
+        state = {}
+        if manager is not None:
+            try:
+                state = manager.restore_dialog_state(self.TILING_STATE_ID) or {}
+            except Exception:
+                logger.debug(
+                    "Could not restore acquisition tiling state", exc_info=True
+                )
+
+        aoi = state.get("aoi_px")
+        self._aoi_combo.blockSignals(True)
+        try:
+            if isinstance(aoi, (list, tuple)) and len(aoi) == 2:
+                self._select_aoi(int(aoi[0]), int(aoi[1]))
+            else:
+                self._aoi_combo.setCurrentIndex(1)
+        except (TypeError, ValueError):
+            self._aoi_combo.setCurrentIndex(1)
+        finally:
+            self._aoi_combo.blockSignals(False)
+
+        overlap = state.get("overlap_percent")
+        if not isinstance(overlap, (int, float)) or not 0.0 <= overlap <= 50.0:
+            from py2flamingo.utils.acquisition_profile_generator import (
+                DEFAULT_OVERLAP_PERCENT,
+            )
+
+            overlap = float(DEFAULT_OVERLAP_PERCENT)
+        self._overlap_spin.blockSignals(True)
+        self._overlap_spin.setValue(float(overlap))
+        self._overlap_spin.blockSignals(False)
+
+        self._show_frames_cb.blockSignals(True)
+        self._show_frames_cb.setChecked(bool(state.get("show_frames", True)))
+        self._show_frames_cb.blockSignals(False)
+
+    def _tiling_manager(self):
+        """The geometry manager, however this window got one.
+
+        PersistentWidget resolves its own from the module-level default; fall
+        back to that so the settings persist even when this window was built
+        without an app.
+        """
+        manager = getattr(self, "_geometry_manager", None)
+        if manager is not None:
+            return manager
+        if self._app is not None:
+            manager = getattr(self._app, "geometry_manager", None)
+            if manager is not None:
+                return manager
+        try:
+            from py2flamingo.services import window_geometry_manager as wgm
+
+            return wgm._default_geometry_manager
+        except Exception:
+            return None
+
     def _on_collect_tiles(self):
         """Open dialog to configure and collect workflows for selected tiles."""
         # Gather selected tiles from both panels
@@ -1459,6 +2019,19 @@ class LED2DOverviewResultWindow(PersistentWidget):
         if not left_tiles and not right_tiles:
             QMessageBox.warning(
                 self, "No Selection", "Please select at least one tile first."
+            )
+            return
+
+        # Belt and braces: the button is disabled without this, but the check
+        # is cheap and the cost of getting past it is a whole run at the wrong
+        # tile spacing.
+        if not self._tiling_is_verified():
+            QMessageBox.warning(
+                self,
+                "Verify the acquisition tiling",
+                "Check the acquisition AOI and tile overlap above, then tick "
+                "the box to confirm them.\n\nThey fix the tile grid this run "
+                "images and cannot be changed afterwards.",
             )
             return
 
@@ -1490,6 +2063,11 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 f"rotations {left_rotation:g} / {right_rotation:g} deg",
             ),
             overview_fov_mm=self._overview_fov_mm(),
+            # Decided and verified here, over the image they apply to. The
+            # dialog shows them read-only: changing them there would put the
+            # grid the user approved out of step with the grid collected.
+            acquisition_aoi_px=self._acquisition_aoi_px(),
+            acquisition_overlap_percent=self._acquisition_overlap_percent(),
         )
         dialog.exec_()
 

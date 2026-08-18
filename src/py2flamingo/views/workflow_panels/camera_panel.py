@@ -79,6 +79,9 @@ class CameraPanel(QWidget):
         # values over them via set_workflow_dict().
         self._aoi_width = 2048
         self._aoi_height = 2048
+        #: True once a caller has built a tile grid from this AOI, so changing
+        #: it would collect a different field than the grid was spaced for.
+        self._aoi_locked = False
         self._cam1_percentage = 100
         self._cam1_mode = 0
         self._cam2_percentage = 100
@@ -255,8 +258,33 @@ class CameraPanel(QWidget):
             self._logger.warning(f"Camera detection failed: {e}")
             return False
 
+    def lock_aoi(self, reason: str) -> None:
+        """Stop the AOI being changed, and say why on the panel.
+
+        The AOI is written into the workflow, so it is the field the run
+        actually collects. When a caller has already built a tile grid from a
+        chosen AOI and had the user confirm it, editing it here would collect a
+        different field than the grid was spaced for -- gaps the grid says are
+        not there. Locking the whole Advanced dialog rather than the AOI rows
+        inside it, because exposure and dual-camera settings are reached
+        through the same button and none of them are worth reopening this hole.
+        """
+        self._aoi_locked = True
+        self._advanced_btn.setEnabled(False)
+        self._advanced_btn.setToolTip(reason)
+        self._aoi_info.setText(
+            f"AOI: {self._aoi_width}x{self._aoi_height} (locked — {reason})"
+        )
+        self._aoi_info.setStyleSheet("color: #d35400; font-size: 9pt;")
+
+    @property
+    def aoi_locked(self) -> bool:
+        return bool(getattr(self, "_aoi_locked", False))
+
     def _on_advanced_clicked(self) -> None:
         """Open advanced camera settings dialog."""
+        if self.aoi_locked:
+            return
         from py2flamingo.views.dialogs import AdvancedCameraDialog
 
         dialog = AdvancedCameraDialog(self)
@@ -362,10 +390,24 @@ class CameraPanel(QWidget):
                     f"({settings['frame_rate']!r}); keeping {self._frame_rate:.1f} fps"
                 )
 
-        if "aoi_width" in settings:
-            self._aoi_width = settings["aoi_width"]
-        if "aoi_height" in settings:
-            self._aoi_height = settings["aoi_height"]
+        # A locked AOI outranks any stored one. Restoring persisted dialog
+        # state runs AFTER the lock is applied, so without this the last run's
+        # AOI would quietly replace the one a tile grid was just built and
+        # verified against.
+        if not self.aoi_locked:
+            if "aoi_width" in settings:
+                self._aoi_width = settings["aoi_width"]
+            if "aoi_height" in settings:
+                self._aoi_height = settings["aoi_height"]
+        elif settings.get("aoi_width") not in (None, self._aoi_width) or settings.get(
+            "aoi_height"
+        ) not in (None, self._aoi_height):
+            self._logger.info(
+                f"Ignoring stored AOI {settings.get('aoi_width')}x"
+                f"{settings.get('aoi_height')}: this acquisition is locked to "
+                f"{self._aoi_width}x{self._aoi_height}, which its tile grid "
+                f"was built from."
+            )
         if "cam1_capture_percentage" in settings:
             self._cam1_percentage = settings["cam1_capture_percentage"]
         if "cam1_capture_mode" in settings:
@@ -377,7 +419,8 @@ class CameraPanel(QWidget):
 
         # Update displays
         self._update_detected_display()
-        self._aoi_info.setText(f"AOI: {self._aoi_width}x{self._aoi_height}")
+        if not self.aoi_locked:
+            self._aoi_info.setText(f"AOI: {self._aoi_width}x{self._aoi_height}")
 
     def get_frame_rate(self) -> float:
         """Get frame rate (capped at 40 fps)."""

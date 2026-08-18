@@ -170,6 +170,8 @@ class TileCollectionDialog(PersistentDialog):
         local_base_folder: str = None,
         targeting_source=None,
         overview_fov_mm: Optional[Tuple[float, float]] = None,
+        acquisition_aoi_px: Optional[Tuple[int, int]] = None,
+        acquisition_overlap_percent: Optional[float] = None,
     ):
         """Initialize the dialog.
 
@@ -194,6 +196,13 @@ class TileCollectionDialog(PersistentDialog):
                 grid's spacing is meaningless for a different field. Falls back
                 to the full sensor, which is what every overview path uses
                 today, but a caller that knows should say so.
+            acquisition_aoi_px: (width, height) AOI the caller already chose and
+                had the user verify. When given, the tiling controls here become
+                READ-ONLY and the camera AOI is locked to it. The grid these
+                produce is what the run images, so letting it be edited in a
+                second window would put the plan the user approved out of step
+                with the one collected.
+            acquisition_overlap_percent: the overlap chosen alongside it.
         """
         super().__init__(parent)
 
@@ -206,6 +215,19 @@ class TileCollectionDialog(PersistentDialog):
         self._left_tiles = list(self._overview_left_tiles)
         self._right_tiles = list(self._overview_right_tiles)
         self._overview_fov_mm = overview_fov_mm
+        self._locked_aoi_px = (
+            (int(acquisition_aoi_px[0]), int(acquisition_aoi_px[1]))
+            if acquisition_aoi_px
+            else None
+        )
+        self._locked_overlap_percent = (
+            float(acquisition_overlap_percent)
+            if acquisition_overlap_percent is not None
+            else None
+        )
+        #: True when the caller already had these settings verified, so nothing
+        #: in this dialog may change them.
+        self._tiling_locked = self._locked_aoi_px is not None
         #: How the overview field was arrived at, for the tiling label.
         self._overview_fov_source = "unknown"
         #: The regenerated grid for each view, or None when re-tiling is off or
@@ -455,7 +477,9 @@ class TileCollectionDialog(PersistentDialog):
         )
         # Initial estimate
         QTimer.singleShot(0, self._update_size_estimate)
-        # First plan, once every widget the refresh touches exists.
+        # Lock first, then plan: the plan must be computed from the locked
+        # values, not from whatever the controls defaulted to.
+        self._apply_tiling_lock()
         QTimer.singleShot(0, self._apply_retiling)
 
         # Sample View Integration checkbox
@@ -748,10 +772,15 @@ class TileCollectionDialog(PersistentDialog):
                 "available. Re-tiling is unavailable; the overview's own tile "
                 "positions will be used."
             )
+            # Unsizable: off regardless of the lock. Guarding this with the
+            # lock flag turned "cannot size the field" into "controls enabled".
             self._retile_checkbox.setEnabled(False)
             return
 
-        self._retile_checkbox.setEnabled(True)
+        # Never re-enable a locked control. This method runs on every replan,
+        # so an unconditional setEnabled(True) here quietly undid the lock a
+        # moment after it was applied.
+        self._retile_checkbox.setEnabled(not self._tiling_locked)
         try:
             camera = self._camera_panel.get_settings()
             aoi = f"{int(camera.get('aoi_width', 0))} x {int(camera.get('aoi_height', 0))} px"
@@ -862,8 +891,43 @@ class TileCollectionDialog(PersistentDialog):
         group.setLayout(layout)
         return group
 
+    def _apply_tiling_lock(self) -> None:
+        """Freeze the tiling controls when the caller already had them verified.
+
+        The AOI and overlap fix the tile grid the run images. When they were
+        chosen and confirmed in the overview window -- over the picture they
+        apply to -- editing them again here would put the grid the user
+        approved out of step with the grid collected, with nothing to say so.
+        Shown, not hidden: the run is about to be built from them.
+        """
+        if self._locked_aoi_px is None:
+            return
+
+        self._retile_checkbox.setChecked(True)
+        self._retile_checkbox.setEnabled(False)
+        if self._locked_overlap_percent is not None:
+            self._retile_overlap_spin.setValue(self._locked_overlap_percent)
+        self._retile_overlap_spin.setEnabled(False)
+
+        # And the camera AOI itself, which is what reaches the workflow. A grid
+        # built for one field and collected with another is the failure this
+        # whole section exists to prevent.
+        self._camera_panel.set_settings(
+            {
+                "aoi_width": self._locked_aoi_px[0],
+                "aoi_height": self._locked_aoi_px[1],
+            }
+        )
+        self._camera_panel.lock_aoi("Set and verified in the LED 2D Overview window.")
+
+        group = self._retile_checkbox.parentWidget()
+        if group is not None and hasattr(group, "setTitle"):
+            group.setTitle("Acquisition Tiling (verified in the overview window)")
+
     def _default_overlap_percent(self) -> float:
         """The overview's own overlap when it recorded one, else the default."""
+        if self._locked_overlap_percent is not None:
+            return self._locked_overlap_percent
         value = getattr(self._config, "tile_overlap_percent", None)
         try:
             value = float(value)
@@ -3310,14 +3374,20 @@ class TileCollectionDialog(PersistentDialog):
         # tile count it produces feeds the size estimate and the ETA. The
         # signals are blocked so the two settings apply as one change rather
         # than replanning the grid twice on the way through.
-        if "retile_overlap_percent" in state:
-            self._retile_overlap_spin.blockSignals(True)
-            self._retile_overlap_spin.setValue(float(state["retile_overlap_percent"]))
-            self._retile_overlap_spin.blockSignals(False)
-        if "retile_enabled" in state:
-            self._retile_checkbox.blockSignals(True)
-            self._retile_checkbox.setChecked(bool(state["retile_enabled"]))
-            self._retile_checkbox.blockSignals(False)
+        # Not when locked: these were chosen and verified upstream against the
+        # image they apply to, and restore runs AFTER the lock is applied, so
+        # the last run's overlap would silently replace the approved one.
+        if not self._tiling_locked:
+            if "retile_overlap_percent" in state:
+                self._retile_overlap_spin.blockSignals(True)
+                self._retile_overlap_spin.setValue(
+                    float(state["retile_overlap_percent"])
+                )
+                self._retile_overlap_spin.blockSignals(False)
+            if "retile_enabled" in state:
+                self._retile_checkbox.blockSignals(True)
+                self._retile_checkbox.setChecked(bool(state["retile_enabled"]))
+                self._retile_checkbox.blockSignals(False)
 
         # Restore workflow type
         if "workflow_type" in state:
