@@ -299,6 +299,39 @@ def selection_region_mm(
     return (min(centres_mm) - half, max(centres_mm) + half)
 
 
+def measured_step_mm(centres_mm: Sequence[float]) -> Optional[float]:
+    """Smallest distinct gap between tile centres along one axis, or None.
+
+    The SMALLEST, not the median: a selection is a subset, so gaps between
+    tiles the user skipped are multiples of the real step. One adjacent pair
+    anywhere in the set gives the true pitch; taking a median would report a
+    skipped gap as the step and inflate the field derived from it.
+    """
+    values = sorted({round(float(v), 6) for v in centres_mm})
+    gaps = [b - a for a, b in zip(values, values[1:]) if b - a > 1e-6]
+    return min(gaps) if gaps else None
+
+
+def field_from_step_mm(
+    step_mm: Optional[float], overlap_percent: float
+) -> Optional[float]:
+    """The field a measured step implies, given the overlap it was built with.
+
+    ``step = fov * (1 - overlap/100)``, so ``fov = step / (1 - overlap/100)``.
+    Used to recover the field an overview was imaged at, which nothing records:
+    the AOI at scan time is not saved, and it is NOT always the full sensor --
+    cropping the LED to match the sheet's vertical extent is exactly what the
+    2026-08-17 run did. Measuring the grid that was walked beats assuming the
+    sensor that might have walked it.
+    """
+    if step_mm is None or step_mm <= 0:
+        return None
+    fraction = 1.0 - _clamp_overlap(float(overlap_percent)) / 100.0
+    if fraction <= 0:
+        return None
+    return float(step_mm) / fraction
+
+
 def plan_acquisition_from_overview(
     overview_centres: Sequence[Tuple[float, float]],
     *,

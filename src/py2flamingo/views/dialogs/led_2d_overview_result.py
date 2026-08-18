@@ -1383,6 +1383,72 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 "Cannot move stage - not connected to microscope.",
             )
 
+    def _overview_fov_mm(self):
+        """(x, y) field, in mm, each overview tile covered — or None.
+
+        Measured from the grid the scan actually walked, because nothing
+        records the AOI the overview ran at and it is NOT always the full
+        sensor: cropping the LED to match the light sheet's vertical extent is
+        exactly what the 2026-08-17 run did. ``step = fov * (1 - overlap/100)``
+        inverts to give the field back.
+
+        Falls back to the full sensor, which is what the overview does when
+        nobody has cropped it. Returns None only when neither is available —
+        the caller must not substitute a guess, because the field sets the
+        region the acquisition will cover.
+        """
+        from py2flamingo.utils.tile_geometry import (
+            field_from_step_mm,
+            measured_step_mm,
+        )
+
+        overlap = getattr(self._config, "tile_overlap_percent", None)
+        tiles = []
+        for result in self._results or []:
+            tiles.extend(getattr(result, "tiles", None) or [])
+        if tiles and overlap is not None:
+            try:
+                fov_x = field_from_step_mm(
+                    measured_step_mm([t.x for t in tiles]), float(overlap)
+                )
+                fov_y = field_from_step_mm(
+                    measured_step_mm([t.y for t in tiles]), float(overlap)
+                )
+            except (TypeError, ValueError):
+                fov_x = fov_y = None
+            # A single row or column measures only one axis. The overview grid
+            # uses one field for both, so the axis that WAS measured stands in
+            # for the one that was not.
+            fov_x = fov_x or fov_y
+            fov_y = fov_y or fov_x
+            if fov_x and fov_y:
+                logger.info(
+                    f"Overview field measured from the tile grid: "
+                    f"{fov_x:.4f} x {fov_y:.4f} mm at {float(overlap):.1f}% overlap"
+                )
+                return (fov_x, fov_y)
+
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            hw = get_hardware_config()
+            px_mm = float(hw.effective_pixel_size_um) / 1000.0
+            fov = (
+                float(hw.sensor_width_px) * px_mm,
+                float(hw.sensor_height_px) * px_mm,
+            )
+        except Exception:
+            logger.warning(
+                "Overview field of view is unknown: the tile grid could not be "
+                "measured and the hardware config is unavailable.",
+                exc_info=True,
+            )
+            return None
+        logger.info(
+            f"Overview field assumed full-sensor: {fov[0]:.4f} x {fov[1]:.4f} mm"
+        )
+        return fov
+
     def _on_collect_tiles(self):
         """Open dialog to configure and collect workflows for selected tiles."""
         # Gather selected tiles from both panels
@@ -1422,6 +1488,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 f"left {len(left_tiles)} / right {len(right_tiles)} tile(s), "
                 f"rotations {left_rotation:g} / {right_rotation:g} deg",
             ),
+            overview_fov_mm=self._overview_fov_mm(),
         )
         dialog.exec_()
 

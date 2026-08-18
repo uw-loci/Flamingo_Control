@@ -169,6 +169,7 @@ class TileCollectionDialog(PersistentDialog):
         parent=None,
         local_base_folder: str = None,
         targeting_source=None,
+        overview_fov_mm: Optional[Tuple[float, float]] = None,
     ):
         """Initialize the dialog.
 
@@ -186,11 +187,31 @@ class TileCollectionDialog(PersistentDialog):
                 tiles were picked off. Recorded in the acquisition manifest,
                 because which image the grid was aimed from is unrecoverable
                 from the acquisition folder afterwards.
+            overview_fov_mm: (x, y) field of view, in mm, the *overview* tiles
+                were imaged at. Needed because it is generally NOT the field
+                this acquisition will use -- LED transmission fills the sensor,
+                the light sheet does not fill it vertically -- and the overview
+                grid's spacing is meaningless for a different field. Falls back
+                to the full sensor, which is what every overview path uses
+                today, but a caller that knows should say so.
         """
         super().__init__(parent)
 
-        self._left_tiles = left_tiles
-        self._right_tiles = right_tiles
+        # The user's selection, kept intact. `_left_tiles`/`_right_tiles` are
+        # the EFFECTIVE lists everything else reads: identical to these until
+        # re-tiling regenerates the grid, and restored from them when it is
+        # switched back off.
+        self._overview_left_tiles = list(left_tiles or [])
+        self._overview_right_tiles = list(right_tiles or [])
+        self._left_tiles = list(self._overview_left_tiles)
+        self._right_tiles = list(self._overview_right_tiles)
+        self._overview_fov_mm = overview_fov_mm
+        #: How the overview field was arrived at, for the tiling label.
+        self._overview_fov_source = "unknown"
+        #: The regenerated grid for each view, or None when re-tiling is off or
+        #: could not be planned.
+        self._left_plan = None
+        self._right_plan = None
         self._left_rotation = left_rotation
         self._right_rotation = right_rotation
         self._config = config
@@ -202,7 +223,9 @@ class TileCollectionDialog(PersistentDialog):
         )  # Default to Z-Stack (user preference)
 
         # Determine if 90-degree overlap mode is available
-        self._has_dual_view = bool(left_tiles) and bool(right_tiles)
+        self._has_dual_view = bool(self._overview_left_tiles) and bool(
+            self._overview_right_tiles
+        )
         self._primary_is_left = True  # Default: left panel is primary
 
         # Calculate Z ranges for tiles
@@ -378,6 +401,13 @@ class TileCollectionDialog(PersistentDialog):
         self._camera_panel.settings_changed.connect(self._on_camera_settings_changed)
         container_layout.addWidget(self._camera_panel)
 
+        # Directly under the camera panel, because the AOI set there is what
+        # sizes the acquisition field this section tiles with.
+        container_layout.addWidget(self._create_retile_section())
+        self._camera_panel.settings_changed.connect(
+            lambda _=None: self._apply_retiling()
+        )
+
         # Z-Stack panel - pass app for system defaults
         # Default to visible since we default to Z-Stack mode
         self._zstack_panel = ZStackPanel(app=self._app)
@@ -425,6 +455,8 @@ class TileCollectionDialog(PersistentDialog):
         )
         # Initial estimate
         QTimer.singleShot(0, self._update_size_estimate)
+        # First plan, once every widget the refresh touches exists.
+        QTimer.singleShot(0, self._apply_retiling)
 
         # Sample View Integration checkbox
         self._add_to_sample_view_checkbox = QCheckBox(
@@ -487,6 +519,363 @@ class TileCollectionDialog(PersistentDialog):
 
         layout.addLayout(button_layout)
         self.setLayout(layout)
+
+    # ------------------------------------------------------------------ #
+    # Acquisition tiling -- the acquisition grid is not the overview grid
+    # ------------------------------------------------------------------ #
+
+    def _effective_pixel_size_um(self) -> Optional[float]:
+        """Sample-plane pixel size, mm-per-pixel * 1000, or None if unknown.
+
+        One source only. Two pixel sizes means the grid previewed here and the
+        grid the stage walks can disagree with nothing to say which is lying.
+        """
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            value = float(get_hardware_config().effective_pixel_size_um)
+        except Exception:
+            logger.debug("Effective pixel size unavailable", exc_info=True)
+            return None
+        return value if value > 0 else None
+
+    def _overview_fov_mm_resolved(self) -> Optional[Tuple[float, float]]:
+        """(x, y) field the overview tiles were imaged at, in mm.
+
+        Sets ``_overview_fov_source`` to how the number was arrived at. The
+        field bounds the region the acquisition will cover, so a caller that
+        measured it and a fallback that assumed the full sensor are not
+        interchangeable, and the label says which one is in force.
+        """
+        self._overview_fov_source = "measured by the overview"
+        if self._overview_fov_mm:
+            try:
+                fx, fy = (float(v) for v in self._overview_fov_mm)
+                if fx > 0 and fy > 0:
+                    return (fx, fy)
+            except (TypeError, ValueError):
+                pass
+        self._overview_fov_source = "assumed full sensor"
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            hw = get_hardware_config()
+            px = float(hw.effective_pixel_size_um) / 1000.0
+            fx = float(hw.sensor_width_px) * px
+            fy = float(hw.sensor_height_px) * px
+        except Exception:
+            logger.debug("Overview FOV unavailable", exc_info=True)
+            return None
+        return (fx, fy) if fx > 0 and fy > 0 else None
+
+    def _acquisition_fov_mm(self) -> Optional[Tuple[float, float]]:
+        """(x, y) field this acquisition will image, from the camera panel AOI.
+
+        The AOI in the panel below is the one applied to the camera before the
+        run, so it is the field the light sheet will actually cover -- and the
+        only honest basis for the acquisition grid.
+        """
+        panel = getattr(self, "_camera_panel", None)
+        pixel_um = self._effective_pixel_size_um()
+        if panel is None or pixel_um is None:
+            return None
+        try:
+            settings = panel.get_settings()
+            width = float(settings.get("aoi_width") or 0)
+            height = float(settings.get("aoi_height") or 0)
+        except Exception:
+            logger.debug("Camera AOI unavailable", exc_info=True)
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return (width * pixel_um / 1000.0, height * pixel_um / 1000.0)
+
+    def _stage_limits(self) -> Optional[dict]:
+        """Hard stage limits, or None when this microscope is not configured.
+
+        None rather than a guess: the placeholder limits are WIDER than the
+        instrument, so reporting "no violations" against them would be worse
+        than reporting nothing.
+        """
+        settings = (
+            getattr(self._app, "microscope_settings", None) if self._app else None
+        )
+        if settings is None or not getattr(settings, "is_configured", False):
+            return None
+        try:
+            return settings.get_stage_limits()
+        except Exception:
+            logger.debug("Stage limits unavailable", exc_info=True)
+            return None
+
+    def _retiling_requested(self) -> bool:
+        checkbox = getattr(self, "_retile_checkbox", None)
+        return bool(checkbox is not None and checkbox.isChecked())
+
+    def _build_plan(self, overview_tiles: List):
+        """The acquisition grid for one view's selection, or None if unplannable."""
+        if not overview_tiles:
+            return None
+        overview_fov = self._overview_fov_mm_resolved()
+        acq_fov = self._acquisition_fov_mm()
+        if overview_fov is None or acq_fov is None:
+            return None
+
+        from py2flamingo.utils.tile_geometry import plan_acquisition_from_overview
+
+        fallback = summarize_acquired_z(overview_tiles)
+        z_min, z_max = (fallback[0], fallback[1]) if fallback else (0.0, 0.0)
+        try:
+            return plan_acquisition_from_overview(
+                overview_tiles,
+                overview_fov_x_mm=overview_fov[0],
+                overview_fov_y_mm=overview_fov[1],
+                acquisition_fov_x_mm=acq_fov[0],
+                acquisition_fov_y_mm=acq_fov[1],
+                overlap_percent=self._retile_overlap_spin.value(),
+                z_min_mm=z_min,
+                z_max_mm=z_max,
+                stage_limits=self._stage_limits(),
+                drop_uncovered=True,
+            )
+        except Exception:
+            logger.error("Could not plan the acquisition grid", exc_info=True)
+            return None
+
+    @staticmethod
+    def _tiles_from_plan(plan, rotation: float) -> List:
+        """Turn a plan into TileResults the rest of the dialog can consume.
+
+        Tile indices are assigned from the regenerated grid's own rows and
+        columns. They are NOT the overview's indices -- a different field of
+        view gives a different number of tiles in a different place, and reusing
+        the old indices is how the per-tile Z ranges would attach to the wrong
+        tiles.
+        """
+        from py2flamingo.models.data.overview_results import TileResult
+
+        tiles = []
+        xs = sorted({round(t.x_mm, 4) for t in plan.tiles}, reverse=True)
+        ys = sorted({round(t.y_mm, 4) for t in plan.tiles}, reverse=True)
+        for planned in plan.tiles:
+            tiles.append(
+                TileResult(
+                    x=planned.x_mm,
+                    y=planned.y_mm,
+                    z=(planned.z_min_mm + planned.z_max_mm) / 2.0,
+                    tile_x_idx=xs.index(round(planned.x_mm, 4)),
+                    tile_y_idx=ys.index(round(planned.y_mm, 4)),
+                    rotation_angle=rotation,
+                    z_stack_min=planned.z_min_mm,
+                    z_stack_max=planned.z_max_mm,
+                )
+            )
+        return tiles
+
+    def _apply_retiling(self, *_args) -> None:
+        """Regenerate the effective tile lists, then refresh everything reading them."""
+        self._left_plan = None
+        self._right_plan = None
+
+        if not self._retiling_requested():
+            self._left_tiles = list(self._overview_left_tiles)
+            self._right_tiles = list(self._overview_right_tiles)
+        else:
+            self._left_plan = self._build_plan(self._overview_left_tiles)
+            self._right_plan = self._build_plan(self._overview_right_tiles)
+            self._left_tiles = (
+                self._tiles_from_plan(self._left_plan, self._left_rotation)
+                if self._left_plan
+                else list(self._overview_left_tiles)
+            )
+            self._right_tiles = (
+                self._tiles_from_plan(self._right_plan, self._right_rotation)
+                if self._right_plan
+                else list(self._overview_right_tiles)
+            )
+
+        self._update_z_ranges()
+        self._update_retile_label()
+        self._update_summary_label()
+        self._refresh_z_section()
+        self._update_smart_acq_description()
+        self._update_size_estimate()
+
+    def _describe_plan(self, plan, label: str) -> List[str]:
+        """Lines describing one view's plan, warnings included."""
+        g = plan.geometry
+        lines = [
+            f"{label}{plan.acquisition_tiles} tile(s) "
+            f"({g.tiles_x} x {g.tiles_y} grid"
+            + (
+                f", {plan.dropped_tiles} outside the selection"
+                if plan.dropped_tiles
+                else ""
+            )
+            + f"), step {g.step_x_mm:.4f} x {g.step_y_mm:.4f} mm"
+        ]
+        no_z = plan.tiles_without_overview_z
+        if no_z:
+            # Named, not counted: their depth was never measured, and the Z
+            # edges are what the laser acquisition sweeps.
+            shown = ", ".join(f"X{t.x_mm:.2f}/Y{t.y_mm:.2f}" for t in no_z[:4])
+            more = f" and {len(no_z) - 4} more" if len(no_z) > 4 else ""
+            lines.append(
+                f"   ⚠ {len(no_z)} tile(s) have no measured depth "
+                f"({shown}{more}) — using the acquisition's overall Z range."
+            )
+        if g.violations:
+            axes = sorted({v.axis.upper() for v in g.violations})
+            lines.append(
+                f"   ⚠ {len(g.violations)} tile position(s) outside the stage "
+                f"{'/'.join(axes)} limit(s): {g.violations[0].describe()}"
+            )
+        return lines
+
+    def _update_retile_label(self) -> None:
+        label = getattr(self, "_retile_label", None)
+        if label is None:
+            return
+
+        acq_fov = self._acquisition_fov_mm()
+        overview_fov = self._overview_fov_mm_resolved()
+        pixel_um = self._effective_pixel_size_um()
+
+        if acq_fov is None or overview_fov is None:
+            label.setStyleSheet("color: #c0392b; font-size: 11px;")
+            label.setText(
+                "Cannot size the acquisition field: no pixel size or camera AOI "
+                "available. Re-tiling is unavailable; the overview's own tile "
+                "positions will be used."
+            )
+            self._retile_checkbox.setEnabled(False)
+            return
+
+        self._retile_checkbox.setEnabled(True)
+        try:
+            camera = self._camera_panel.get_settings()
+            aoi = f"{int(camera.get('aoi_width', 0))} x {int(camera.get('aoi_height', 0))} px"
+        except Exception:
+            aoi = "AOI unknown"
+
+        lines = [
+            f"Acquisition field {acq_fov[0]:.4f} x {acq_fov[1]:.4f} mm "
+            f"({aoi} at {pixel_um:.4f} µm/px); "
+            f"overview field {overview_fov[0]:.4f} x {overview_fov[1]:.4f} mm "
+            f"({self._overview_fov_source})."
+        ]
+
+        if not self._retiling_requested():
+            lines.append(
+                f"Off — collecting the {len(self._overview_left_tiles) + len(self._overview_right_tiles)}"
+                " selected tile(s) at the overview's own positions and spacing. "
+                "Correct only if the acquisition field and overlap match the "
+                "overview's; otherwise the tiles will be gapped."
+            )
+            label.setStyleSheet("color: #555; font-size: 11px;")
+            label.setText("\n".join(lines))
+            return
+
+        plans = [
+            (self._left_plan, f"R={self._left_rotation:g}°: "),
+            (self._right_plan, f"R={self._right_rotation:g}°: "),
+        ]
+        described = False
+        warned = False
+        for plan, prefix in plans:
+            if plan is None:
+                continue
+            described = True
+            plan_lines = self._describe_plan(
+                plan, prefix if self._has_dual_view else ""
+            )
+            warned = warned or len(plan_lines) > 1
+            lines.extend(plan_lines)
+
+        if not described:
+            lines.append(
+                "Could not generate a grid from this selection — the overview's "
+                "own tile positions will be used."
+            )
+            warned = True
+
+        label.setStyleSheet(
+            "color: #c0392b; font-size: 11px;"
+            if warned
+            else "color: #555; font-size: 11px;"
+        )
+        label.setText("\n".join(lines))
+
+    def _create_retile_section(self) -> QGroupBox:
+        """Choose the acquisition field and overlap, independent of the overview.
+
+        The overview and the acquisition do not see the same field. LED
+        transmission fills the sensor; the light sheet does not fill it
+        vertically, so re-imaging at the overview's tile centres leaves gaps
+        wherever the sheet cannot illuminate what the LED could see. This is
+        also the coupling that let a requested 20% overlap reach the stage as
+        0.25%: the overview grid was a one-way door into acquisition, and
+        nothing re-derived the spacing.
+        """
+        group = QGroupBox("Acquisition Tiling")
+        layout = QVBoxLayout()
+
+        self._retile_checkbox = QCheckBox(
+            "Re-tile the selection for the acquisition field of view"
+        )
+        self._retile_checkbox.setChecked(True)
+        self._retile_checkbox.setToolTip(
+            "Generate a fresh tile grid over the region the selected tiles "
+            "cover, using the camera AOI set below and the overlap set here.\n"
+            "Each new tile takes the deepest Z range of the overview tiles it "
+            "overlaps.\n"
+            "Turn off only to collect at the overview's own tile positions."
+        )
+        self._retile_checkbox.toggled.connect(self._apply_retiling)
+        layout.addWidget(self._retile_checkbox)
+
+        overlap_row = QHBoxLayout()
+        overlap_label = QLabel("Tile overlap:")
+        self._retile_overlap_spin = QDoubleSpinBox()
+        self._retile_overlap_spin.setRange(0.0, 50.0)  # the server's own clamp
+        self._retile_overlap_spin.setSingleStep(1.0)
+        self._retile_overlap_spin.setDecimals(1)
+        self._retile_overlap_spin.setSuffix(" %")
+        self._retile_overlap_spin.setValue(self._default_overlap_percent())
+        self._retile_overlap_spin.setToolTip(
+            "Percent of a field neighbouring tiles share. The step is "
+            "FOV x (1 - overlap/100). The stitcher needs real overlap to "
+            "register on; below about 5% it cannot."
+        )
+        self._retile_overlap_spin.valueChanged.connect(self._apply_retiling)
+        overlap_label.setBuddy(self._retile_overlap_spin)
+        overlap_row.addWidget(overlap_label)
+        overlap_row.addWidget(self._retile_overlap_spin)
+        overlap_row.addStretch()
+        layout.addLayout(overlap_row)
+
+        self._retile_label = QLabel()
+        self._retile_label.setWordWrap(True)
+        self._retile_label.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addWidget(self._retile_label)
+
+        group.setLayout(layout)
+        return group
+
+    def _default_overlap_percent(self) -> float:
+        """The overview's own overlap when it recorded one, else the default."""
+        value = getattr(self._config, "tile_overlap_percent", None)
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = None
+        if value is None or not 0.0 <= value <= 50.0:
+            from py2flamingo.utils.acquisition_profile_generator import (
+                DEFAULT_OVERLAP_PERCENT,
+            )
+
+            return float(DEFAULT_OVERLAP_PERCENT)
+        return value
 
     # ------------------------------------------------------------------ #
     # Smart Limited Acquisition (Mode A: position-based single-arm)
@@ -1949,7 +2338,9 @@ class TileCollectionDialog(PersistentDialog):
                 "Field of view X (mm)": round(fov_mm, 4),
                 "Field of view Y (mm)": round(float(hw.fov_height_mm), 4),
             }
+            fov_height_mm = float(hw.fov_height_mm)
         except Exception as exc:
+            fov_height_mm = None
             manifest.notes.append(f"optics unavailable: {exc}")
 
         try:
@@ -1967,13 +2358,21 @@ class TileCollectionDialog(PersistentDialog):
         except Exception as exc:
             manifest.notes.append(f"illumination unavailable: {exc}")
 
+        # The overlap this ACQUISITION asked for, which since re-tiling is not
+        # the overview's. Reporting the overview's would fire a MISMATCH on
+        # every re-tiled run and turn the manifest's most valuable line into
+        # noise -- which is how a real mismatch would then get past a reader.
         requested = None
-        try:
-            requested = float(getattr(self._config, "tile_overlap_percent", None))
-        except (TypeError, ValueError):
-            requested = None
+        if self._retiling_requested():
+            requested = float(self._retile_overlap_spin.value())
+            grid_source = "re-tiled for the acquisition field"
+        else:
+            try:
+                requested = float(getattr(self._config, "tile_overlap_percent", None))
+            except (TypeError, ValueError):
+                requested = None
+            grid_source = "overview tile positions"
 
-        step_mm = self._observed_tile_step_mm()
         manifest.tiling = {
             "Tiles requested": len(self._left_tiles or [])
             + len(self._right_tiles or []),
@@ -1981,29 +2380,46 @@ class TileCollectionDialog(PersistentDialog):
             "Right panel tiles": len(self._right_tiles or []),
             "Left rotation (deg)": self._left_rotation,
             "Right rotation (deg)": self._right_rotation,
+            "Tile grid": grid_source,
         }
-        manifest.tiling.update(overlap_check(fov_mm, step_mm, requested))
-        if "MISMATCH" in manifest.tiling:
-            manifest.warnings.append(manifest.tiling["MISMATCH"])
 
-    def _observed_tile_step_mm(self):
-        """Smallest distinct spacing between the tiles actually requested, mm.
+        # Per axis. The acquisition field is generally NOT square -- the light
+        # sheet does not fill the sensor vertically -- so checking the smallest
+        # step against the X field would report a mismatch on a perfectly good
+        # grid, and could hide a real one on the other axis.
+        acq_fov = self._acquisition_fov_mm()
+        fov_by_axis = acq_fov if acq_fov else (fov_mm, fov_height_mm)
+        steps = self._observed_tile_steps_mm()
+        for axis, axis_fov, axis_step in (
+            ("X", fov_by_axis[0], steps[0]),
+            ("Y", fov_by_axis[1], steps[1]),
+        ):
+            for key, value in overlap_check(axis_fov, axis_step, requested).items():
+                if key == "MISMATCH":
+                    manifest.warnings.append(f"{axis}: {value}")
+                    manifest.tiling[f"MISMATCH ({axis})"] = value
+                else:
+                    manifest.tiling[f"{key} [{axis}]"] = value
+
+    def _observed_tile_steps_mm(self):
+        """(x, y) smallest distinct spacing between the tiles requested, mm.
 
         Measured from the tile list rather than recomputed from the overlap
         setting, so the manifest reports what was really stepped instead of
-        restating the intention.
+        restating the intention. Per axis, because the acquisition field is not
+        square and one number cannot describe both.
         """
-        try:
-            tiles = list(self._left_tiles or []) + list(self._right_tiles or [])
-            steps = []
-            for axis in ("x", "y"):
-                values = sorted({round(float(getattr(t, axis)), 4) for t in tiles})
-                gaps = [b - a for a, b in zip(values, values[1:]) if b - a > 1e-6]
-                if gaps:
-                    steps.append(min(gaps))
-            return min(steps) if steps else None
-        except Exception:
-            return None
+        steps = []
+        for axis in ("x", "y"):
+            try:
+                tiles = list(self._left_tiles or []) + list(self._right_tiles or [])
+                values = [float(getattr(t, axis)) for t in tiles]
+                from py2flamingo.utils.tile_geometry import measured_step_mm
+
+                steps.append(measured_step_mm(values))
+            except Exception:
+                steps.append(None)
+        return (steps[0], steps[1])
 
     def _fill_manifest_tiles(self, manifest, TileRecord, mapping) -> None:
         try:
@@ -2842,6 +3258,8 @@ class TileCollectionDialog(PersistentDialog):
             "z_manual_end": self._z_end_spin.value(),
             "multiview_enabled": self._multiview_checkbox.isChecked(),
             "multiview_angles": self._multiview_angles_spin.value(),
+            "retile_enabled": self._retile_checkbox.isChecked(),
+            "retile_overlap_percent": self._retile_overlap_spin.value(),
             # Panel settings (using ui_state methods for raw dict persistence)
             "illumination": self._illumination_panel.get_ui_state(),
             "camera": self._camera_panel.get_settings(),
@@ -2887,6 +3305,19 @@ class TileCollectionDialog(PersistentDialog):
         if state.get("z_manual_mode"):
             self._z_manual_radio.setChecked(True)
         self._refresh_z_section()
+
+        # Acquisition tiling. Restored before the workflow type because the
+        # tile count it produces feeds the size estimate and the ETA. The
+        # signals are blocked so the two settings apply as one change rather
+        # than replanning the grid twice on the way through.
+        if "retile_overlap_percent" in state:
+            self._retile_overlap_spin.blockSignals(True)
+            self._retile_overlap_spin.setValue(float(state["retile_overlap_percent"]))
+            self._retile_overlap_spin.blockSignals(False)
+        if "retile_enabled" in state:
+            self._retile_checkbox.blockSignals(True)
+            self._retile_checkbox.setChecked(bool(state["retile_enabled"]))
+            self._retile_checkbox.blockSignals(False)
 
         # Restore workflow type
         if "workflow_type" in state:
