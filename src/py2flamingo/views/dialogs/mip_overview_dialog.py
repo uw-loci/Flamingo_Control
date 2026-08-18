@@ -62,6 +62,7 @@ from py2flamingo.models.mip_overview import (
     read_tile_z_range,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.saved_data_version import MIP_SESSION
 from py2flamingo.utils.tile_folder_organizer import infer_local_drive_root
 from py2flamingo.visualization.zarr_2d_session import (
     ZARR_AVAILABLE,
@@ -1273,12 +1274,16 @@ class MIPOverviewDialog(PersistentDialog):
             self._app.config_service.set_mip_session_path(folder)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        metadata = {
-            "version": "1.0",
-            "saved_at": datetime.now().isoformat(),
-            "config": self._config.to_dict(),
-            "tiles": [t.to_dict() for t in self._tiles],
-        }
+        saved_at = datetime.now().isoformat()
+        metadata = MIP_SESSION.stamp(
+            {
+                "version": "1.0",
+                "saved_at": saved_at,
+                "config": self._config.to_dict(),
+                "tiles": [t.to_dict() for t in self._tiles],
+            },
+            written_at=saved_at,
+        )
 
         if ZARR_AVAILABLE:
             save_path = Path(folder) / f"mip_overview_{timestamp}.zarr"
@@ -1364,6 +1369,15 @@ class MIPOverviewDialog(PersistentDialog):
                 )
                 return
 
+            # What wrote this, and can we read it? A session from a newer
+            # build is refused rather than guessed at: a newer writer may mean
+            # something different by the same fields.
+            compatibility = MIP_SESSION.check(metadata)
+            if not compatibility.readable:
+                QMessageBox.critical(self, "Load Error", compatibility.reason)
+                return
+            logger.info(f"Loading session: {compatibility.reason}")
+
             config = MIPOverviewConfig.from_dict(metadata["config"])
             tiles = []
             for tile_data in metadata.get("tiles", []):
@@ -1379,6 +1393,15 @@ class MIPOverviewDialog(PersistentDialog):
                     self, "Load Error", f"Failed to read metadata:\n{e}"
                 )
                 return
+
+            # What wrote this, and can we read it? A session from a newer
+            # build is refused rather than guessed at: a newer writer may mean
+            # something different by the same fields.
+            compatibility = MIP_SESSION.check(metadata)
+            if not compatibility.readable:
+                QMessageBox.critical(self, "Load Error", compatibility.reason)
+                return
+            logger.info(f"Loading session: {compatibility.reason}")
 
             config = MIPOverviewConfig.from_dict(metadata["config"])
 
@@ -1466,6 +1489,12 @@ class MIPOverviewDialog(PersistentDialog):
                 logger.error(f"Failed to load zarr session: {e}")
                 return None
 
+            compatibility = MIP_SESSION.check(metadata)
+            if not compatibility.readable:
+                logger.error(compatibility.reason)
+                return None
+            logger.info(f"Loading session: {compatibility.reason}")
+
             config = MIPOverviewConfig.from_dict(metadata["config"])
             tiles = []
             for tile_data in metadata.get("tiles", []):
@@ -1479,6 +1508,12 @@ class MIPOverviewDialog(PersistentDialog):
             except Exception as e:
                 logger.error(f"Failed to load metadata: {e}")
                 return None
+
+            compatibility = MIP_SESSION.check(metadata)
+            if not compatibility.readable:
+                logger.error(compatibility.reason)
+                return None
+            logger.info(f"Loading session: {compatibility.reason}")
 
             config = MIPOverviewConfig.from_dict(metadata["config"])
 

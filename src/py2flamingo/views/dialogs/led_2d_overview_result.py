@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.services.window_geometry_manager import PersistentWidget
+from py2flamingo.utils.saved_data_version import LED_2D_SESSION
 
 logger = logging.getLogger(__name__)
 
@@ -1753,13 +1754,19 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Build metadata
-        metadata = {
-            "version": "1.0",
-            "saved_at": datetime.now().isoformat(),
-            "config": {},
-            "rotations": [],
-        }
+        # Build metadata. Stamped with the build and format that wrote it, so
+        # a session that will not load, or loads into something subtly wrong,
+        # can be told apart from a corrupt one.
+        saved_at = datetime.now().isoformat()
+        metadata = LED_2D_SESSION.stamp(
+            {
+                "version": "1.0",
+                "saved_at": saved_at,
+                "config": {},
+                "rotations": [],
+            },
+            written_at=saved_at,
+        )
 
         # Save config if available
         if self._config:
@@ -1881,6 +1888,14 @@ class LED2DOverviewResultWindow(PersistentWidget):
                 metadata = json.load(f)
         else:
             raise FileNotFoundError(f"No valid session found in {folder_path}")
+
+        # What wrote this, and can we read it? A session from a newer build is
+        # refused rather than guessed at: a newer writer may mean something
+        # different by the same fields, and the caller shows this message.
+        compatibility = LED_2D_SESSION.check(metadata)
+        if not compatibility.readable:
+            raise ValueError(compatibility.reason)
+        logger.info(f"Loading session: {compatibility.reason}")
 
         # Reconstruct config
         config = None

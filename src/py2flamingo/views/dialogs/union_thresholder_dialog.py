@@ -35,6 +35,7 @@ from py2flamingo.pipeline.services.threshold_analysis_service import (
     ThresholdSettings,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.saved_data_version import THRESHOLD_PRESET
 
 logger = logging.getLogger(__name__)
 
@@ -901,30 +902,32 @@ class UnionThresholderDialog(PersistentDialog):
 
     def _build_preset_dict(self) -> dict:
         """Build a preset dictionary from current dialog state."""
-        return {
-            "version": 2,
-            "channels": {
-                str(ch_id): {
-                    "enabled": cb.isChecked(),
-                    "threshold": slider.value(),
-                }
-                for ch_id, (cb, slider, _) in self._channel_controls.items()
-            },
-            "display": {
-                "opacity": self._opacity_slider.value() / 100.0,
-                "show_mask": self._show_mask_cb.isChecked(),
-            },
-            "processing": {
-                "gauss_sigma": self._gauss_sigma_spin.value(),
-                "min_object_size": self._min_object_spin.value(),
-                "opening_enabled": self._opening_cb.isChecked(),
-                "opening_radius": self._opening_radius_spin.value(),
-            },
-            "profile": {
-                "buffer_fraction": self._buffer_spin.value(),
-                "angles": self._angles_edit.text(),
-            },
-        }
+        return THRESHOLD_PRESET.stamp(
+            {
+                "version": 2,
+                "channels": {
+                    str(ch_id): {
+                        "enabled": cb.isChecked(),
+                        "threshold": slider.value(),
+                    }
+                    for ch_id, (cb, slider, _) in self._channel_controls.items()
+                },
+                "display": {
+                    "opacity": self._opacity_slider.value() / 100.0,
+                    "show_mask": self._show_mask_cb.isChecked(),
+                },
+                "processing": {
+                    "gauss_sigma": self._gauss_sigma_spin.value(),
+                    "min_object_size": self._min_object_spin.value(),
+                    "opening_enabled": self._opening_cb.isChecked(),
+                    "opening_radius": self._opening_radius_spin.value(),
+                },
+                "profile": {
+                    "buffer_fraction": self._buffer_spin.value(),
+                    "angles": self._angles_edit.text(),
+                },
+            }
+        )
 
     def _apply_preset_dict(self, state: dict) -> None:
         """Apply a preset/state dictionary to the dialog controls.
@@ -1088,6 +1091,18 @@ class UnionThresholderDialog(PersistentDialog):
             logger.error(f"Failed to load preset: {e}")
             QMessageBox.critical(self, "Load Error", f"Failed to load preset:\n{e}")
             return
+
+        # A preset from a newer build is refused rather than applied. Every
+        # value here is silently clamped into range on the way in, so a field
+        # a newer version means differently would not fail — it would apply a
+        # plausible wrong threshold, and the tiles that threshold selects are
+        # what gets acquired.
+        compatibility = THRESHOLD_PRESET.check(preset)
+        if not compatibility.readable:
+            logger.error(compatibility.reason)
+            QMessageBox.critical(self, "Preset Not Loaded", compatibility.reason)
+            return
+        logger.info(f"Loading preset: {compatibility.reason}")
 
         self._apply_preset_dict(preset)
 
