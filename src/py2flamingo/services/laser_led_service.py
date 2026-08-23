@@ -431,25 +431,32 @@ class LaserLEDService(MicroscopeCommandService):
             f"Setting {color_names[led_color]} LED intensity to {intensity_percent:.1f}%"
         )
 
-        # LED RANGE FIX: Map UI 0-100% to second half of 16-bit range (positive percentages)
-        # LED uses signed percentage system: -100% to +100% mapped to unsigned 16-bit
-        # From C++ GUI logs: 0% → 32000, 50% → 48767, 100% → 65534
-        # First half (0-31999): -100% to ~0% (negative percentages, LED off/dark)
-        # Second half (32000-65534): 0% to +100% (positive percentages, LED brightness)
-        # UI  0% → 32000 (server 0%, LED off)
-        # UI 50% → 48767 (server +50%, half brightness)
-        # UI 100% → 65534 (server +100%, full brightness)
-        LED_MIN = 32000
-        LED_MAX = 65534
-        led_value = LED_MIN + int((LED_MAX - LED_MIN) * (intensity_percent / 100.0))
+        # The server takes the PERCENTAGE directly: 27 means 27%.
+        #
+        # It used to take a raw 16-bit level, and this mapped 0-100% onto the
+        # positive half of a signed range (0% -> 32000, 50% -> 48767,
+        # 100% -> 65534) to match what the C++ GUI was observed to send. A
+        # server update replaced that with the percentage itself, so the old
+        # mapping now asks for 32000% and the LED lands wherever the firmware
+        # clamps to -- bright regardless of the setting, with the slider
+        # apparently doing nothing.
+        #
+        # Kept in the log rather than the code: nothing here should be
+        # translating the number any more, and the history explains why a
+        # reader might expect it to.
+        #
+        # The wire fields are int32, so a fractional percent from the spin box
+        # is rounded rather than truncated -- 27.6% is nearer 28 than 27.
+        led_value = int(round(intensity_percent))
 
         self.logger.debug(
-            f"LED value mapping: UI {intensity_percent:.1f}% → LED value {led_value} (server +{intensity_percent:.1f}%)"
+            f"LED_SET: {color_names[led_color]} at {intensity_percent:.1f}% "
+            f"-> sending {led_value} (percentage, server protocol)"
         )
 
         # LED_SET command (0x4001):
         # int32Data0 = led_color (0=Red, 1=Green, 2=Blue, 3=White)
-        # int32Data1 = led_value (32000-65534 range, positive half of signed percentage)
+        # int32Data1 = intensity as a PERCENTAGE (0-100)
         result = self._send_command(
             LaserLEDCommandCode.LED_SET,
             "LED_SET",

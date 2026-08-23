@@ -125,7 +125,7 @@ class LEDCommands:
     """
 
     # LED control commands
-    SET_VALUE = 0x4001  # 16385 - Set LED brightness (0-65535)
+    SET_VALUE = 0x4001  # 16385 - Set LED brightness as a PERCENTAGE (0-100)
     ENABLE = 0x4002  # 16386 - Enable LED
     DISABLE = 0x4003  # 16387 - Disable LED
     SELECTION_CHANGE = 0x4006  # 16390 - Change LED selection
