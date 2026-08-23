@@ -302,11 +302,18 @@ class ConnectionView(QWidget):
     def _on_disconnect_clicked(self) -> None:
         """Handle disconnect button click.
 
-        Calls controller to disconnect and displays result.
+        The UI is put into the disconnected state whether or not there was
+        anything to disconnect. "Not connected" comes back as a failure, and
+        restoring the enabled state only on success meant that pressing
+        Disconnect while nothing was held did nothing at all — the safety net
+        for a view stuck in a state it cannot leave was itself a no-op.
+
+        The message still reports what actually happened, so a real disconnect
+        failure is not hidden.
         """
         success, message = self._controller.disconnect()
         self._show_message(message, is_error=not success)
-        if success:
+        if success or not self._is_connected():
             self._update_status(connected=False)
 
     def _update_status(self, connected: bool) -> None:
@@ -369,12 +376,20 @@ class ConnectionView(QWidget):
         self.connection_established.emit()
 
     def _update_status_error(self, error_message: str) -> None:
-        """Update UI state for communication error (TCP connected but microscope not responding).
+        """Update UI state for a communication error, leaving the address editable.
 
-        This puts the UI in a partial state where:
-        - Connect button is re-enabled (to allow retry)
-        - Disconnect button stays enabled (TCP is connected)
-        - Sample View and other features are disabled (microscope not usable)
+        Reached when the socket opened but the microscope did not answer. The
+        single most likely reason for that is the address being wrong — a
+        different machine on the network answering on the same port looks
+        exactly like this — so the address is the FIRST thing the user needs to
+        change, not the last.
+
+        It used to disable the IP and port here, reasoning that a TCP connection
+        was still held. That stranded people: with a wrong-but-reachable IP
+        entered, the fields locked on the first attempt and the only way back
+        was restarting the app. Disconnect did not help either, because with no
+        connection actually held it returned "Not connected" and the view only
+        restores the enabled state on success.
 
         Args:
             error_message: Error message to display
@@ -387,11 +402,11 @@ class ConnectionView(QWidget):
 
         # Re-enable Connect to allow retry
         self.connect_btn.setEnabled(True)
-        # Keep Disconnect enabled since TCP is connected
+        # Disconnect stays available to tear down a socket that may be held.
         self.disconnect_btn.setEnabled(True)
-        # Keep IP/port disabled (still have TCP connection)
-        self.ip_input.setEnabled(False)
-        self.port_input.setEnabled(False)
+        # The address stays editable. Correcting it is the fix for this error.
+        self.ip_input.setEnabled(True)
+        self.port_input.setEnabled(True)
         # (sample_view_btn stays enabled — it works without connection)
 
     def _on_sample_view_clicked(self) -> None:
@@ -453,12 +468,50 @@ class ConnectionView(QWidget):
         # Display result
         self._show_message(message, is_error=not success)
 
-        # If test successful, pull and display settings
-        if success:
-            self._logger.info("ConnectionView: Test successful, loading settings...")
+        if not success:
+            self._logger.warning("ConnectionView: Test failed, not loading settings")
+            return
+
+        # Settings can only be read over a LIVE connection, and a test
+        # deliberately does not leave one: it opens a socket, confirms the
+        # server answers, and closes it again. Asking for settings afterwards
+        # always failed, so a SUCCESSFUL test reported "Communication Error"
+        # and put the view into its error state — which is how a wrong address
+        # got its fields locked on the very first attempt.
+        if self._is_connected():
+            self._logger.info("ConnectionView: Test successful, refreshing settings...")
             self._load_and_display_settings()
-        else:
-            self._logger.warning(f"ConnectionView: Test failed, not loading settings")
+            return
+
+        self._logger.info(
+            "ConnectionView: Test successful; not connected, so settings were "
+            "not read. Press Connect to open a session."
+        )
+        self.settings_display.setPlainText(
+            f"{ip}:{port} answered.\n\n"
+            "Settings are read over a live connection — press Connect to open "
+            "one.\n\n"
+            "Note that a successful test only means SOMETHING answered on that "
+            "address and port. If Connect then reports a communication error, "
+            "the address most likely belongs to a different machine."
+        )
+        self.settings_display.setStyleSheet(
+            "QTextEdit { font-family: 'Courier New', monospace; font-size: 10pt; }"
+        )
+
+    def _is_connected(self) -> bool:
+        """Is a live connection held right now?
+
+        Asked of the controller rather than inferred from which widgets happen
+        to be enabled — the enabled state is a consequence of the connection,
+        not a record of it, and reading it backwards is how the view got stuck
+        believing in a connection nothing was holding.
+        """
+        try:
+            return bool(self._controller.get_connection_status().get("connected"))
+        except Exception:
+            self._logger.debug("Could not read connection status", exc_info=True)
+            return False
 
     def send_debug_query(self, command_code: int, command_name: str) -> None:
         """Send a debug query command and display the parsed response.
