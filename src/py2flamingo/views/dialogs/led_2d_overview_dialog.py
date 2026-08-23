@@ -541,15 +541,29 @@ class LED2DOverviewDialog(PersistentDialog):
     LOW_OVERLAP_WARN_PERCENT = 5.0
 
     def _create_tile_overlap_row(self) -> QFrame:
-        """The tile-overlap control, deliberately made the loudest thing here.
+        """The overlap the OVERVIEW itself walks — not the acquisition's.
 
-        This is a one-way door. The overview walks a grid whose step is
-        ``FOV × (1 − overlap)``, and tile collection re-images those exact stage
-        positions — so overlap chosen here is inherited by every later
-        acquisition and cannot be raised afterwards without shifting the whole
-        grid (which would invalidate the overview the tiles were picked from).
-        Hence the framed row, the (!!) explainer, and the red state below
-        ``LOW_OVERLAP_WARN_PERCENT``.
+        This used to be a one-way door: tile collection re-imaged the overview's
+        exact stage positions, so the overlap chosen here was inherited by every
+        later acquisition. That is no longer true. The acquisition chooses its
+        own AOI and overlap in the results window, and regenerates its own grid
+        (a 9-tile overview routinely becomes 32 acquisition tiles).
+
+        Two things still depend on this value, so it cannot simply go away:
+
+        * **It is the only record of the overview's AOI.** Nothing stores the
+          AOI the overview ran at, and it is not always the full sensor —
+          cropping the LED to the light sheet's vertical extent is exactly what
+          the 2026-08-17 run did. ``_overview_fov_mm`` inverts
+          ``step = FOV × (1 − overlap)`` to recover the field, and that field
+          sets the region the acquisition covers. A wrong value here silently
+          moves that region.
+        * **Gaps.** 0% nominal overlap plus stage error means real gaps in the
+          overview: sample never seen, and holes in the per-tile Z map the
+          acquisition's Z ranges are built from.
+
+        Neither is about stitching, and neither is permanent, so the row is no
+        longer shouted about — it just has to be right.
         """
         frame = QFrame()
         frame.setObjectName("tileOverlapRow")
@@ -569,10 +583,14 @@ class LED2DOverviewDialog(PersistentDialog):
         self.tile_overlap.setSuffix(" %")
         self.tile_overlap.setValue(10.0)
         self.tile_overlap.setToolTip(
-            "Percent of a field of view that neighbouring tiles share.\n"
-            "Tiles step by FOV × (1 − overlap), so 0% butts them edge-to-edge:\n"
-            "the stitcher then has nothing to register on and any stage\n"
-            "repeatability error shows up as a seam. 10% is a sane default.\n\n"
+            "Percent of a field of view that neighbouring OVERVIEW tiles\n"
+            "share. Tiles step by FOV × (1 − overlap), so 0% butts them\n"
+            "edge-to-edge and any stage error opens a real gap — sample you\n"
+            "never see, and a hole in the Z map the acquisition is built from.\n\n"
+            "This is NOT the acquisition's overlap: that is chosen separately\n"
+            "in the results window, and the acquisition regenerates its own\n"
+            "grid. It does still need to be accurate, because it is the only\n"
+            "record of the AOI the overview ran at.\n\n"
             "The server clamps this to 0–50%."
         )
         self.tile_overlap.valueChanged.connect(self._update_scan_info)
@@ -594,20 +612,23 @@ class LED2DOverviewDialog(PersistentDialog):
             QPushButton:hover { background-color: #e53935; }
             """)
         self._overlap_help_btn.setToolTip(
-            "This choice is PERMANENT for this sample.\n"
+            "This sets the OVERVIEW's own grid, not the acquisition's.\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "The overview walks a tile grid whose step is FOV × (1 − overlap).\n"
-            "Collect Tiles later re-images those SAME stage positions, so the\n"
-            "overlap you pick now is inherited by every acquisition built from\n"
-            "this overview — full tile collections included.\n\n"
-            "It cannot be increased afterwards: doing so would move every tile\n"
-            "position, and the tiles you selected on the overview would no\n"
-            "longer correspond to what gets acquired.\n\n"
-            "At 0% the tiles butt edge-to-edge. Stitching then has no shared\n"
-            "content to register on and falls back to raw stage positions, and\n"
-            "each frame's edge falloff lands directly on the seam — visible as\n"
-            "a brightness step at every tile boundary.\n\n"
-            "10% is the sane default. Below 5% is flagged."
+            "The overview walks a tile grid whose step is FOV × (1 − overlap).\n\n"
+            "It used to be permanent — Collect Tiles re-imaged those same stage\n"
+            "positions. It no longer does: the acquisition chooses its own AOI\n"
+            "and overlap in the results window and regenerates its own grid, so\n"
+            "a 9-tile overview routinely becomes 32 acquisition tiles.\n\n"
+            "Two things still depend on this number:\n\n"
+            "1. It is the ONLY record of the AOI the overview ran at. Nothing\n"
+            "   else stores it, and it is not always the full sensor. The\n"
+            "   recovered field sets the region the acquisition covers, so a\n"
+            "   wrong value here silently moves that region.\n\n"
+            "2. At 0% the tiles butt edge-to-edge, and any stage error then\n"
+            "   opens a real gap: sample never imaged, and a hole in the\n"
+            "   per-tile Z map the acquisition's Z ranges come from.\n\n"
+            "So it only has to beat stage error, not satisfy the stitcher.\n"
+            "10% is a safe default. Below 5% is flagged."
         )
         self._overlap_help_btn.clicked.connect(self._show_tile_overlap_help)
         row.addWidget(self._overlap_help_btn)
@@ -632,8 +653,9 @@ class LED2DOverviewDialog(PersistentDialog):
         value = spin.value()
         if value < self.LOW_OVERLAP_WARN_PERCENT:
             label.setText(
-                f"⚠ {value:.1f}% is too little to stitch — this is permanent "
-                f"for every acquisition from this overview."
+                f"⚠ {value:.1f}% risks gaps between overview tiles if the stage "
+                f"is off — sample you never see. (The acquisition sets its own "
+                f"overlap later; this is not it.)"
             )
             label.setStyleSheet("color: #c62828; font-weight: bold;")
             if frame is not None:
@@ -642,7 +664,10 @@ class LED2DOverviewDialog(PersistentDialog):
                     "background-color: rgba(198, 40, 40, 40); border-radius: 4px; }"
                 )
         else:
-            label.setText("Applies to every acquisition from this overview.")
+            label.setText(
+                "Overview tiles only. The acquisition chooses its own overlap "
+                "in the results window."
+            )
             label.setStyleSheet("color: gray;")
             if frame is not None:
                 frame.setStyleSheet(
@@ -653,7 +678,7 @@ class LED2DOverviewDialog(PersistentDialog):
     def _show_tile_overlap_help(self) -> None:
         """Click target for (!!) — the tooltip text as a dismissable dialog."""
         QMessageBox.information(
-            self, "Tile overlap is permanent", self._overlap_help_btn.toolTip()
+            self, "Overview tile overlap", self._overlap_help_btn.toolTip()
         )
 
     def _create_imaging_group(self) -> QGroupBox:
@@ -1872,11 +1897,68 @@ class LED2DOverviewDialog(PersistentDialog):
                 f"Enabled {color_names[led_color]} LED for LED 2D Overview scan"
             )
 
+            # Prove a frame actually arrives before committing to the scan.
+            #
+            # start_live_view() succeeding means the request was made, not that
+            # the camera is streaming. On 2026-08-26 the stream delivered
+            # NOTHING for a whole overview: 294 tiles, 125 minutes of stage and
+            # camera wait, every plane timing out on an empty buffer, and the
+            # run finished "successfully" with 0 tiles and no error. Every tile
+            # captured zero frames and the only sign was a Captured 0 tiles line
+            # at the very end.
+            #
+            # One frame is all this needs. At 40 fps it arrives in ~25 ms, so a
+            # few seconds is generous and costs nothing on a healthy stream.
+            if not self._wait_for_first_frame(camera_controller):
+                return False
+
             return True
 
         except Exception as e:
             self._logger.error(f"Error enabling LED: {e}", exc_info=True)
             return False
+
+    #: How long to wait for the first live frame before refusing to scan. At
+    #: 40 fps a frame is due every 25 ms; this is startup slack, not a guess.
+    FIRST_FRAME_TIMEOUT_S = 5.0
+
+    def _wait_for_first_frame(self, camera_controller) -> bool:
+        """Is the camera actually delivering frames? Log and fail if not.
+
+        The overview reads every plane from the live buffer, so an empty buffer
+        does not degrade the result -- it produces no result at all, after the
+        full scan time. Checking here turns two hours of silence into an
+        immediate, actionable message.
+        """
+        import time
+
+        deadline = time.monotonic() + self.FIRST_FRAME_TIMEOUT_S
+        while time.monotonic() < deadline:
+            try:
+                if camera_controller.get_latest_frame() is not None:
+                    return True
+            except Exception as exc:  # noqa: BLE001 - treat as "no frame yet"
+                self._logger.debug(f"get_latest_frame raised while waiting: {exc}")
+            from PyQt5.QtWidgets import QApplication
+
+            QApplication.processEvents()
+            time.sleep(0.02)
+
+        self._logger.error(
+            f"No camera frame arrived within {self.FIRST_FRAME_TIMEOUT_S:.0f}s of "
+            f"starting live view, so the overview would read every plane from an "
+            f"empty buffer and capture nothing. Refusing to start."
+        )
+        QMessageBox.critical(
+            self,
+            "No Camera Frames",
+            "Live view started but no frames are arriving from the camera, so "
+            "the overview would run to completion and capture nothing.\n\n"
+            "Most often the live port is already held by another client (the "
+            "C++ Flamingo GUI). Close it, or stop and restart Live View here, "
+            "then try again.",
+        )
+        return False
 
     def _stop_sample_view_live(self) -> None:
         """Stop the live view in SampleView and update button state."""

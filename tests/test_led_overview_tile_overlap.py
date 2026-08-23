@@ -165,7 +165,9 @@ class TestOverlapIsUnmissableInTheUI:
     """The setting is a one-way door, so the UI has to say so.
 
     The overview fixes the tile grid step; Collect Tiles re-images those exact
-    stage positions. Overlap chosen here is therefore inherited by every later
+    stage positions. (NO LONGER TRUE -- see test_there_is_a_bang_bang_explainer:
+    the acquisition grid was decoupled and picks its own overlap.) Overlap
+    chosen here was therefore inherited by every later
     acquisition and cannot be raised afterwards without moving every tile — at
     which point the tiles the user selected on the overview no longer match
     what would be acquired. A quiet spin box in the corner of a grid was not
@@ -208,16 +210,24 @@ class TestOverlapIsUnmissableInTheUI:
         btn = self._dlg._overlap_help_btn
         assert btn.text() == "!!"
         tip = btn.toolTip()
-        # It must actually say the two things that were missed.
-        assert "PERMANENT" in tip
-        assert "cannot be increased afterwards" in tip
+        # This used to assert the overlap was PERMANENT and inherited by every
+        # later acquisition. That was true when written and stopped being true
+        # when the acquisition grid was decoupled (91f0216, 0537356, 92abe28):
+        # the acquisition now picks its own AOI and overlap in the results
+        # window and regenerates its own grid. The explainer must say what the
+        # value is still FOR, or it sends the user to the wrong control.
+        assert "ONLY record" in tip and "AOI" in tip
+        assert "gap" in tip
 
     @pytest.mark.parametrize("value", [0.0, 1.0, 4.9])
     def test_below_five_percent_goes_red(self, value):
         self._dlg.tile_overlap.setValue(value)
         label = self._dlg._overlap_warning_label
         assert "#c62828" in label.styleSheet()
-        assert "too little to stitch" in label.text()
+        # The risk at low OVERVIEW overlap is a gap the stage opens, not a
+        # stitch with nothing to register on -- the stitcher registers the
+        # acquisition tiles, whose overlap is set separately.
+        assert "gaps" in label.text()
 
     @pytest.mark.parametrize("value", [5.0, 10.0, 30.0])
     def test_five_percent_and_above_is_calm(self, value):
@@ -233,9 +243,13 @@ class TestOverlapIsUnmissableInTheUI:
         self._dlg.tile_overlap.setValue(10.0)
         assert "#c62828" not in frame.styleSheet()
 
-    def test_the_resting_message_still_states_the_consequence(self):
+    def test_the_resting_message_says_which_overlap_this_is(self):
+        # It used to say "Applies to every acquisition from this overview",
+        # which is no longer true and points at the wrong control.
         self._dlg.tile_overlap.setValue(10.0)
-        assert "every acquisition" in self._dlg._overlap_warning_label.text()
+        text = self._dlg._overlap_warning_label.text()
+        assert "Overview tiles only" in text
+        assert "results window" in text
 
 
 class TestFocusStackingIsNotAnAcquisitionChoice:

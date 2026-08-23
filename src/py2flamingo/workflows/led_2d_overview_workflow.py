@@ -84,6 +84,11 @@ class LED2DOverviewWorkflow(QObject):
     scan_cancelled = pyqtSignal()
     scan_error = pyqtSignal(str)
 
+    #: Consecutive tiles capturing zero frames before the scan gives up. A
+    #: healthy stream never produces one; the failure this guards against
+    #: produced 294 in a row while the run reported success.
+    MAX_EMPTY_TILE_STREAK = 3
+
     # No default FOV - must be queried from hardware to avoid damage
     # If FOV cannot be determined, the workflow will not start
 
@@ -110,6 +115,9 @@ class LED2DOverviewWorkflow(QObject):
         # the end of a run can say where its time went instead of leaving it to
         # be reconstructed from timestamps.
         self._tile_time_totals = [0.0, 0.0, 0]
+        # Consecutive tiles that captured no frames at all. See
+        # MAX_EMPTY_TILE_STREAK.
+        self._empty_tile_streak = 0
 
         # Adaptive Z state. `_z_extents` maps (x_idx, y_idx) -> ContentExtent so
         # a tile can be predicted from its GRID neighbours rather than from
@@ -1751,6 +1759,32 @@ class LED2DOverviewWorkflow(QObject):
                     f"({sweep_s / max(1, len(z_values)):.2f}s/plane), "
                     f"total {move_s + sweep_s:.2f}s"
                 )
+
+                # A tile that captured nothing is not a tile with no sample --
+                # it is a tile the camera never delivered a frame for, and if
+                # that is happening it will keep happening. On 2026-08-26 every
+                # one of 294 tiles captured zero frames and the scan still ran
+                # to completion, reporting success after 125 minutes.
+                if not frames:
+                    self._empty_tile_streak += 1
+                    if self._empty_tile_streak >= self.MAX_EMPTY_TILE_STREAK:
+                        msg = (
+                            f"No camera frames on {self._empty_tile_streak} "
+                            f"consecutive tiles — the live stream has stopped "
+                            f"delivering, so every remaining tile would capture "
+                            f"nothing too. Stopping after "
+                            f"{tile_idx + 1}/{total_tiles} tiles rather than "
+                            f"running the rest of the scan blind. Check that no "
+                            f"other client (the C++ Flamingo GUI) has taken the "
+                            f"live port, then restart Live View and try again."
+                        )
+                        logger.error(msg)
+                        self.scan_error.emit(msg)
+                        self._cancelled = True
+                        self._finish_cancelled()
+                        return
+                else:
+                    self._empty_tile_streak = 0
 
                 # Compute projections from captured frames
                 if frames:
