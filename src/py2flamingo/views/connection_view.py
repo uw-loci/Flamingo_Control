@@ -9,7 +9,7 @@ import struct
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtWidgets import (
     QComboBox,
@@ -83,6 +83,16 @@ class ConnectionView(QWidget):
         self._camera_service = camera_service
         self._configurations = {}  # Map of name -> MicroscopeConfiguration
         self._logger = logging.getLogger(__name__)
+
+        # "Save this one?" hint state. `_save_hint_dismissed_for` records the
+        # (ip, port) the user already answered for, so connecting to a
+        # different unsaved microscope can still offer it.
+        self._save_hint_on = False
+        self._save_hint_dismissed_for = None
+        self._save_hint_timer = QTimer(self)
+        self._save_hint_timer.setInterval(600)
+        self._save_hint_timer.timeout.connect(self._on_save_hint_tick)
+
         self.setup_ui()
 
         # Load configurations if manager provided
@@ -298,6 +308,8 @@ class ConnectionView(QWidget):
                 self._logger.warning(
                     "ConnectionView: Settings retrieval failed - error state active"
                 )
+            # Connected to an address nobody saved? Offer to keep it.
+            self._refresh_save_config_hint()
 
     def _on_disconnect_clicked(self) -> None:
         """Handle disconnect button click.
@@ -345,6 +357,9 @@ class ConnectionView(QWidget):
             self.port_input.setEnabled(True)
             self.connection_closed.emit()
             self._logger.debug("ConnectionView: Emitted connection_closed signal")
+            # The hint is about the connection that just ended; a button still
+            # pulsing over a disconnected panel is pointing at nothing.
+            self._stop_save_config_hint()
 
     def _on_connection_lost_ui(self, reason: str) -> None:
         """React to a detected unexpected connection loss (GUI thread)."""
@@ -885,6 +900,9 @@ class ConnectionView(QWidget):
             if hasattr(self, "delete_btn"):
                 self.delete_btn.setEnabled(True)
 
+            # This address is saved by definition now, so nothing to offer.
+            self._refresh_save_config_hint()
+
     def _on_refresh_clicked(self) -> None:
         """Handle refresh button click - reload configurations."""
         self._load_configurations()
@@ -926,11 +944,102 @@ class ConnectionView(QWidget):
             # Select manual entry
             self.config_combo.setCurrentText("-- Manual Entry --")
 
+    # ------------------------------------------------------------------ #
+    # "Save this one?" hint for an address that is not a saved configuration
+    # ------------------------------------------------------------------ #
+
+    def _is_saved_address(self, ip: str) -> bool:
+        """Is this IP already one of the saved configurations?
+
+        Matched on IP alone. The question being asked is "do I already have
+        this microscope?", and a saved entry pointing at the same machine
+        answers it whatever port is in the box.
+        """
+        if not ip:
+            return True  # nothing typed: nothing to offer to save
+        target = ip.strip()
+        for config in self._configurations.values():
+            if str(getattr(config, "ip_address", "")).strip() == target:
+                return True
+        return False
+
+    def _refresh_save_config_hint(self) -> None:
+        """Flash Save Configuration when the live address is not saved anywhere.
+
+        Only while connected, and only for an address the user has not already
+        dismissed the hint for: connecting to a *different* unsaved microscope
+        is a fresh occasion to offer it, but the same one is nagging.
+        """
+        button = getattr(self, "save_config_btn", None)
+        if button is None:
+            return
+
+        ip = self.ip_input.text()
+        dismissed = self._save_hint_dismissed_for == (
+            ip.strip(),
+            self.port_input.value(),
+        )
+        if self._is_connected() and not self._is_saved_address(ip) and not dismissed:
+            self._start_save_config_hint()
+        else:
+            self._stop_save_config_hint()
+
+    def _start_save_config_hint(self) -> None:
+        if not self._save_hint_timer.isActive():
+            self._save_hint_on = True
+            self._paint_save_config_hint(True)
+            self._save_hint_timer.start()
+
+    def _stop_save_config_hint(self) -> None:
+        self._save_hint_timer.stop()
+        self._save_hint_on = False
+        self._paint_save_config_hint(False)
+
+    def _on_save_hint_tick(self) -> None:
+        self._save_hint_on = not self._save_hint_on
+        self._paint_save_config_hint(self._save_hint_on)
+
+    def _paint_save_config_hint(self, highlight: bool) -> None:
+        """Outline only — the button keeps its native look between pulses.
+
+        An outline rather than a fill: this is a suggestion for later, not the
+        action the user came here to do, and it sits in a row beside Connect.
+        """
+        button = getattr(self, "save_config_btn", None)
+        if button is None:
+            return
+        if highlight:
+            button.setStyleSheet(
+                "QPushButton { border: 2px solid #FFB300; border-radius: 4px; "
+                "padding: 4px 10px; }"
+            )
+        else:
+            button.setStyleSheet("")
+
+    def _dismiss_save_config_hint(self) -> None:
+        """Stop hinting for this address; pressing the button is acknowledgement.
+
+        Recorded against the address rather than as a one-shot flag, so the
+        hint can still appear for the next unsaved microscope. Dismissed on the
+        press itself, not on a successful save: if the save is rejected for a
+        missing name the user is already reading that message, and a button
+        still pulsing underneath it adds nothing.
+        """
+        self._save_hint_dismissed_for = (
+            self.ip_input.text().strip(),
+            self.port_input.value(),
+        )
+        self._stop_save_config_hint()
+
     def _on_save_config_clicked(self) -> None:
         """Handle save configuration button click.
 
         Saves the current IP and port as a named configuration.
         """
+        # Pressing it is the acknowledgement, so stop the hint here rather than
+        # on a successful save.
+        self._dismiss_save_config_hint()
+
         # Get configuration name from input
         config_name = self.config_name_input.text().strip()
 
@@ -981,6 +1090,8 @@ class ConnectionView(QWidget):
                 self._configurations[config.name] = config
                 if hasattr(self, "config_combo"):
                     self.config_combo.addItem(config.name)
+
+            self._refresh_save_config_hint()
 
             # Try to select default
             default_config = self._config_manager.get_default_configuration()
