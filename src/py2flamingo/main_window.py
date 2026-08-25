@@ -1158,12 +1158,6 @@ class MainWindow(QMainWindow):
             self._show_as_panel(
                 "mip_overview", "MIP Overview", self._mip_overview_dialog
             )
-
-            # Keep reference to prevent garbage collection
-            if not hasattr(self, "_mip_overview_dialogs"):
-                self._mip_overview_dialogs = []
-            self._mip_overview_dialogs.append(dialog)
-
             logger.info("MIP Overview dialog opened")
 
         except Exception as e:
@@ -1189,12 +1183,6 @@ class MainWindow(QMainWindow):
             self._show_as_panel(
                 "psf_analysis", "PSF Analysis", self._psf_analysis_dialog
             )
-
-            # Keep reference to prevent garbage collection
-            if not hasattr(self, "_psf_analysis_dialogs"):
-                self._psf_analysis_dialogs = []
-            self._psf_analysis_dialogs.append(dialog)
-
             logger.info("PSF Analysis dialog opened")
 
         except Exception as e:
