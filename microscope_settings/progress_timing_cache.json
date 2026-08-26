@@ -18,5 +18,9 @@
   "led_2d_overview:led_white:z0.25:tiles~200": {
     "mean_ms": 12693.237420000756,
     "samples": 1
+  },
+  "led_2d_overview:led_white:z0.25:tiles~100": {
+    "mean_ms": 16706.712386665942,
+    "samples": 1
   }
 }
