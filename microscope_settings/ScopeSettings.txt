@@ -31,30 +31,30 @@
   Offset left y-axis = -1
   Offset right x-axis = 2300
   Offset right y-axis = -1
-  Amplitude left x-axis = 100
+  Amplitude left x-axis = 0
   Amplitude left y-axis = -1
-  Amplitude right x-axis = 100
+  Amplitude right x-axis = 0
   Amplitude right y-axis = -1
   Alignment center x-axis = 2000
   Alignment center y-axis = -1
-  Sample scan frequency (Hz) = 200
+  Sample scan frequency (Hz) = 5000
 </Illumination settings>
 <Stage limits>
-  Hard limit max x-axis = 14.999998
+  Hard limit max x-axis = 12.300
   Hard limit max y-axis = 25.000
   Hard limit max z-axis = 25.000
   Hard limit max r-axis = 720.000
   Hard limit min x-axis = 1.000
   Hard limit min y-axis = 5.000
-  Hard limit min z-axis = 8.000
+  Hard limit min z-axis = 12.500
   Hard limit min r-axis = -720.000
-  Soft limit max x-axis = 14.999998
+  Soft limit max x-axis = 12.300
   Soft limit max y-axis = 25.000
   Soft limit max z-axis = 25.000
   Soft limit max r-axis = 720.000
   Soft limit min x-axis = 1.000
   Soft limit min y-axis = 5.000
-  Soft limit min z-axis = 11.000
+  Soft limit min z-axis = 12.500
   Soft limit min r-axis = -720.000
   Home x-axis = 8.032
   Home y-axis = 23.898
@@ -62,7 +62,7 @@
   Home r-axis = -217.965
   Unload x-axis = 1.000
   Unload y-axis = 5.000
-  Unload z-axis = 11.000
+  Unload z-axis = 12.500
   Unload r-axis = 0.000
   Default velocity x-axis = 1.000
   Default velocity y-axis = 1.000
@@ -76,16 +76,16 @@
   Camera 2 capture mode (0: full, 1: from front, 2: from back) = 0
 </Camera overlap settings>
 <LED settings>
-  LED selection (0 red, 1 green, 2 blue, 3 white) = 1
+  LED selection (0 red, 1 green, 2 blue, 3 white) = 0
   Preview on = 0
   Recording on = 0
-  Intensity red = 42000
-  Intensity green = 55561
-  Intensity blue = 54087
-  Intensity white = 54756
-  UI slider min (match LED DAC) = 3200000
-  UI slider max (match LED DAC) = 6553500
-  UI slider factor adjustment = 100
+  Intensity red = 98
+  Intensity green = 100
+  Intensity blue = 76
+  Intensity white = 37
+  UI slider min (match LED DAC) = 0
+  UI slider max (match LED DAC) = 100
+  UI slider factor adjustment = 1
 </LED settings>
 <Type>
   Microscope type = T, X, L, V SPIM
