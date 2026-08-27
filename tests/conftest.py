@@ -2,6 +2,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Force Qt's offscreen backend for the whole suite, before anything can import
 # PyQt5. Without it, constructing a widget on a headless box (WSL, CI, ssh)
 # SEGFAULTS the whole pytest process — you get a bare "Extension modules: …"
@@ -61,3 +63,21 @@ def pytest_collection_modifyitems(config, items):
     if removed:
         config.hook.pytest_deselected(items=removed)
         items[:] = kept
+
+
+@pytest.fixture(autouse=True)
+def _reset_stage_motion_gate():
+    """Never let one test's blocked stage leak into the next.
+
+    `stage_motion_gate` is module-level state, set as a side effect of
+    constructing or reloading a `ConfigurationService`. A test that connects to
+    a deliberately unconfigured scope (e.g. the reload tests) leaves motion
+    blocked, and any later test that moves would then fail for a reason that has
+    nothing to do with it — an order-dependent failure, which is the worst kind
+    to debug. Reset before and after every test.
+    """
+    from py2flamingo.services import stage_motion_gate
+
+    stage_motion_gate.set_motion_blocked(None)
+    yield
+    stage_motion_gate.set_motion_blocked(None)

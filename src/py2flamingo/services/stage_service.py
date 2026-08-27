@@ -367,6 +367,15 @@ class StageService(MicroscopeCommandService):
             >>> # Stage begins moving asynchronously
             >>> # Wait for motion stopped callback or poll is_motion_stopped()
         """
+        # Refuse to move an instrument whose limits we do not know. This check
+        # is here and not only in the controllers because workflow_queue_service
+        # and led_2d_overview_workflow call THIS method directly, never touching
+        # PositionController — so gating the controllers alone would have left
+        # the LED overview free to drive an unconfigured stage.
+        from py2flamingo.services.stage_motion_gate import ensure_motion_allowed
+
+        ensure_motion_allowed()
+
         self.logger.debug(f"Moving axis {axis} to {position_mm} mm...")
 
         result = self._send_movement_command(

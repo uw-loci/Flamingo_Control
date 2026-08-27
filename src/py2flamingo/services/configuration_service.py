@@ -124,6 +124,28 @@ class ConfigurationService:
         )
         self.logger.info(f"Loaded microscope-specific settings for '{microscope_name}'")
 
+        self._apply_stage_motion_gate()
+
+    def _apply_stage_motion_gate(self) -> None:
+        """Allow or block stage motion for the microscope now in force.
+
+        The placeholder limits that stand in for a missing settings file are
+        WIDER than any real instrument, so an unconfigured scope is not merely
+        unprotected — it is authorised to travel where the stage cannot go.
+        Nothing in the movement path consulted ``is_configured``, so this is
+        where that becomes an actual refusal rather than a log line.
+        """
+        from py2flamingo.services import stage_motion_gate
+
+        svc = getattr(self, "microscope_settings", None)
+        if svc is not None and getattr(svc, "is_configured", False):
+            stage_motion_gate.set_motion_blocked(None)
+        else:
+            name = getattr(svc, "microscope_name", None)
+            stage_motion_gate.set_motion_blocked(
+                stage_motion_gate.build_block_reason(name)
+            )
+
     def _load_scope_settings(self) -> Optional[Dict[str, Any]]:
         """
         Load scope settings if available.
@@ -288,6 +310,7 @@ class ConfigurationService:
             )
 
         self.microscope_settings = new_service
+        self._apply_stage_motion_gate()
         return True
 
     def get_stage_limits(self) -> Dict[str, Dict[str, float]]:

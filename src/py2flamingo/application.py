@@ -17,7 +17,7 @@ import logging
 import sys
 from typing import Optional
 
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from PyQt5.QtWidgets import QApplication
 
 from py2flamingo.services.component_factory import (
@@ -518,17 +518,37 @@ class FlamingoApplication(QObject):
             return
         from PyQt5.QtWidgets import QMessageBox
 
-        QMessageBox.warning(
-            self.main_window,
-            "Microscope not configured",
-            f"There is no stage-limit configuration for '{name}'.\n\n"
-            f"Placeholder limits of 0-26 mm are in force on every axis. These "
-            f"are almost certainly WIDER than the instrument, so the usual "
-            f"protection against driving the stage into the objective or the "
-            f"chamber is not there.\n\n"
-            f"Run Edit > Microscope Setup to record this scope's real limits "
-            f"before moving the stage.",
+        from py2flamingo.services.stage_motion_gate import SETUP_DOCS_URL
+
+        box = QMessageBox(self.main_window)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Microscope not configured — stage motion blocked")
+        box.setTextFormat(Qt.RichText)
+        box.setText(
+            f"<b>There is no stage-limit configuration for "
+            f"'{name}', so stage motion is blocked.</b>"
         )
+        box.setInformativeText(
+            f"Without those limits the placeholder range of 0–26 mm would apply "
+            f"on every axis. That is wider than any real Flamingo, so it would "
+            f"permit travel the stage cannot make — into the objective or the "
+            f"chamber wall. Moving on a guess is worse than not moving."
+            f"<p><b>To make this microscope usable:</b></p>"
+            f"<ol>"
+            f"<li>Open <b>Edit ▸ Microscope Setup</b> and enter this "
+            f"instrument's X/Y/Z soft limits. The dialog only <i>reads</i> the "
+            f"current position, so it works with motion blocked.</li>"
+            f"<li>It writes <code>microscope_settings/{name}_settings.json</code> "
+            f"in the application folder, beside the other "
+            f"<code>{{scope}}_settings.json</code> files.</li>"
+            f"<li>Reconnect. Motion is enabled as soon as that file loads.</li>"
+            f"</ol>"
+            f'<p><a href="{SETUP_DOCS_URL}">What a microscope needs to be '
+            f"active (documentation)</a><br>"
+            f"<small>In the repository: <code>docs/config_files_reference.md</code>, "
+            f"section 6.</small></p>"
+        )
+        box.exec_()
 
     def _on_settings_loaded(self):
         """Handle settings loaded event - query initial position from hardware.

@@ -225,8 +225,69 @@ Filename and gitignore status tell you how a file is *versioned*, not what it *i
 
 1. `saved_configurations.json` — seeded automatically. Verify the IP/port match the scope.
 2. Connect. This writes `microscope_settings/ScopeSettings.txt` and fixes the name.
-3. `microscope_settings/{name}_settings.json` — must exist for that name, or stage
-   limits are unknown.
+3. `microscope_settings/{name}_settings.json` — must exist for that name, or **stage
+   motion is blocked**. See section 6.
 4. `drive_mappings.json` — seeded automatically; needed before loading acquired data.
 
 Everything else has a working default or degrades harmlessly.
+
+---
+
+## 6. Making a microscope active
+
+**A microscope with no stage-limit configuration cannot move the stage.** Attempting a
+move raises `MicroscopeNotConfiguredError` and the app says so on connect.
+
+### Why it refuses rather than guessing
+
+`{name}_settings.json` is the only store that bounds a stage move
+(`position_controller.move_x/y/z/r` raise, `movement_controller._clamp_to_limits`
+clamps). When it is missing, `MicroscopeSettingsService` substitutes placeholder limits
+of **0–26 mm on every axis** — and those are *wider* than any real Flamingo: n7's X axis
+stops at 12.31 mm, Liara's at 5.0. So the fallback does not merely fail to protect the
+stage, it authorises travel the instrument cannot make, into the objective or the
+chamber wall. Moving on a fabricated limit is worse than not moving.
+
+### What to do
+
+1. **Edit ▸ Microscope Setup** — enter this instrument's X/Y/Z soft limits. The dialog
+   only *reads* the current stage position, so it works while motion is blocked. Take
+   the numbers from the scope's own `<Stage limits>` block in `ScopeSettings.txt`, and
+   tighten rather than widen where you are unsure: a limit can always be relaxed later,
+   but it cannot un-crash a stage.
+2. **Reconnect.** Motion is enabled as soon as that file loads.
+
+### Where the file goes
+
+`microscope_settings/{name}_settings.json`, in the application folder, beside the other
+`{scope}_settings.json` files. `{name}` must **byte-match** the `Microscope name` the
+scope reports in `ScopeSettings.txt` — a case-only mismatch is accepted with a warning,
+but two files differing only in case are refused outright rather than guessed at.
+
+Minimum contents — all four axes, each with `min` and `max`. A *partial* axis makes the
+file fail to load, and a wholly missing `stage_limits` block counts as unconfigured:
+
+```json
+{
+  "microscope_name": "liara",
+  "stage_limits": {
+    "x": { "min": 0.0, "max": 5.0,  "unit": "mm" },
+    "y": { "min": 0.0, "max": 15.0, "unit": "mm" },
+    "z": { "min": 0.0, "max": 15.0, "unit": "mm" },
+    "r": { "min": -720.0, "max": 720.0, "unit": "degrees" }
+  },
+  "version": "1.0"
+}
+```
+
+`r` matters: Edit ▸ Microscope Setup only collects x/y/z, so rotation limits have to be
+maintained by hand here. See `n7_settings.json` and `liara_settings.json` for complete
+examples including the optional `reference_position`, `display` and `notifications`
+blocks.
+
+### What is *not* blocked
+
+The **emergency stop** (`halt_motion`) sends HALT directly and is never gated — stopping
+motion must always be possible. Reading the position, connecting, live view, and the
+setup dialog itself all work normally; only commanding the stage to a new position is
+refused.

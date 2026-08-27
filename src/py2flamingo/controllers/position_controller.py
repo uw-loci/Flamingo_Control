@@ -1196,6 +1196,15 @@ class PositionController:
             RuntimeError: If command fails or response invalid
             ConnectionError: If communication fails
         """
+        # Refuse to move an instrument whose limits we do not know. This is the
+        # funnel for move_x/y/z/r and move_to_position; StageService.move_to_position
+        # carries the same check for the paths that bypass this controller.
+        # Not gated: emergency_stop sends HALT directly and never comes through
+        # here, so stopping motion is always possible.
+        from py2flamingo.services.stage_motion_gate import ensure_motion_allowed
+
+        ensure_motion_allowed()
+
         # Validate inputs
         if not isinstance(axis_code, int) or axis_code not in [1, 2, 3, 4]:
             error_msg = f"Invalid axis_code {axis_code}, must be 1-4"
