@@ -27,6 +27,28 @@ logger = logging.getLogger(__name__)
 
 _CONFIGS_DIR = Path(__file__).parent
 
+
+def deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+    """Recursively merge ``overlay`` into a copy of ``base`` (overlay wins).
+
+    Nested dicts merge key-by-key; any non-dict value (incl. lists) replaces
+    the base value wholesale.
+
+    Lives here, in the config layer, because both per-microscope overlays need
+    it: this module's ``microscopes:`` block in microscope_hardware.yaml and
+    ``visualization.voxel_storage_factory.resolve_visualization_config``, which
+    imports it rather than keeping a second copy. Two implementations of a
+    merge rule is how the two overlays would quietly stop agreeing.
+    """
+    out = dict(base)
+    for key, val in (overlay or {}).items():
+        if isinstance(val, dict) and isinstance(out.get(key), dict):
+            out[key] = deep_merge(out[key], val)
+        else:
+            out[key] = val
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Microscope hardware configuration
 # ---------------------------------------------------------------------------
@@ -72,6 +94,28 @@ class HardwareConfig:
     # by the microscope (ScopeSettings.txt), so the YAML values are only a
     # last-resort fallback for disconnected/offline use.
     optics_source: str = "yaml"
+
+    # --- Per-microscope overlay provenance (see _apply_microscope_overlay) ---
+    # The scope's own "Microscope name" from ScopeSettings.txt, or None when no
+    # readable file is on disk. Set whether or not a YAML overlay matched,
+    # because optics_signature keys off it: guard scope-awareness must not
+    # depend on whether a given scope happens to have an overlay entry.
+    microscope_name: Optional[str] = None
+    # Which entry of the YAML's ``microscopes:`` map was actually applied.
+    # None => no name, or a name with no matching entry => base YAML alone.
+    # Provenance only; a silent no-match looks identical to a correct base load
+    # without it, which is why it is logged and carried here.
+    microscope_profile: Optional[str] = None
+    # What THIS microscope's overlay says the objective SHOULD be. Purely an
+    # assertion used to detect a stale scope-reported value — it never wins over
+    # the scope (see _apply_optics_overlays). Kept as a separate key from
+    # objective_magnification precisely because they are different jobs: one is
+    # a value to use, this one is a claim to check. None => nothing asserted.
+    expected_objective_magnification: Optional[float] = None
+    # Human-readable description of an expected-vs-reported objective
+    # disagreement, or None. Surfaced at connect by application._on_settings_loaded.
+    optics_disagreement: Optional[str] = None
+
     # Measured image-plane pixel size (um/px) from the Pixel Calibrator. When
     # set it overrides the magnification-derived pixel size (it is the most
     # accurate source).
@@ -192,13 +236,25 @@ class HardwareConfig:
     def optics_signature(self) -> str:
         """Stable descriptor of the optics that determine pixel size.
 
-        Built from the magnification path (objective x tube/ref) and the sensor
-        pixel size — deliberately NOT from ``pixel_size_override_um``, so it
-        describes the *hardware* configuration independent of any measured
-        calibration. Used to detect objective/tube/camera changes and to decide
-        whether a saved pixel calibration still applies.
+        Built from the microscope name, the magnification path (objective x
+        tube/ref) and the sensor pixel size — deliberately NOT from
+        ``pixel_size_override_um``, so it describes the *hardware* configuration
+        independent of any measured calibration. Used to detect
+        objective/tube/camera changes and to decide whether a saved pixel
+        calibration still applies.
+
+        The NAME is in here because ``pixel_calibration.json`` and
+        ``optics_guard.json`` are single global files shared by every scope.
+        Without it, two microscopes that happen to report the same magnification
+        produce an identical signature, so a calibration measured on one would be
+        applied verbatim on the other with the guard reporting no problem. An
+        unnamed scope keeps the old two-part form so an existing acknowledgement
+        for a single-scope setup is not invalidated for no reason.
         """
-        return f"{self.system_magnification:.3f}|{self.sensor_pixel_size_um:.3f}"
+        optics = f"{self.system_magnification:.3f}|{self.sensor_pixel_size_um:.3f}"
+        if not self.microscope_name:
+            return optics
+        return f"{self.microscope_name.strip().lower()}|{optics}"
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "HardwareConfig":
@@ -226,6 +282,11 @@ class HardwareConfig:
             numerical_aperture=optics.get("numerical_aperture", 0.4),
             immersion_refractive_index=optics.get("immersion_refractive_index", 1.33),
             camera_x_inverted=optics.get("camera_x_inverted", True),
+            expected_objective_magnification=(
+                float(optics["expected_objective_magnification"])
+                if optics.get("expected_objective_magnification") is not None
+                else None
+            ),
             channel_wavelengths_nm=wavelengths
             or {
                 0: 405.0,
@@ -251,11 +312,19 @@ class HardwareConfig:
 # CWD-relative to match the rest of the app (connection_service writes
 # ScopeSettings.txt to ``microscope_settings/`` relative to the working dir).
 def _scope_settings_path() -> Path:
+    # CWD-relative, matching where connection_service writes the file. NOTE:
+    # ConfigurationService instead walks UP from the CWD to find the project
+    # root, so launched from a subdirectory the two can read different
+    # ScopeSettings.txt files — hardware config keyed off one scope, stage
+    # limits off another. Not closed here: a module-level base-path override
+    # is sticky global state that leaks between the app, the headless path and
+    # tests, which is a worse failure than the narrow one it fixes. The launcher
+    # cds to the project root, so the two agree in practice.
     return Path("microscope_settings") / "ScopeSettings.txt"
 
 
 def _pixel_calibration_path() -> Path:
-    return Path("microscope_settings") / "pixel_calibration.json"
+    return scoped_settings_read_path("pixel_calibration.json")
 
 
 def _read_scope_optics(path: Optional[Path] = None) -> Optional[Dict[str, float]]:
@@ -288,6 +357,143 @@ def _read_scope_optics(path: Optional[Path] = None) -> Optional[Dict[str, float]
     except Exception:
         logger.debug("Could not read scope optics from %s", path, exc_info=True)
         return None
+
+
+def optics_signature_matches(stored: Optional[str], current: Optional[str]) -> bool:
+    """Does a stored optics signature describe the same optics as ``current``?
+
+    Tolerates the LEGACY two-part form. Signatures used to be
+    ``"{mag}|{sensor_px}"``; they are now ``"{name}|{mag}|{sensor_px}"`` so that
+    two scopes reporting the same magnification cannot share one entry in the
+    single global ``pixel_calibration.json`` / ``optics_guard.json``.
+
+    Without this, adding the name would have re-signed every existing install's
+    optics with NO hardware change: the stored acknowledgement would stop
+    matching, blocking acquisition with "the optics changed (6.205|6.500 ->
+    n7|6.205|6.500)" — identical numbers — and a calibration stamped in the old
+    form would be silently discarded, changing the effective pixel size. A
+    legacy signature predates multi-scope support, so it can only have come from
+    the one scope then in use; treating it as matching whatever scope reports
+    those same optics today is both safe and what the user meant.
+
+    Settling on a state rewrites the signature in the new form, so legacy
+    entries age out on their own.
+    """
+    if not stored or not current:
+        return False
+    if stored == current:
+        return True
+    # Legacy "mag|sensor" against today's "name|mag|sensor".
+    return stored.count("|") == 1 and current.endswith("|" + stored)
+
+
+def _read_scope_microscope_name(path: Optional[Path] = None) -> Optional[str]:
+    """The scope's own ``Microscope name`` from ScopeSettings.txt, or None.
+
+    Reads the SAME file :func:`_read_scope_optics` already opens, which is what
+    makes this safe to call at import time: the file is written on every connect
+    and persists on disk between runs, so the name is available before any
+    connection is made. Deliberately does NOT route through
+    ``ConfigurationService`` — that caches its parse at construction, and this
+    module must also work offline with no service layer at all (the headless
+    and stitcher paths).
+
+    Returns None for a missing file or a blank value, so a truncated file can
+    never key an overlay.
+    """
+    import re
+
+    path = path or _scope_settings_path()
+    try:
+        if not path.exists():
+            return None
+        text = path.read_text(errors="ignore")
+        # Horizontal whitespace only, and the value must stay on the SAME line:
+        # with a plain \s* the newline after a blank "Microscope name =" is
+        # consumed and the next line becomes the name.
+        m = re.search(r"Microscope name[^\S\r\n]*=[^\S\r\n]*([^\r\n]+)", text)
+        if not m:
+            return None
+        return m.group(1).strip() or None
+    except Exception:
+        logger.debug("Could not read microscope name from %s", path, exc_info=True)
+        return None
+
+
+def _apply_microscope_overlay(
+    data: Dict[str, Any], scope_name: Optional[str]
+) -> "tuple[Dict[str, Any], Optional[str]]":
+    """Deep-merge ``data['microscopes'][scope_name]`` over the base YAML.
+
+    Mirrors ``resolve_visualization_config`` so the hardware and visualization
+    overlays behave identically: case-insensitive name match, and the
+    ``microscopes`` key is stripped UNCONDITIONALLY (match or not) so
+    :meth:`HardwareConfig.from_dict` can never see it.
+
+    Returns ``(merged_data, matched_key_or_None)``.
+    """
+    micros = (data.get("microscopes") or {}) if isinstance(data, dict) else {}
+    matched: Optional[str] = None
+    if scope_name and micros:
+        matched = next(
+            (k for k in micros if str(k).strip().lower() == scope_name.strip().lower()),
+            None,
+        )
+        if matched is not None:
+            logger.info(
+                "Applying per-microscope hardware overlay '%s' for scope '%s'",
+                matched,
+                scope_name,
+            )
+            data = deep_merge(data, micros.get(matched) or {})
+        else:
+            # Not silent: a typo'd key looks exactly like a correct base load.
+            logger.info(
+                "No per-microscope hardware overlay for scope '%s' "
+                "(available: %s); using base config",
+                scope_name,
+                ", ".join(sorted(str(k) for k in micros)) or "none",
+            )
+    data = dict(data)
+    data.pop("microscopes", None)
+    return data, matched
+
+
+def scoped_settings_read_path(filename: str) -> Path:
+    """Where to READ a per-microscope settings file from.
+
+    Prefers ``microscope_settings/{name}_{filename}``, falling back to the
+    shared pre-split ``microscope_settings/{filename}`` when this scope has no
+    copy of its own yet.
+
+    Deliberately NOT a migration. These files (``pixel_calibration.json``,
+    ``optics_guard.json``) carry an ``optics_signature`` that already says which
+    optics they describe, and that signature now includes the microscope name —
+    so the existing gates reject a foreign scope's file on their own. Copying
+    them around would mean guessing an owner the file never recorded. The shared
+    file simply keeps working as a fallback until this scope writes its own,
+    which happens the first time anyone calibrates on it.
+    """
+    settings = Path("microscope_settings")
+    name = _read_scope_microscope_name()
+    if name:
+        scoped = settings / f"{name}_{filename}"
+        if scoped.exists():
+            return scoped
+    return settings / filename
+
+
+def scoped_settings_write_path(filename: str) -> Path:
+    """Where to WRITE a per-microscope settings file.
+
+    Always this scope's own copy when a name is known, so measuring on one
+    instrument can never overwrite another's. Falls back to the shared name only
+    when there is no scope name to attribute the file to (offline / headless).
+    """
+    settings = Path("microscope_settings")
+    settings.mkdir(exist_ok=True)
+    name = _read_scope_microscope_name()
+    return settings / (f"{name}_{filename}" if name else filename)
 
 
 def _read_calibration(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
@@ -332,11 +538,14 @@ def get_hardware_config(force_reload: bool = False) -> HardwareConfig:
         return _hardware_config
 
     yaml_path = _CONFIGS_DIR / "microscope_hardware.yaml"
+    scope_name = _read_scope_microscope_name()
     if yaml_path.exists():
         try:
             with open(yaml_path, "r") as f:
                 data = yaml.safe_load(f)
-            cfg = HardwareConfig.from_dict(data or {})
+            data, matched = _apply_microscope_overlay(data or {}, scope_name)
+            cfg = HardwareConfig.from_dict(data)
+            cfg.microscope_profile = matched
         except Exception:
             logger.exception("Error loading %s, using defaults", yaml_path)
             cfg = HardwareConfig()
@@ -346,12 +555,17 @@ def get_hardware_config(force_reload: bool = False) -> HardwareConfig:
             yaml_path,
         )
         cfg = HardwareConfig()
+    # Set regardless of which branch ran, and regardless of whether an overlay
+    # matched: optics_signature keys off this.
+    cfg.microscope_name = scope_name
 
     _apply_optics_overlays(cfg)
     _hardware_config = cfg
     logger.info(
-        "Hardware config ready (optics_source=%s, system_mag=%.2fx, "
-        "pixel=%.4fum, FOV=%.4fmm)",
+        "Hardware config ready (scope=%s, profile=%s, optics_source=%s, "
+        "system_mag=%.2fx, pixel=%.4fum, FOV=%.4fmm)",
+        cfg.microscope_name or "unknown",
+        cfg.microscope_profile or "base",
         cfg.optics_source,
         cfg.system_magnification,
         cfg.effective_pixel_size_um,
@@ -372,6 +586,32 @@ def _apply_optics_overlays(cfg: HardwareConfig) -> None:
         cfg.reference_tube_lens_mm = scope["reference_tube_lens_mm"]
         cfg.optics_source = "scope"
 
+        # The scope stays authoritative — but when this microscope's overlay
+        # asserts a different objective, say so. A stale server objective is not
+        # a cosmetic disagreement: pixel size, field of view, tile spacing and
+        # FOV-derived jog steps all scale with it, so a 1.5x error steps the
+        # stage 1.5x further than the UI says. Liara shipped a stale 17 against
+        # a measured 25.48 and it took a full wrong stitch to notice.
+        expected = cfg.expected_objective_magnification
+        reported = float(scope["objective_magnification"])
+        if expected and expected > 0 and reported > 0:
+            delta = abs(reported - expected) / expected
+            if delta > 0.02:
+                cfg.optics_disagreement = (
+                    f"{cfg.microscope_name or 'This microscope'} is configured to "
+                    f"expect a {expected:.2f}x objective, but the scope reports "
+                    f"{reported:.3f}x ({delta * 100:.0f}% off).\n\n"
+                    f"The scope value WINS, so pixel size, field of view, tile "
+                    f"spacing and FOV-derived jog steps are all currently derived "
+                    f"from {reported:.3f}x "
+                    f"({cfg.sensor_pixel_size_um / reported:.4f} um/px) rather than "
+                    f"{expected:.2f}x "
+                    f"({cfg.sensor_pixel_size_um / expected:.4f} um/px).\n\n"
+                    f"If the scope is the stale one, run the Pixel Calibrator and "
+                    f"push the measured magnification to the scope."
+                )
+                logger.warning("Optics disagreement: %s", cfg.optics_disagreement)
+
     # A measured calibration is the most accurate pixel size, BUT only if it
     # was taken at the current optics. Applying a stale calibration (e.g. from a
     # previous objective) would silently override the correct scope value — so
@@ -381,7 +621,7 @@ def _apply_optics_overlays(cfg: HardwareConfig) -> None:
     if cal and cal.get("mean_pixel_size_um"):
         cal_sig = cal.get("optics_signature")
         cur_sig = cfg.optics_signature
-        if cal_sig is None or cal_sig == cur_sig:
+        if cal_sig is None or optics_signature_matches(cal_sig, cur_sig):
             cfg.pixel_size_override_um = float(cal["mean_pixel_size_um"])
             cfg.optics_source = "calibration"
         else:

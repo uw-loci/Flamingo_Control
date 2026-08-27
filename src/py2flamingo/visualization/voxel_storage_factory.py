@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from py2flamingo.configs.config_loader import deep_merge
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,19 +30,11 @@ def _default_config_path() -> Path:
     return Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
 
 
-def _deep_merge(base: dict, overlay: dict) -> dict:
-    """Recursively merge ``overlay`` into a copy of ``base`` (overlay wins).
-
-    Nested dicts merge key-by-key; any non-dict value (incl. lists) replaces
-    the base value wholesale.
-    """
-    out = dict(base)
-    for key, val in (overlay or {}).items():
-        if isinstance(val, dict) and isinstance(out.get(key), dict):
-            out[key] = _deep_merge(out[key], val)
-        else:
-            out[key] = val
-    return out
+# The merge rule lives in the config layer and is shared with the hardware
+# config's own ``microscopes:`` overlay (config_loader._apply_microscope_overlay).
+# One implementation, so the two per-microscope overlays cannot drift apart in
+# how they combine a scope's entry with the base.
+_deep_merge = deep_merge
 
 
 def resolve_visualization_config(
@@ -76,8 +70,16 @@ def resolve_visualization_config(
 
     micros = config.get("microscopes") or {}
     if microscope_name and micros:
+        # .strip() as well as .lower(), matching config_loader's hardware
+        # overlay exactly. The two claim to key off the same name; a YAML key
+        # written as " liara" matching one and not the other would give a scope
+        # its own optics and another scope's chamber geometry.
         match = next(
-            (k for k in micros if str(k).lower() == str(microscope_name).lower()),
+            (
+                k
+                for k in micros
+                if str(k).strip().lower() == str(microscope_name).strip().lower()
+            ),
             None,
         )
         if match is not None:

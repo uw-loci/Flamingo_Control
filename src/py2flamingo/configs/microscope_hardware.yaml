@@ -98,3 +98,62 @@ stage_limits:
   z_max_mm: 26.0
   r_min_deg: -720.0
   r_max_deg: 720.0
+
+# ---------------------------------------------------------------------------
+# Per-microscope overlays
+# ---------------------------------------------------------------------------
+# Keyed on the scope's own "Microscope name" from ScopeSettings.txt (matched
+# case-insensitively). Deep-merged OVER everything above, before the runtime
+# overlays run, so the precedence is:
+#
+#   pixel_calibration.json  >  ScopeSettings.txt  >  this block  >  the base above
+#
+# ---- THIS BLOCK MUST STAY LAST IN THE FILE ----
+# PixelCalibrationService.apply_config_patch rewrites the FIRST matching
+# `key:` line in this file (re.subn with count=1 and re.MULTILINE), and its
+# `^\s*` matches INDENTED keys too. So any key repeated here that also exists
+# in the base -- objective_magnification, sensor_pixel_size_um,
+# tube_lens_focal_length_mm, reference_tube_lens_mm -- would be patched INSTEAD
+# of the base if it appeared above it. Pinned by
+# tests/test_hardware_config_optics.py::TestYamlOrderingConstraint.
+#
+# STAGE LIMITS DO NOT BELONG HERE. The only limits that gate a stage move live
+# in microscope_settings/{name}_settings.json. The stage_limits block above is
+# read by exactly one caller (workflow_controller.py, for a tile-count
+# ESTIMATE) and uses a different key shape (x_min_mm vs x.min). A third
+# representation of the stage envelope is how they drift apart.
+#
+# SENSOR DIMENSIONS DO NOT BELONG HERE either: disk_tile_loader freezes
+# FRAME_WIDTH/FRAME_HEIGHT from them at import time, so a per-scope sensor size
+# would be stale for the rest of the session after a mid-session scope switch.
+microscopes:
+  # Liara -- high-res ASLM / TSPIM (CTLSM2). Single-sided illumination, no
+  # galvo; the light-sheet waist is swept by a voice coil (Thorlabs BLINK)
+  # driven by a Moku:Go against an Arduino clock, off-network from this app.
+  liara:
+    camera:
+      # Measured on a real Liara acquisition (Workflow.txt: 11.0 f/s, and
+      # `Z stage velocity 0.011 mm/s` = 1 um plane spacing x 11 fps confirms
+      # it). NOT a camera-capability figure -- the voice-coil sweep is
+      # synchronised to the camera readout by an external clock, so this rate
+      # is a contract with hardware we cannot see, not a ceiling to approach.
+      max_frame_rate_hz_full_frame: 11.0
+    optics:
+      # ESPECIAL 23.8x / 0.7 NA dipping detection objective, into an
+      # ethyl-cinnamate-class clearing medium (n ~ 1.55).
+      numerical_aperture: 0.7
+      immersion_refractive_index: 1.55
+      # ASSERTION ONLY -- never used as a value, and deliberately NOT
+      # `objective_magnification`. The scope always wins (it reports the
+      # objective in the same file this overlay is keyed on), so a per-scope
+      # `objective_magnification` could never take effect. What this does is
+      # make a stale server value VISIBLE: >2% away and get_hardware_config
+      # records an optics_disagreement that the app shows on connect.
+      #
+      # 25.48x = 6.5 um sensor pitch / 0.2551 um/px measured on a calibration
+      # standard 2026-08-03. Corroborated by the LOCI courseware, which
+      # documents the same objective as "23.8x/0.7 NA ... the ~25x sometimes
+      # quoted is the effective magnification once the RI ~ 1.55 clearing
+      # medium is accounted for (0.253 um/px, ~518 um field)" -- agreeing to
+      # within 0.8%. Liara's server currently still reports a stale 17.
+      expected_objective_magnification: 25.48

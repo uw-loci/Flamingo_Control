@@ -226,3 +226,27 @@ class TestPlanMicroscopeChange(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOneDeepMergeImplementation(unittest.TestCase):
+    """The viz overlay and the hardware overlay must share one merge rule.
+
+    Two copies is how the two per-microscope overlays would quietly start
+    disagreeing about how a scope's entry combines with the base.
+    """
+
+    def test_factory_reuses_the_config_layer_merge(self):
+        from py2flamingo.configs.config_loader import deep_merge
+        from py2flamingo.visualization import voxel_storage_factory
+
+        self.assertIs(voxel_storage_factory._deep_merge, deep_merge)
+
+    def test_nested_dicts_merge_and_lists_replace(self):
+        from py2flamingo.configs.config_loader import deep_merge
+
+        base = {"a": {"x": 1, "y": 2}, "l": [1, 2], "k": "base"}
+        out = deep_merge(base, {"a": {"y": 9}, "l": [3]})
+        self.assertEqual(out["a"], {"x": 1, "y": 9})  # sibling preserved
+        self.assertEqual(out["l"], [3])  # list replaced wholesale
+        self.assertEqual(out["k"], "base")
+        self.assertEqual(base["a"], {"x": 1, "y": 2})  # input untouched
