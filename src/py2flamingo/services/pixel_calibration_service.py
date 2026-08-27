@@ -49,11 +49,22 @@ class PixelCalibrationService:
 
     def __init__(self, calibration_file: Optional[str] = None):
         if calibration_file is None:
-            settings_dir = Path("microscope_settings")
-            settings_dir.mkdir(exist_ok=True)
-            self._file = settings_dir / "pixel_calibration.json"
+            # Per microscope. Writes ALWAYS go to this scope's own file, so
+            # calibrating on one instrument can no longer overwrite another's
+            # measurement — with one shared file, switching back left the other
+            # scope permanently blocked on a stale_calibration it could not
+            # resolve without re-measuring. Reads fall back to the shared
+            # pre-split file until this scope has written its own.
+            from py2flamingo.configs.config_loader import (
+                scoped_settings_read_path,
+                scoped_settings_write_path,
+            )
+
+            self._file = scoped_settings_write_path("pixel_calibration.json")
+            self._read_file = scoped_settings_read_path("pixel_calibration.json")
         else:
             self._file = Path(calibration_file)
+            self._read_file = self._file
         self._calibration: Optional[PixelCalibration] = None
         self.load()
 
@@ -871,15 +882,19 @@ class PixelCalibrationService:
             raise
 
     def load(self) -> Optional[PixelCalibration]:
+        # Reads from _read_file, which may be the shared pre-split file; saves
+        # always go to _file, this scope's own. Whether a calibration read this
+        # way actually applies is decided by its optics_signature, not by where
+        # it was found (see config_loader._apply_optics_overlays).
         try:
-            if not self._file.exists():
+            if not self._read_file.exists():
                 return None
-            with open(self._file, "r") as f:
+            with open(self._read_file, "r") as f:
                 data = json.load(f)
             cal_data = data.get("calibration")
             if cal_data:
                 self._calibration = PixelCalibration.from_dict(cal_data)
-                logger.info("Loaded pixel calibration from %s", self._file)
+                logger.info("Loaded pixel calibration from %s", self._read_file)
             return self._calibration
         except Exception as e:
             logger.error("Error loading pixel calibration: %s", e, exc_info=True)

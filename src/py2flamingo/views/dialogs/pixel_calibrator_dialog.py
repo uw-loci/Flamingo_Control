@@ -589,6 +589,18 @@ class PixelCalibratorDialog(PersistentDialog):
             if not ok:
                 logger.warning("Pushing magnification to scope failed: %s", msg)
 
+        # Both paths above rewrite inputs to get_hardware_config() — the YAML's
+        # objective_magnification, and the local ScopeSettings.txt. Without
+        # dropping the cache the process keeps serving the pre-patch
+        # magnification, pixel size and optics_signature, so the optics guard
+        # goes on reasoning about a scope state that no longer exists on disk.
+        try:
+            from py2flamingo.configs.config_loader import invalidate_hardware_config
+
+            invalidate_hardware_config()
+        except Exception:  # noqa: BLE001 - never fail the patch over this
+            logger.debug("Could not invalidate hardware config", exc_info=True)
+
         QMessageBox.information(
             self,
             "Configs patched",

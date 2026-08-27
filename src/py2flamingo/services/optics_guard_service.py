@@ -22,6 +22,8 @@ import logging
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from py2flamingo.configs.config_loader import optics_signature_matches
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,16 +36,26 @@ class OpticsGuardService:
         hardware_config_getter: Optional[Callable] = None,
         calibration_file: Optional[str] = None,
     ):
+        from py2flamingo.configs.config_loader import (
+            scoped_settings_read_path,
+            scoped_settings_write_path,
+        )
+
         if state_file is None:
-            settings_dir = Path("microscope_settings")
-            settings_dir.mkdir(exist_ok=True)
-            self._file = settings_dir / "optics_guard.json"
+            # Per microscope: the acknowledgement list is a statement about ONE
+            # instrument's optics. Shared, alternating between two scopes mixed
+            # their entries in a single append-only list with no way to tell
+            # them apart. Reads fall back to the shared pre-split file so an
+            # existing install keeps the acknowledgement it already made.
+            self._file = scoped_settings_write_path("optics_guard.json")
+            self._read_file = scoped_settings_read_path("optics_guard.json")
         else:
             self._file = Path(state_file)
+            self._read_file = self._file
         self._cal_file = (
             Path(calibration_file)
             if calibration_file
-            else Path("microscope_settings") / "pixel_calibration.json"
+            else scoped_settings_read_path("pixel_calibration.json")
         )
         self._hw_getter = hardware_config_getter
         self._acknowledged: List[str] = []
@@ -115,18 +127,23 @@ class OpticsGuardService:
         """
         cur = self.current_signature()
         prev_last = self._last_seen
-        if cur is not None and cur != self._last_seen:
-            self._last_seen = cur
-            self._save()
+        # _last_seen is advanced ONLY once the state is settled, in _set_ok().
+        # Advancing it here -- in memory or on disk -- made an `optics_changed`
+        # block last exactly one check(): the next one found prev_last == cur,
+        # fell through to _set_ok and cleared the block with nobody having
+        # resolved anything. A reconnect did it, and so did a plain "Test
+        # Connection" (connection_view re-emits settings_loaded), and once
+        # persisted it survived a restart too. So an UNRESOLVED mismatch must
+        # leave both copies of _last_seen alone.
 
         if cur is None:
-            return self._set_ok()
-        if cur in self._acknowledged:
-            return self._set_ok()
+            return self._set_ok(cur)
+        if self._is_accepted(cur):
+            return self._set_ok(cur)
 
         cal_sig = self.calibration_signature()
-        if cal_sig is not None and cal_sig == cur:
-            return self._set_ok()  # calibration matches current optics
+        if optics_signature_matches(cal_sig, cur):
+            return self._set_ok(cur)  # calibration matches current optics
 
         if cal_sig is not None:
             return self._set_mismatch(
@@ -150,12 +167,23 @@ class OpticsGuardService:
             )
         # First time we've seen this optics and there's no calibration to
         # contradict — don't nag a fresh setup.
-        return self._set_ok()
+        return self._set_ok(cur)
 
-    def _set_ok(self) -> None:
+    def _is_accepted(self, cur: str) -> bool:
+        """Has the user acknowledged these optics (in either signature format)?"""
+        return any(optics_signature_matches(a, cur) for a in self._acknowledged)
+
+    def _set_ok(self, cur: Optional[str] = None) -> None:
         self._blocked = False
         self._reason = ""
         self._mismatch = None
+        # Settled state, so it is now safe to remember these optics as "last
+        # seen". An unresolved mismatch never reaches here, which is what makes
+        # a block outlive a reconnect and a restart. Only write when it actually
+        # changed, so an OK check is not a disk write per connect.
+        if cur is not None and cur != self._last_seen:
+            self._last_seen = cur
+            self._save()
         return None
 
     def _set_mismatch(self, mismatch: Dict) -> Dict:
@@ -191,13 +219,26 @@ class OpticsGuardService:
     def mismatch(self) -> Optional[Dict]:
         return self._mismatch
 
-    def acknowledge_current(self) -> None:
-        """Accept the scope-reported pixel size for the current optics."""
+    def acknowledge_current(self) -> bool:
+        """Accept the scope-reported pixel size for the current optics.
+
+        Returns False when there is no current signature to acknowledge (no
+        readable hardware config), leaving the block in place. It used to no-op
+        silently in that case, so "Accept scope value" appeared to do nothing
+        and left the user blocked with no error to act on.
+        """
         cur = self.current_signature()
-        if cur and cur not in self._acknowledged:
+        if not cur:
+            logger.warning(
+                "Cannot acknowledge optics: no current signature is available "
+                "(hardware config unreadable). The block stays in place."
+            )
+            return False
+        if cur not in self._acknowledged:
             self._acknowledged.append(cur)
         self._save()
         self.check()
+        return True
 
     def note_calibration_saved(self) -> None:
         """Re-evaluate after a new calibration is saved (may clear the block)."""
@@ -208,10 +249,13 @@ class OpticsGuardService:
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
+        # From _read_file (this scope's, else the shared pre-split file); _save
+        # always writes _file, so the first save forks this scope's state off
+        # the inherited one rather than writing back into the shared file.
         try:
-            if not self._file.exists():
+            if not self._read_file.exists():
                 return
-            data = json.loads(self._file.read_text()) or {}
+            data = json.loads(self._read_file.read_text()) or {}
             self._acknowledged = list(data.get("acknowledged_signatures", []))
             self._last_seen = data.get("last_seen_signature")
         except Exception:
