@@ -66,6 +66,9 @@ class ConfigurationManager:
         """
         self.config_file = Path(config_file)
         self._configurations: Dict[str, MicroscopeConfiguration] = {}
+        # Name of the profile that last reached a microscope. Persisted so the
+        # Connection tab reopens on the scope you were actually using.
+        self._last_used: Optional[str] = None
 
         # Load existing configurations on init
         self._load_from_json()
@@ -102,8 +105,16 @@ class ConfigurationManager:
                 config = MicroscopeConfiguration.from_dict(config_data)
                 self._configurations[config.name] = config
 
+            # Only honour a remembered name that still names a real profile --
+            # a profile can be deleted, or the file hand-edited, between runs.
+            last_used = data.get("last_used")
+            if last_used in self._configurations:
+                self._last_used = last_used
+
             logger.info(
-                f"Loaded {len(self._configurations)} configurations from {self.config_file}"
+                f"Loaded {len(self._configurations)} configurations from "
+                f"{self.config_file}"
+                + (f" (last used: {self._last_used})" if self._last_used else "")
             )
 
         except Exception as e:
@@ -117,6 +128,8 @@ class ConfigurationManager:
             config_list = [config.to_dict() for config in self._configurations.values()]
 
             data = {"configurations": config_list, "version": "1.0"}
+            if self._last_used:
+                data["last_used"] = self._last_used
 
             # Ensure parent directory exists
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -166,15 +179,54 @@ class ConfigurationManager:
         """
         return sorted(self._configurations.keys())
 
-    def get_default_configuration(self) -> Optional[MicroscopeConfiguration]:
-        """Get the default configuration.
+    def set_last_used(self, name: str) -> None:
+        """Record the profile that last reached a microscope, and persist it.
 
-        Returns the first available configuration alphabetically,
-        or None if no configurations exist.
+        Call this only after a connection actually succeeded. Recording the
+        selection instead would defeat the point: picking the wrong scope by
+        mistake is exactly the thing this is meant to stop repeating.
+
+        Unknown names are ignored rather than stored, so a manual-entry address
+        cannot displace a real profile.
+
+        Args:
+            name: Name of the configuration that connected
+        """
+        if name not in self._configurations:
+            return
+        if self._last_used == name:
+            return
+
+        self._last_used = name
+        try:
+            self._save_to_json()
+        except Exception as e:
+            # Not worth failing a good connection over. Next session just falls
+            # back to the alphabetical default.
+            logger.warning(f"Could not remember last-used configuration: {e}")
+
+    def get_last_used_name(self) -> Optional[str]:
+        """Name of the profile that last connected, or None if not recorded."""
+        return self._last_used
+
+    def get_default_configuration(self) -> Optional[MicroscopeConfiguration]:
+        """Get the configuration to preselect in the Connection tab.
+
+        The profile that last actually connected, if one is recorded; otherwise
+        the first alphabetically.
+
+        Alphabetical order alone is a poor default once there is more than one
+        microscope: with 'liara' and 'n7' saved, the tab always opened on liara,
+        so connecting to n7 meant noticing and changing the selection every
+        session -- and not noticing meant a connection timeout, or worse,
+        reaching the wrong microscope.
 
         Returns:
             Default MicroscopeConfiguration if any configs exist, None otherwise
         """
+        if self._last_used and self._last_used in self._configurations:
+            return self._configurations[self._last_used]
+
         names = self.get_configuration_names()
         if names:
             return self._configurations[names[0]]
@@ -271,6 +323,11 @@ class ConfigurationManager:
 
             # Remove from configurations
             del self._configurations[name]
+
+            # Deleting the remembered profile falls the default back to
+            # alphabetical rather than leaving a dangling name behind.
+            if self._last_used == name:
+                self._last_used = None
 
             # Save updated list to JSON
             self._save_to_json()

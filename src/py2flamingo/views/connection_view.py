@@ -308,6 +308,9 @@ class ConnectionView(QWidget):
                 self._logger.warning(
                     "ConnectionView: Settings retrieval failed - error state active"
                 )
+            # Reopen on this microscope next session, not on whichever profile
+            # sorts first alphabetically.
+            self._remember_connected_configuration(ip, port)
             # Connected to an address nobody saved? Offer to keep it.
             self._refresh_save_config_hint()
 
@@ -947,6 +950,32 @@ class ConnectionView(QWidget):
     # ------------------------------------------------------------------ #
     # "Save this one?" hint for an address that is not a saved configuration
     # ------------------------------------------------------------------ #
+
+    def _remember_connected_configuration(self, ip: str, port: int) -> None:
+        """Record which saved profile this successful connection used.
+
+        Matched on IP *and* port, unlike :meth:`_is_saved_address`: this picks
+        one profile to reopen on, so two entries pointing at the same machine on
+        different ports must not be treated as interchangeable. An address that
+        matches no saved profile records nothing, leaving the previous choice
+        standing rather than clearing it.
+        """
+        manager = self._config_manager
+        if manager is None or not hasattr(manager, "set_last_used"):
+            return
+
+        target_ip = str(ip).strip()
+        for name, config in self._configurations.items():
+            if str(getattr(config, "ip_address", "")).strip() == target_ip and int(
+                getattr(config, "port", -1)
+            ) == int(port):
+                try:
+                    manager.set_last_used(name)
+                except Exception as e:  # never break a good connection over this
+                    self._logger.warning(
+                        f"Could not remember configuration '{name}': {e}"
+                    )
+                return
 
     def _is_saved_address(self, ip: str) -> bool:
         """Is this IP already one of the saved configurations?
