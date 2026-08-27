@@ -55,6 +55,12 @@ class CameraController(QObject):
     # silent dead stream has cost.
     FIRST_FRAME_TIMEOUT_MS = 5000
 
+    # Gap between frames that counts as a stall once the stream has proven it
+    # works. Longer than the first-frame budget: a running acquisition can put
+    # real pauses between frames, and a false alarm here would train people to
+    # ignore the one message that matters.
+    STALL_TIMEOUT_MS = 10000
+
     def __init__(self, camera_service: CameraService, laser_led_controller=None):
         """
         Initialize camera controller.
@@ -129,6 +135,7 @@ class CameraController(QObject):
         # Starting the stream is a request, not a delivery -- so check that a
         # frame actually arrives, and say so when one does not.
         self._frames_displayed = 0
+        self._stall_reported = False
         self._live_view_watchdog = QTimer()
         self._live_view_watchdog.setSingleShot(True)
         self._live_view_watchdog.setInterval(self.FIRST_FRAME_TIMEOUT_MS)
@@ -177,6 +184,7 @@ class CameraController(QObject):
             # Reset local frame counter for fresh start
             self._local_frame_counter = 0
             self._frames_displayed = 0
+            self._stall_reported = False
 
             # Start camera streaming (fills buffer in background)
             self.camera_service.start_live_view_streaming()
@@ -198,23 +206,40 @@ class CameraController(QObject):
             return False
 
     def _note_frame_displayed(self) -> None:
-        """Record that a frame reached the UI, and stand the watchdog down."""
+        """Record that a frame reached the UI, and restart the stall timer.
+
+        Restarted, not stopped. The first version stood the watchdog down for
+        good on the first frame, and on 2026-08-27 the receiver thread died
+        immediately *after* delivering exactly one frame -- so the one check
+        that could have caught it had already been disarmed by the frame that
+        killed it.
+        """
         self._frames_displayed += 1
-        if self._live_view_watchdog.isActive():
-            self._live_view_watchdog.stop()
+        self._live_view_watchdog.start(self.STALL_TIMEOUT_MS)
 
     def _on_first_frame_timeout(self) -> None:
-        """Live view has been running for a while with nothing to show."""
-        if self._frames_displayed:
-            return
+        """Live view has gone quiet: either it never started, or it stopped."""
+        if self._stall_reported:
+            return  # one report per live view, not one every timeout
+        self._stall_reported = True
 
-        error_msg = (
-            f"Live view has received no camera frames in "
-            f"{self.FIRST_FRAME_TIMEOUT_MS / 1000:.0f} s. The stream was "
-            f"started but nothing is arriving on it -- the most common cause "
-            f"is another client (the C++ GUI) holding the live port. Nothing "
-            f"that depends on the camera will work until this is fixed."
-        )
+        if self._frames_displayed:
+            seconds = self.STALL_TIMEOUT_MS / 1000
+            error_msg = (
+                f"Live view has received no camera frames for {seconds:.0f} s "
+                f"after {self._frames_displayed} frame(s). The stream started "
+                f"and then stopped -- check the log for a data receiver error. "
+                f"The displayed image is frozen, not live."
+            )
+        else:
+            seconds = self.FIRST_FRAME_TIMEOUT_MS / 1000
+            error_msg = (
+                f"Live view has received no camera frames in {seconds:.0f} s. "
+                f"The stream was started but nothing is arriving on it -- the "
+                f"most common cause is another client (the C++ GUI) holding "
+                f"the live port. Nothing that depends on the camera will work "
+                f"until this is fixed."
+            )
         self.logger.error(error_msg)
         self.error_occurred.emit(error_msg)
 

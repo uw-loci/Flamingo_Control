@@ -37,6 +37,28 @@ class ImageHeader:
     reserved1: int  # Reserved field
     reserved2: int  # Reserved field
 
+    # Largest sensor dimension we will believe. The PCO Edge is 2048; this
+    # leaves generous room for a bigger camera without accepting the
+    # multi-million-pixel dimensions that a misaligned read produces.
+    MAX_DIM = 8192
+
+    def is_plausible(self) -> bool:
+        """Could this have been written by the server, or is it misread bytes?
+
+        The size field is the check that matters: `image_size` must be exactly
+        the two-bytes-per-pixel payload the dimensions imply. Image data
+        interpreted as a header passes none of these, because three unrelated
+        words almost never satisfy that identity.
+
+        Deliberately shape-agnostic -- 1024x2048 and 2048x1024 are as valid as
+        a square AOI.
+        """
+        return (
+            8 <= self.image_width <= self.MAX_DIM
+            and 8 <= self.image_height <= self.MAX_DIM
+            and self.image_size == self.image_width * self.image_height * 2
+        )
+
     @classmethod
     def from_bytes(cls, data: bytes) -> "ImageHeader":
         """
@@ -138,6 +160,11 @@ class CameraService(MicroscopeCommandService):
         self._data_thread: Optional[threading.Thread] = None
         self._streaming = False
         self._streaming_lock = threading.Lock()
+
+        # Bytes read past a header during a resync, served back before the
+        # socket on the next read. Reset with each stream so a recovery from one
+        # session cannot leak into the next.
+        self._rx_pushback = bytearray()
 
         # Image callback
         self._image_callback: Optional[Callable] = None
@@ -890,10 +917,12 @@ class CameraService(MicroscopeCommandService):
         import time
 
         self.logger.info("Data receiver thread started")
+        self._rx_pushback.clear()
         self.logger.info(
             f"Waiting for image data on socket (timeout={self._data_socket.gettimeout()}s)..."
         )
         frames_received = 0
+        consecutive_errors = 0
         last_log_time = time.time()
 
         while self._streaming:
@@ -914,6 +943,14 @@ class CameraService(MicroscopeCommandService):
 
                 # Parse header
                 header = ImageHeader.from_bytes(header_bytes)
+
+                # A header that fails this is misread bytes, not a strange
+                # frame: reshaping on it raises, and until 2026-08-27 that
+                # killed the receiver thread for good.
+                if not header.is_plausible():
+                    header = self._resync_to_header(self._data_socket, header_bytes)
+                    if header is None:
+                        break
 
                 if frames_received == 0:
                     self.logger.info(
@@ -937,7 +974,19 @@ class CameraService(MicroscopeCommandService):
                     break
 
                 # Convert to numpy array (16-bit unsigned)
+                if len(image_data_bytes) != header.image_size:
+                    self.logger.warning(
+                        f"Short image payload: expected {header.image_size} "
+                        f"bytes, got {len(image_data_bytes)} - dropping frame"
+                    )
+                    continue
+
                 image_array = np.frombuffer(image_data_bytes, dtype=np.uint16)
+                # Safe by construction: `is_plausible` established that
+                # image_size == width * height * 2, and the length was just
+                # checked against image_size. Shape is taken from the header
+                # rather than assumed square, so a 1024x2048 AOI reshapes the
+                # same way a 2048x2048 one does.
                 image_array = image_array.reshape(
                     (header.image_height, header.image_width)
                 )
@@ -949,6 +998,7 @@ class CameraService(MicroscopeCommandService):
                     self._frame_times.pop(0)
 
                 frames_received += 1
+                consecutive_errors = 0
 
                 if frames_received % 10 == 0:
                     self.logger.debug(f"Received {frames_received} frames")
@@ -1015,16 +1065,101 @@ class CameraService(MicroscopeCommandService):
                 break
 
             except Exception as e:
-                if self._streaming:  # Only log if we're supposed to be streaming
-                    self.logger.error(f"Error in data receiver: {e}")
-                    import traceback
+                # One malformed frame used to end the stream permanently, and
+                # the only trace was this log line: live view froze on its last
+                # good image and the LED overview quietly collected nothing.
+                # Try to recover; give up only if the errors keep coming.
+                if not self._streaming:
+                    break
 
-                    self.logger.error(f"Traceback: {traceback.format_exc()}")
-                break
+                consecutive_errors += 1
+                self.logger.error(
+                    f"Error in data receiver "
+                    f"({consecutive_errors}/{self.MAX_CONSECUTIVE_ERRORS}): {e}"
+                )
+                import traceback
+
+                self.logger.error(f"Traceback: {traceback.format_exc()}")
+
+                if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                    self.logger.error(
+                        "Giving up on the live stream after "
+                        f"{consecutive_errors} consecutive errors"
+                    )
+                    break
+
+                if self._resync_to_header(self._data_socket, b"") is None:
+                    break
+                continue
 
         self.logger.info(
             f"Data receiver thread stopped (received {frames_received} frames)"
         )
+
+    # Consecutive bad frames tolerated before the stream is abandoned. More
+    # than one because a single glitch is worth recovering from; small because
+    # a stream that cannot produce a valid frame is not going to start.
+    MAX_CONSECUTIVE_ERRORS = 5
+
+    # How far to hunt for the next real header before giving up. A framing
+    # discrepancy is a handful of bytes per frame; anything past this is a
+    # different problem and scanning further would just stall the thread.
+    MAX_RESYNC_BYTES = 8192
+
+    def _resync_to_header(
+        self, sock: socket.socket, window: bytes
+    ) -> Optional[ImageHeader]:
+        """Slide forward until the bytes read as a real header again.
+
+        The 2026-08-27 stream went out of step by exactly 8 bytes per frame:
+        frame 1 read correctly, then every subsequent header landed two words
+        early, so `image_height` came out holding the *previous* frame's
+        `image_size` (2097152 = 1024x1024x2) and the reshape blew up. One bad
+        frame then killed the receiver thread outright, which is why live view
+        froze on its first image and an LED overview collected nothing for two
+        hours.
+
+        Whether those 8 bytes are a longer header or a per-frame trailer cannot
+        be told apart from the stream alone, so this does not assume either. It
+        recovers, and it **logs the measured offset** -- which is the number that
+        settles it.
+        """
+        scan = bytearray(window)
+        skipped = 0
+
+        while skipped <= self.MAX_RESYNC_BYTES:
+            offset = 0
+            while offset + 40 <= len(scan):
+                candidate = ImageHeader.from_bytes(bytes(scan[offset : offset + 40]))
+                if candidate.is_plausible():
+                    self.logger.warning(
+                        f"Live stream framing recovered after skipping "
+                        f"{skipped + offset} byte(s): next frame is "
+                        f"{candidate.image_width}x{candidate.image_height}. "
+                        f"A steady non-zero skip means each frame occupies that "
+                        f"many bytes more than the 40-byte header plus "
+                        f"image_size this reader assumes."
+                    )
+                    leftover = scan[offset + 40 :]
+                    if leftover:
+                        self._rx_pushback[0:0] = leftover
+                    return candidate
+                offset += 1
+
+            skipped += offset
+            del scan[:offset]
+
+            chunk = sock.recv(4096)
+            if not chunk:
+                self.logger.warning("Connection closed while resynchronising")
+                return None
+            scan.extend(chunk)
+
+        self.logger.error(
+            f"Could not find a valid image header within "
+            f"{self.MAX_RESYNC_BYTES} bytes - giving up on this stream"
+        )
+        return None
 
     def _receive_exact(self, sock: socket.socket, num_bytes: int) -> Optional[bytes]:
         """
@@ -1041,6 +1176,15 @@ class CameraService(MicroscopeCommandService):
             socket.timeout: If receive times out
         """
         data = bytearray()
+
+        # Bytes handed back by a resync are served before touching the socket,
+        # so recovering alignment never costs us the frame we recovered into.
+        pending = getattr(self, "_rx_pushback", None)
+        if pending:
+            take = min(num_bytes, len(pending))
+            data.extend(pending[:take])
+            del pending[:take]
+
         while len(data) < num_bytes:
             try:
                 chunk = sock.recv(num_bytes - len(data))

@@ -121,23 +121,96 @@ class TestADeadStreamIsReported:
 
 
 class TestAWorkingStreamIsLeftAlone:
-    def test_a_delivered_frame_disarms_the_watchdog(self, app):
+    def test_a_delivered_frame_re_arms_rather_than_disarms(self, app):
+        # This test used to assert the watchdog was stopped for good on the
+        # first frame. That is precisely what let the 2026-08-27 failure
+        # through: the receiver thread died immediately *after* delivering
+        # exactly one frame, so the frame that killed the stream also disarmed
+        # the only check that would have noticed.
         controller = _controller(app, deliver=True)
         controller.start_live_view()
         controller._pull_and_display_frame()
 
         assert controller._frames_displayed == 1
-        assert not controller._live_view_watchdog.isActive()
+        assert controller._live_view_watchdog.isActive()
 
-    def test_no_error_once_frames_are_arriving(self, app):
+    def test_the_re_armed_gap_is_longer_than_the_first_frame_budget(self, app):
+        # A running acquisition can put real pauses between frames. A false
+        # alarm here would train people to ignore the one message that matters.
+        from py2flamingo.controllers.camera_controller import CameraController
+
+        assert (
+            CameraController.STALL_TIMEOUT_MS > CameraController.FIRST_FRAME_TIMEOUT_MS
+        )
+
+    def test_no_error_while_frames_keep_arriving(self, app):
+        controller = _controller(app, deliver=True)
+        errors = _errors(controller)
+
+        controller.start_live_view()
+        for _ in range(5):
+            controller._pull_and_display_frame()
+
+        assert errors == []
+
+
+class TestAStreamThatDiesAfterOneFrameIsReported:
+    """The 2026-08-27 failure exactly: one good frame, then the receiver died."""
+
+    def test_a_stall_after_one_frame_is_an_error(self, app):
         controller = _controller(app, deliver=True)
         errors = _errors(controller)
 
         controller.start_live_view()
         controller._pull_and_display_frame()
-        controller._on_first_frame_timeout()  # even if it somehow fires late
+        controller._fake_service.deliver = False  # receiver thread dies
+        controller._on_first_frame_timeout()
 
-        assert errors == []
+        assert len(errors) == 1
+
+    def test_the_message_says_the_image_is_frozen_not_live(self, app):
+        # The user-visible symptom is a picture that looks fine and is stale.
+        controller = _controller(app, deliver=True)
+        errors = _errors(controller)
+
+        controller.start_live_view()
+        controller._pull_and_display_frame()
+        controller._on_first_frame_timeout()
+
+        assert "frozen" in errors[0]
+
+    def test_the_message_counts_the_frames_that_did_arrive(self, app):
+        controller = _controller(app, deliver=True)
+        errors = _errors(controller)
+
+        controller.start_live_view()
+        controller._pull_and_display_frame()
+        controller._on_first_frame_timeout()
+
+        assert "1 frame" in errors[0]
+
+    def test_it_reports_once_not_on_every_timeout(self, app):
+        controller = _controller(app, deliver=False)
+        errors = _errors(controller)
+
+        controller.start_live_view()
+        for _ in range(4):
+            controller._on_first_frame_timeout()
+
+        assert len(errors) == 1
+
+    def test_a_restart_allows_a_fresh_report(self, app):
+        controller = _controller(app, deliver=False)
+        errors = _errors(controller)
+
+        controller.start_live_view()
+        controller._on_first_frame_timeout()
+        controller.stop_live_view()
+
+        controller.start_live_view()
+        controller._on_first_frame_timeout()
+
+        assert len(errors) == 2
 
     def test_stopping_live_view_disarms_the_watchdog(self, app):
         # Otherwise a short deliberate live view that is stopped before the
