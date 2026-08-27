@@ -634,3 +634,13 @@ class LaserLEDController(QObject):
     def is_preview_active(self) -> bool:
         """Check if any light source is currently in preview mode."""
         return self._active_source is not None
+
+    def get_active_source(self) -> Optional[str]:
+        """Which light source is actually enabled: 'laser_N', 'led_R/G/B/W', or None.
+
+        This is the controller's record of what was enabled on the hardware, not
+        a checkbox. There are two `LaserLEDControlPanel` instances sharing one
+        controller (the main window and Sample View), so either panel's own
+        checkbox can disagree with what is lit.
+        """
+        return self._active_source

@@ -52,6 +52,7 @@ class _FakeController(QObject):
         self.sent = []
         self.enabled_led = []
         self._laser_powers = {}
+        self._active_source = None
 
     def is_led_available(self):
         return True
@@ -73,11 +74,16 @@ class _FakeController(QObject):
         self._laser_powers[index] = power
         return True, power
 
+    def get_active_source(self):
+        return self._active_source
+
     def enable_led_for_preview_async(self, led_color=None):
         self.enabled_led.append(led_color)
+        self._active_source = "led_W"
 
     def enable_led_for_preview(self, led_color=None):
         self.enabled_led.append(led_color)
+        self._active_source = "led_W"
 
     def enable_laser_for_preview_async(self, *a, **k):
         pass
@@ -128,7 +134,12 @@ class TestTheWarningAppearsWhenTheLampIsOff:
         assert panel._led_off_warning_shown
 
     def test_no_warning_when_the_led_is_the_selected_source(self, panel):
+        # Ticking the box is not enough on its own -- `_on_source_clicked` is
+        # what actually enables the lamp. See
+        # TestTheCheckIsAskedOfTheHardwareNotTheCheckbox for why the state is
+        # read from the controller rather than from this panel's checkbox.
         panel._led_radio.setChecked(True)
+        panel._on_source_clicked(panel._led_radio)
         panel._led_slider.setValue(99)
         assert not panel._led_off_warning_shown
 
@@ -194,3 +205,67 @@ class TestTheSliderDoesNotFloodTheCommandSocket:
         panel._led_spinbox.setValue(27.0)
         panel._on_led_intensity_spinbox_finished()
         assert panel._fake.sent[-1] == (0, 27.0)
+
+
+class TestTheCheckIsAskedOfTheHardwareNotTheCheckbox:
+    """Two panels share one controller -- the main window's and Sample View's.
+
+    Ticking Select in one leaves the other's checkbox unticked while the lamp is
+    on, so a per-panel checkbox answers the wrong question in both directions.
+    """
+
+    def test_a_ticked_box_still_warns_if_nothing_is_actually_lit(self, panel):
+        # The failure that matters: the box looks armed, no lamp is on, and the
+        # slider reports success into a dark chamber.
+        panel._led_radio.setChecked(True)  # no _on_source_clicked -> nothing enabled
+        panel._led_slider.setValue(77)
+        assert panel._led_off_warning_shown
+
+    def test_no_warning_once_the_controller_says_an_led_is_on(self, panel):
+        panel._led_radio.setChecked(True)
+        panel._on_source_clicked(panel._led_radio)
+        panel._led_slider.setValue(77)
+        assert not panel._led_off_warning_shown
+
+    def test_the_other_panel_agrees_without_its_own_box_ticked(self, panel, app):
+        from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
+
+        panel._led_radio.setChecked(True)
+        panel._on_source_clicked(panel._led_radio)
+
+        other = LaserLEDControlPanel(panel._fake)
+        try:
+            assert not other._led_radio.isChecked()
+            other._led_slider.setValue(50)
+            assert not other._led_off_warning_shown
+        finally:
+            other.deleteLater()
+
+    def test_a_lit_laser_is_not_mistaken_for_a_lit_led(self, panel):
+        panel._fake._active_source = "laser_2"
+        panel._led_slider.setValue(77)
+        assert panel._led_off_warning_shown
+
+    def test_the_committed_log_line_names_the_active_source(self, panel, caplog):
+        import logging
+
+        with caplog.at_level(logging.INFO):
+            panel._led_spinbox.setValue(77.0)
+            panel._on_led_intensity_spinbox_finished()
+
+        line = [r.message for r in caplog.records if "intensity set to" in r.message]
+        assert line and "active light source" in line[-1]
+
+    def test_that_line_says_none_when_nothing_is_lit(self, panel, caplog):
+        # One line, in every log, that answers "was anything on when this was
+        # set?" -- the question two sessions of logs could not answer.
+        import logging
+
+        with caplog.at_level(logging.INFO):
+            panel._led_spinbox.setValue(77.0)
+            panel._on_led_intensity_spinbox_finished()
+
+        line = [r.message for r in caplog.records if "intensity set to" in r.message][
+            -1
+        ]
+        assert "none" in line

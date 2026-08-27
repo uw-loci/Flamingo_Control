@@ -510,7 +510,8 @@ class LaserLEDControlPanel(QWidget):
         # Log immediately for spinbox changes (user typed it in)
         color_names = ["Red", "Green", "Blue", "White"]
         self.logger.info(
-            f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}%"
+            f"{color_names[led_color]} LED intensity set to {intensity_percent:.1f}% "
+            f"(active light source: {self._active_source_description()})"
         )
 
     def _on_led_slider_released(self) -> None:
@@ -572,9 +573,31 @@ class LaserLEDControlPanel(QWidget):
     # ------------------------------------------------------------------ #
 
     def _led_is_selected(self) -> bool:
-        """Is the LED the currently checked light source?"""
+        """Is an LED actually the enabled light source?
+
+        Asks the controller, not this panel's checkbox. Two panels share one
+        controller -- the main window's and Sample View's -- so ticking Select
+        in one leaves the other's checkbox unticked while the lamp is on. The
+        checkbox is only the fallback for a controller that cannot answer.
+        """
+        controller = self.laser_led_controller
+        if hasattr(controller, "get_active_source"):
+            active = controller.get_active_source()
+            return bool(active and str(active).startswith("led"))
+
         radio = getattr(self, "_led_radio", None)
         return bool(radio is not None and radio.isChecked())
+
+    def _active_source_description(self) -> str:
+        """Plain-language name of whatever light source is currently enabled."""
+        controller = self.laser_led_controller
+        if not hasattr(controller, "get_active_source"):
+            return "unknown"
+
+        active = controller.get_active_source()
+        if not active:
+            return "none - no lamp or laser is on"
+        return str(active)
 
     def _update_led_off_warning(self) -> None:
         """Show a warning if the intensity was changed while the LED is off.
@@ -593,10 +616,11 @@ class LaserLEDControlPanel(QWidget):
         off = not self._led_is_selected()
         if off and not self._led_off_warning_shown:
             self.logger.warning(
-                "LED intensity changed while the LED is not selected as the "
-                "light source. The command is accepted by the server but the "
-                "lamp stays off, so the live view will not change. Tick the "
-                "LED checkbox to turn it on."
+                "LED intensity changed while no LED is lit (active light "
+                "source: %s). The server accepts the command and answers "
+                "status=1, but nothing is illuminated, so the live view will "
+                "not change. Tick Select in the LED row to turn it on.",
+                self._active_source_description(),
             )
         self._led_off_warning_shown = off
         warning.setVisible(off)
@@ -608,7 +632,8 @@ class LaserLEDControlPanel(QWidget):
             led_color = self._led_combobox.currentIndex()
             color_names = ["Red", "Green", "Blue", "White"]
             self.logger.info(
-                f"{color_names[led_color]} LED intensity set to {intensity:.1f}%"
+                f"{color_names[led_color]} LED intensity set to {intensity:.1f}% "
+                f"(active light source: {self._active_source_description()})"
             )
 
     def _on_led_color_changed(self, index: int) -> None:
