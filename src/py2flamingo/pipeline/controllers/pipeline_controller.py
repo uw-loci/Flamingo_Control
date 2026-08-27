@@ -157,20 +157,27 @@ class PipelineController(QObject):
     def _build_coordinate_config(self) -> Optional[dict]:
         """Load visualization config and extract display + stage_control sections."""
         try:
-            from pathlib import Path
-
-            import yaml
-
-            config_path = (
-                Path(__file__).parent.parent.parent
-                / "configs"
-                / "visualization_3d_config.yaml"
+            # Through the per-microscope overlay, not the raw YAML: the base
+            # `stage_control` ranges are one instrument's chamber, and a scope
+            # travelling outside them has its tiles rejected as out-of-bounds.
+            from py2flamingo.visualization.voxel_storage_factory import (
+                resolve_visualization_config,
             )
-            if not config_path.exists():
-                logger.warning(f"Visualization config not found: {config_path}")
+
+            name = None
+            try:
+                from py2flamingo.configs.config_loader import (
+                    _read_scope_microscope_name,
+                )
+
+                name = _read_scope_microscope_name()
+            except Exception:  # noqa: BLE001 - fall back to the base config
+                logger.debug("Could not read microscope name", exc_info=True)
+
+            full_config = resolve_visualization_config(microscope_name=name)
+            if not full_config:
+                logger.warning("Visualization config unavailable")
                 return None
-            with open(config_path) as f:
-                full_config = yaml.safe_load(f)
             return {
                 "display": full_config.get("display", {}),
                 "stage_control": full_config.get("stage_control", {}),

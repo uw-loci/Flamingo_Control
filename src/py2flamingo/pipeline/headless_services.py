@@ -21,7 +21,6 @@ exceptions instead of silently being swallowed.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Set
 
 import numpy as np
@@ -198,15 +197,27 @@ def _load_default_coord_config() -> Dict[str, Any]:
     coord config when the file is present.
     """
     try:
-        import yaml
-
-        # py2flamingo/pipeline/headless_services.py → py2flamingo/configs/...
-        config_path = (
-            Path(__file__).parent.parent / "configs" / "visualization_3d_config.yaml"
+        # Resolve through the per-microscope overlay rather than reading the
+        # YAML raw: the base `stage_control` ranges belong to one instrument,
+        # and a scope whose travel falls outside them has every tile rejected as
+        # out-of-bounds. Reading raw here would hand the headless path the wrong
+        # chamber while the GUI used the right one.
+        from py2flamingo.visualization.voxel_storage_factory import (
+            resolve_visualization_config,
         )
-        if config_path.exists():
-            with config_path.open() as f:
-                full_config = yaml.safe_load(f) or {}
+
+        name = None
+        try:
+            from py2flamingo.configs.config_loader import (
+                _read_scope_microscope_name,
+            )
+
+            name = _read_scope_microscope_name()
+        except Exception:  # noqa: BLE001 - fall back to the base config
+            logger.debug("Could not read microscope name", exc_info=True)
+
+        full_config = resolve_visualization_config(microscope_name=name)
+        if full_config:
             return {
                 "display": full_config.get("display", {}),
                 "stage_control": full_config.get("stage_control", {}),

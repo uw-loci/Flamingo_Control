@@ -79,6 +79,32 @@ display:
 #       # step_to_stage_transform still needs rig calibration (see file header).
 #       features_yaml: configs/step_chamber_features_aslm.yaml
 
+microscopes:
+  # Liara / CTLSM2 — high-res ASLM. GEOMETRY ONLY, and only because the base
+  # ranges below are n7's: n7's z_range_mm is [12.5, 26.0] while Liara's Z axis
+  # travels 0–15, so all but ~2.5 mm of Liara's range would fall OUTSIDE the
+  # storage bounds and every tile there would be silently dropped — the same
+  # failure that discarded 51,062 chunks on 2026-08-08 (see the guard comment in
+  # visualization/voxel_storage_factory.py).
+  #
+  # Ranges are Liara's real stage envelope, matching
+  # microscope_settings/liara_settings.json. Keep the two in step.
+  #
+  # NO `orientation:` BLOCK ON PURPOSE. Liara is an ASLM system whose display
+  # axes likely permute relative to the legacy scope, but the correct
+  # permutation has to be determined on the rig — guessing it here would silently
+  # mis-place every voxel, which is worse than the legacy orientation being
+  # merely wrong in a known way. That is the per-microscope orientation work
+  # (Phase 1c), not this.
+  #
+  # RIG VERIFICATION PENDING: confirm the chamber wireframe and click-to-move
+  # land correctly on Liara before trusting these ranges.
+  liara:
+    stage_control:
+      x_range_mm: [0.0, 5.0]
+      y_range_mm: [0.0, 15.0]
+      z_range_mm: [0.0, 15.0]
+
 storage:
   # High-resolution storage (2-3x display resolution)
   # This preserves data quality during rotations
