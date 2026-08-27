@@ -65,11 +65,11 @@ file.** `drive_mappings.json` likewise holds a dict of mappings.
 | File | Purpose | Mult. | In git | Missing ⇒ |
 |---|---|---|---|---|
 | `ScopeSettings.txt` | Downloaded from the scope. Type, **Microscope name**, stage limits, home | 1 (overwritten per connection) | yes | Name falls back to `"default"`, so `default_settings.json` is sought and stage limits are unknown |
-| `{name}_settings.json` | Stage soft limits, position-history sizing, **`reference_position`** (the recovery anchor). `n7_settings.json` | **N** | yes | Placeholder limits 0-26 mm are used — a guess, possibly WIDER than the instrument. Run Edit ▸ Microscope Setup |
+| `{name}_settings.json` | Stage soft limits, position-history sizing, **`reference_position`** (the recovery anchor). `n7_settings.json`, `liara_settings.json`. **This is the ONLY store that gates a stage move** — `position_controller.move_x/y/z/r` raise and `movement_controller._clamp_to_limits` clamps against it. `microscope_hardware.yaml`'s `stage_limits` block is a tile-count *estimate* only, and ScopeSettings.txt contributes just `Soft limit max y-axis`. Selected by name, so a case mismatch used to mean placeholders; the service now case-folds as a fallback and warns | **N** | yes | Placeholder limits 0-26 mm are used — a guess, possibly WIDER than the instrument. Run Edit ▸ Microscope Setup |
 | `{name}_start_position.txt` | **Vestigial.** Nothing reads its contents any more — `get_start_position()` was removed as dead in `2026-08-11`. `FlamingoConnect.check_start_position()` only checks that *some* `*_start_position.txt` exists and creates an empty `default_start_position.txt` if not | 1 | yes | An empty placeholder is created |
-| `pixel_calibration.json` | XY Pixel Calibrator result (µm/px + the optics the config *believed* when it was measured). **Absent by default** — the 2026-06-26 one was removed 2026-08-17 as stale: it was stamped `5.000` (the YAML fallback of the day) while measuring 1.0276 µm/px, i.e. ~6.33×, against a scope now reporting 6.205. Two points, quality 0.37, 3.3° shear — and `residual_px: 0.0` is meaningless with two points, which exactly determine the affine | 1 ⚠ | yes | Falls back to ScopeSettings/YAML optics |
-| `optics_guard.json` | Remembers optics config to detect a changed objective | 1 ⚠ | yes | No mismatch warning |
-| `position_presets.json` | Named stage positions | 1 ⚠ | yes | No presets |
+| `{name}_pixel_calibration.json` | **Per scope since 2026-08-26.** XY Pixel Calibrator result (µm/px + the optics the config *believed* when it was measured). **Absent by default** — the 2026-06-26 one was removed 2026-08-17 as stale: it was stamped `5.000` (the YAML fallback of the day) while measuring 1.0276 µm/px, i.e. ~6.33×, against a scope now reporting 6.205. Two points, quality 0.37, 3.3° shear — and `residual_px: 0.0` is meaningless with two points, which exactly determine the affine | **N** | the shared seed is | Falls back to ScopeSettings/YAML optics |
+| `{name}_optics_guard.json` | Remembers optics config to detect a changed objective. Signature is `name|mag|sensor_px`. **Per scope since 2026-08-26** — one shared acknowledgement list mixed two instruments' entries with no way to tell them apart | **N** | the shared seed is | No mismatch warning |
+| `{name}_position_presets.json` | Named stage positions. **Per microscope since 2026-08-26** — these are raw stage coordinates, and `move_to_position(validate=True)` CLAMPS rather than refusing, so a shared file sent the stage somewhere else while the UI reported the preset's name. The pre-split `position_presets.json` is adopted for a scope only when EVERY preset is reachable within that scope's limits (all-or-nothing, 1 µm tolerance for a position saved at a limit), and is copied, never moved | **N** | **no** (the legacy `position_presets.json` stays tracked and acts as the seed, like the `.example.json` pattern in §4) | No presets |
 | `led_2d_overview_settings.json` | LED overview dialog state (bbox, overlap, Z step) | 1 | yes | Dialog defaults |
 | `progress_timing_cache.json` | Learned per-phase timings for ETA | 1 | yes | ETA re-learns. Harmless |
 | `stitching_timing_cache.json` | Same, for stitching | 1 | no | Harmless |
@@ -83,13 +83,29 @@ file.** `drive_mappings.json` likewise holds a dict of mappings.
 
 | File | Purpose | Mult. |
 |---|---|---|
-| `microscope_hardware.yaml` | Sensor size, **acquisition frame rate (40)**, optics defaults | 1 |
+| `microscope_hardware.yaml` | Sensor size, **acquisition frame rate (40)**, optics defaults, plus a per-microscope `microscopes:` overlay | 1 file, N entries |
 | `stitching_config.yaml` | ~74 stitching defaults | 1 |
 | `visualization_3d_config.yaml` | Chamber ranges, voxel size for the 3D view | 1 |
 | `step_chamber_features.yaml`, `..._aslm.yaml` | Chamber geometry from STEP files | 1 per chamber type |
 
-These are code-adjacent defaults, not per-site settings. Overlay order for optics is
-**measured calibration > ScopeSettings > YAML** (`get_hardware_config()`).
+These are code-adjacent defaults. Two of them (`microscope_hardware.yaml`,
+`visualization_3d_config.yaml`) now carry a `microscopes:` map keyed on the scope's own
+**Microscope name**, deep-merged over the base — so they are one file holding N entries,
+not one setting. Overlay order for optics is **measured calibration > ScopeSettings >
+the `microscopes:` block > the base YAML** (`get_hardware_config()`).
+
+The per-scope block supplies fallbacks and one *assertion*,
+`expected_objective_magnification`: it is never used as a value, but when the scope
+reports something >2% away, `get_hardware_config()` records an `optics_disagreement`
+that the app shows on connect. That is how a stale server objective becomes visible —
+Liara shipped a stale 17× against a measured 25.48×.
+
+**`microscopes:` must stay LAST in `microscope_hardware.yaml`.**
+`PixelCalibrationService.apply_config_patch` rewrites the first matching `key:` line
+(`re.subn`, `count=1`, `MULTILINE`) and `^\s*` matches indented keys, so a per-scope
+entry placed above the base would be patched instead of it — silently, with the dialog
+reporting success. Pinned by
+`tests/test_hardware_config_optics.py::TestYamlOrderingConstraint`.
 
 > `microscope_hardware.yaml.bak` and `stitching_config.yaml.bak` are tracked and unused —
 > deletion candidates.
@@ -117,14 +133,37 @@ disuse here.
 - `microscope_settings/{name}_settings.json` — stage soft limits are the important
   part and they are genuinely instrument-specific.
 
+The filename must **byte-match** the `Microscope name` that scope reports in its
+  `ScopeSettings.txt`. Include all four axes with `min` and `max` — a partial axis makes
+  `_load_settings` raise, which lands in the not-configured branch and substitutes the
+  *wider* placeholders. `r` especially: Edit ▸ Microscope Setup only collects x/y/z.
+
 **Add an entry, not a file:**
 
 - `saved_configurations.json` — a second `{name, ip_address, port}` object.
 - `drive_mappings.json` — a second server-path → drive entry if it writes elsewhere.
+- `microscope_hardware.yaml`'s `microscopes:` map — optics and camera only. **Never
+  stage limits** (a third representation of the envelope is how they drift apart) and
+  **never sensor dimensions** (`disk_tile_loader` freezes `FRAME_WIDTH`/`FRAME_HEIGHT`
+  from them at import, so a per-scope value goes stale after a mid-session switch).
+- `visualization_3d_config.yaml`'s `microscopes:` map — chamber ranges and orientation.
+  Needed, not optional: the base ranges are n7's, and a scope whose travel falls outside
+  them has every tile silently dropped from 3D storage.
 
 **Change nothing:**
 
-- Everything in `src/py2flamingo/configs/`, and the `workflows/` templates.
+- The `workflows/` templates.
+
+**How the preset seed behaves on each rig:** both machines pull the same tracked
+`position_presets.json` (n7's 8 named positions). On n7 every one is reachable, so
+they migrate to `n7_position_presets.json` and nothing is lost. On Liara all 8 are
+outside its 0-5 / 0-15 envelope, so it adopts none and starts clean — no n7
+coordinates on a 5 mm axis. Neither machine writes to the tracked file, so a pull
+never conflicts.
+
+**Known gaps with two scopes configured:** the Pixel Calibrator patches the *base*
+`optics:` block regardless of which scope is connected (bounded — those values are
+offline fallbacks), and `stitching_config.yaml`'s `pixel_size_um` is still global.
 
 **Watch out — single files that arguably should be per-scope** (marked ⚠ above). These
 are shared today, so connecting a second instrument silently reuses the first one's
@@ -133,11 +172,30 @@ values:
 | File | Why it is a problem |
 |---|---|
 | `pixel_calibration.json` | µm/px is an optics property. A calibration measured on one scope would be applied to another. Partly mitigated: it records the optics it was measured at and is *ignored* when they no longer match |
-| `position_presets.json` | Stage coordinates are instrument-specific; presets from one scope may be unreachable or wrong on another |
 | `optics_guard.json` | Tracks one optics configuration |
 
-Only `pixel_calibration.json` currently defends itself. The others would need a
-`{name}_` prefix to be multi-scope-safe.
+**This table is now empty** — every file that was shared-but-instrument-specific
+became per-scope on 2026-08-26. The pattern for all three: **writes always go to
+`{scope}_{name}`; reads fall back to the shared pre-split file** until that scope
+writes its own (`config_loader.scoped_settings_read_path` /
+`scoped_settings_write_path`). No migration and no guessing at an owner — for the
+calibration and guard files the stored `optics_signature` already records which optics
+they describe, and `position_presets.json` is adopted only when every preset is
+reachable on the connecting scope.
+
+**`stitching_config.yaml` does NOT need the same treatment**, despite holding
+`pixel_size_um` and a deconvolution `psf:` block. `py2flamingo.stitching` is a
+re-export shim over the standalone `flamingo_stitcher` package, so the copy under
+`src/py2flamingo/configs/` never drives a stitch — its only reader is an autofill
+preview in `pipeline/ui/property_panel.py`. In the stitcher itself the pixel size is
+already resolved **per acquisition** (`suggested_pixel_size_um` reads that
+acquisition's own ScopeSettings objective, falling back to the per-microscope entry in
+the stitcher's `microscope_hardware.yaml`). What genuinely is still global there is the
+deconvolution PSF: `deconvolution.py` takes NA and `n_immersion` from the stitcher's
+hardware config, whose `microscopes:` map is read only for `objective_magnification`.
+So Liara would generate a PSF at NA 0.4 / n 1.33 with `nz: 31` — the file's own comment
+says 31 suffices only below NA 0.5, and Liara's objective is **0.7**. That is work for
+the flamingo-stitcher repo, not this one.
 
 ---
 

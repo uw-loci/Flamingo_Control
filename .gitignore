@@ -197,3 +197,12 @@ microscope_settings/stitching_timing_cache.json
 
 # uv lockfile (repo uses pyproject.toml + requirements*.txt, not uv)
 uv.lock
+
+# Per-microscope runtime config, written by the app on the machine it runs on.
+# The shared pre-split files (position_presets.json, pixel_calibration.json,
+# optics_guard.json) stay tracked and act as seeds; these are each machine's
+# own copy and are rewritten on save, so tracking them would leave a
+# permanently dirty tree — the thing that made `git describe --dirty` useless.
+microscope_settings/*_position_presets.json
+microscope_settings/*_pixel_calibration.json
+microscope_settings/*_optics_guard.json
