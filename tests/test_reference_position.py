@@ -103,7 +103,26 @@ class TestItIsPerMicroscope:
 
     def test_is_configured_reports_whether_setup_has_run(self, tmp_path):
         assert _service(tmp_path).is_configured is False
-        assert _service(tmp_path, name="scopeC", settings={}).is_configured is True
+        # A file only counts as configured once it actually states the limits —
+        # see test_a_file_without_stage_limits_is_not_configured below.
+        limits = {
+            "x": {"min": 1.0, "max": 12.0},
+            "y": {"min": 5.0, "max": 25.0},
+            "z": {"min": 12.5, "max": 26.0},
+        }
+        svc = _service(tmp_path, name="scopeC", settings={"stage_limits": limits})
+        assert svc.is_configured is True
+
+    def test_a_file_without_stage_limits_is_not_configured(self, tmp_path):
+        """Parseable but silent about limits => the 0-26 placeholders are live.
+
+        That is the permissive direction, so it must not read as configured.
+        A partial axis already lands in the load error path; a wholly missing
+        block used to slip through as "configured" while handing back 0-26.
+        """
+        svc = _service(tmp_path, name="scopeD", settings={"version": "1.0"})
+        assert svc.is_configured is False
+        assert svc.get_stage_limits()["x"]["max"] == 26.0
 
 
 class TestNoMicroscopeNameSurvivesInCode:

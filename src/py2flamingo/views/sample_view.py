@@ -3917,8 +3917,20 @@ class SampleView(QWidget):
             )
             from py2flamingo.views.dialogs.settings_dialog import SettingsDialog
 
-            # Get or create the settings service
-            settings_service = getattr(self, "_settings_service", None)
+            # Prefer the application's LIVE service. This dialog writes stage
+            # limits, and stage limits are the only thing gating a stage move —
+            # so it must act on the service the movement path actually reads,
+            # not a private copy. A private copy built once (with a hardcoded
+            # "n7" default, below) goes stale the moment the user connects to a
+            # different scope, and then "correcting" the limits on screen saves
+            # them into the wrong microscope's file.
+            settings_service = None
+            if self._configuration_service is not None:
+                settings_service = getattr(
+                    self._configuration_service, "microscope_settings", None
+                )
+            if settings_service is None:
+                settings_service = getattr(self, "_settings_service", None)
             if settings_service is None:
                 # Try to get microscope name from configuration service
                 microscope_name = "n7"  # Default

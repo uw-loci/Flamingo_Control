@@ -42,6 +42,20 @@ class MicroscopeSettingsService:
         self.settings_file = (
             self.base_path / "microscope_settings" / f"{microscope_name}_settings.json"
         )
+        if not self.settings_file.exists():
+            found = self._find_case_insensitive(microscope_name)
+            if found is not None:
+                self.logger.warning(
+                    "[MicroscopeSettingsService] Settings file matched only by "
+                    "case-folding: '%s' -> '%s'. The scope reports its name as "
+                    "'%s'; rename the file to match exactly.",
+                    self.settings_file.name,
+                    found.name,
+                    microscope_name,
+                )
+                # Adopt the found path so save_settings() writes back to the
+                # same file rather than creating a second, differently-cased one.
+                self.settings_file = found
 
         print(
             f"[MicroscopeSettingsService] Initializing for microscope: '{microscope_name}'"
@@ -59,6 +73,48 @@ class MicroscopeSettingsService:
         # this rather than re-testing the file path.
         self.is_configured: bool = self.settings_file.exists()
         self.settings = self._load_settings()
+
+    def _find_case_insensitive(self, microscope_name: str) -> Optional[Path]:
+        """A ``{name}_settings.json`` differing from ``microscope_name`` only in case.
+
+        The filename is built verbatim from the scope-reported name, but the
+        per-microscope *visualization* overlay matches case-insensitively. On a
+        case-sensitive filesystem that mismatch is dangerous rather than merely
+        untidy: a scope reporting "Liara" against a ``liara_settings.json``
+        finds no file, falls through to ``_get_default_settings()``, and gates
+        the stage with the 0-26 mm placeholders -- which are WIDER than any real
+        instrument. Matching here turns a silent widening into a warning.
+
+        Returns None when there is no match or the directory is unreadable.
+        """
+        target = f"{microscope_name}_settings.json".lower()
+        try:
+            settings_dir = self.base_path / "microscope_settings"
+            matches = [
+                c
+                for c in sorted(settings_dir.glob("*_settings.json"))
+                if c.name.lower() == target
+            ]
+        except OSError:
+            self.logger.debug("Could not scan for settings files", exc_info=True)
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            # Two files differing only in case. Picking one would be a coin
+            # toss decided by ASCII order, and self.settings_file is also where
+            # save_settings() writes — so Edit > Microscope Setup would tighten
+            # one file while the other stayed in force. Refuse, and let the
+            # not-configured path put the placeholders on the record instead.
+            self.logger.critical(
+                "[MicroscopeSettingsService] %d settings files match '%s' "
+                "differing only in case (%s). Refusing to guess. Delete or "
+                "merge all but one, named exactly as the scope reports itself.",
+                len(matches),
+                microscope_name,
+                ", ".join(c.name for c in matches),
+            )
+        return None
 
     def _load_settings(self) -> Dict[str, Any]:
         """Load microscope-specific settings from JSON file.
@@ -101,6 +157,41 @@ class MicroscopeSettingsService:
                     f"[MicroscopeSettingsService] Successfully loaded settings for microscope '{self.microscope_name}' "
                     f"from {self.settings_file}"
                 )
+                # The file's own idea of which scope it describes. A mismatch is
+                # worth saying out loud: n7_settings.json's note records that its
+                # limits were "copied from zion settings as a starting point",
+                # which is exactly how one instrument's envelope ends up gating
+                # another.
+                claimed = str(settings.get("microscope_name", "") or "").strip()
+                if claimed and claimed.lower() != str(self.microscope_name).lower():
+                    self.logger.warning(
+                        "[MicroscopeSettingsService] %s says it is for '%s', but "
+                        "it was loaded for '%s'. Check that these stage limits "
+                        "belong to the connected instrument.",
+                        self.settings_file.name,
+                        claimed,
+                        self.microscope_name,
+                    )
+
+                # A file with NO stage_limits block used to take this branch
+                # silently: is_configured stayed True while get_stage_limits()
+                # handed back the 0-26 mm placeholders. That is the permissive
+                # direction, and it defeats every guard that keys off
+                # is_configured. A partial block already lands in the except
+                # below (the log lines index it); a missing one must not be
+                # treated as better-configured than a broken one.
+                if not isinstance(settings.get("stage_limits"), dict):
+                    self.is_configured = False
+                    self.logger.error(
+                        "[MicroscopeSettingsService] %s has no 'stage_limits' "
+                        "block, so the PLACEHOLDER 0-26 mm limits apply — wider "
+                        "than any real instrument. Marking '%s' NOT CONFIGURED; "
+                        "run Edit > Microscope Setup before moving the stage.",
+                        self.settings_file.name,
+                        self.microscope_name,
+                    )
+                    return settings
+
                 # Log stage limits to verify correct file was loaded
                 if "stage_limits" in settings:
                     limits = settings["stage_limits"]

@@ -499,6 +499,37 @@ class FlamingoApplication(QObject):
         if self.stage_control_view:
             self.stage_control_view._set_controls_enabled(True)
 
+    def _warn_if_scope_unconfigured(self) -> None:
+        """Say so on screen when the newly-connected scope has no settings file.
+
+        Swapping to a scope we have no `{name}_settings.json` for substitutes
+        the 0-26 mm placeholder limits, which are WIDER than any real
+        instrument — n7 stops at 12.31 mm on X, Liara at 5.0. Nothing in the
+        movement path consults `is_configured`, so those placeholders become the
+        live gate. A CRITICAL log line does not reach someone about to jog the
+        stage; this does.
+        """
+        settings = self.microscope_settings
+        if settings is None or getattr(settings, "is_configured", True):
+            return
+        name = getattr(settings, "microscope_name", "this microscope")
+        self.logger.critical("Connected to unconfigured microscope '%s'", name)
+        if self.main_window is None:
+            return
+        from PyQt5.QtWidgets import QMessageBox
+
+        QMessageBox.warning(
+            self.main_window,
+            "Microscope not configured",
+            f"There is no stage-limit configuration for '{name}'.\n\n"
+            f"Placeholder limits of 0-26 mm are in force on every axis. These "
+            f"are almost certainly WIDER than the instrument, so the usual "
+            f"protection against driving the stage into the objective or the "
+            f"chamber is not there.\n\n"
+            f"Run Edit > Microscope Setup to record this scope's real limits "
+            f"before moving the stage.",
+        )
+
     def _on_settings_loaded(self):
         """Handle settings loaded event - query initial position from hardware.
 
@@ -508,9 +539,51 @@ class FlamingoApplication(QObject):
         """
         self.logger.info("Settings loaded - querying initial position from hardware")
 
+        # FIRST: connection_service just rewrote ScopeSettings.txt, but
+        # ConfigurationService parsed it once at startup and never re-reads. Do
+        # that now, before anything below asks for the microscope name — the
+        # stage limits that gate every move are selected by that name, and the
+        # viewer re-init further down consumes it too. Runs on the GUI thread
+        # with no motion in flight.
+        try:
+            if getattr(self, "config_service", None) and (
+                self.config_service.reload_scope_settings()
+            ):
+                # NotificationService caches the OLD MicroscopeSettingsService,
+                # so without this the ntfy URL and per-event flags would keep
+                # reading and writing the previous scope's JSON.
+                self._notification_service = None
+                # Sample View caches its own service (defaulting to "n7") and
+                # hands it to the Settings dialog, which WRITES stage limits.
+                # Left stale, a user could "correct" the limits they see and
+                # save them into the other scope's file.
+                if self.sample_view is not None:
+                    self.sample_view._settings_service = None
+                self._warn_if_scope_unconfigured()
+        except Exception as e:  # noqa: BLE001 - never block connect
+            self.logger.exception(f"Per-microscope settings reload failed: {e}")
+
         # ScopeSettings.txt was just refreshed and the hardware config cache
         # invalidated; re-evaluate whether the optics match the calibration.
         self._check_optics_guard(show_dialog=True)
+
+        # A stale objective on the scope is not cosmetic: pixel size, FOV, tile
+        # spacing and FOV-derived jog steps all scale with it. The log line in
+        # config_loader fires into a log nobody reads at connect time, so put it
+        # on screen next to the optics-guard dialog. Non-blocking — this is an
+        # accusation about configuration, not a proven hazard.
+        try:
+            from py2flamingo.configs.config_loader import get_hardware_config
+
+            disagreement = get_hardware_config().optics_disagreement
+            if disagreement and self.main_window is not None:
+                from PyQt5.QtWidgets import QMessageBox
+
+                QMessageBox.warning(
+                    self.main_window, "Objective mismatch", disagreement
+                )
+        except Exception as e:  # noqa: BLE001 - never block connect
+            self.logger.exception(f"Optics disagreement check failed: {e}")
 
         # The microscope name is now known (from ScopeSettings.txt). Re-init the
         # 3D viewer for this scope's orientation if it changed since the viewer
@@ -963,7 +1036,18 @@ class FlamingoApplication(QObject):
                     self.main_window._on_pixel_calibrator()
 
             def on_accept_scope():
-                guard.acknowledge_current()
+                # The dialog closes either way, so a silent failure here would
+                # look exactly like success while acquisition stayed blocked.
+                if not guard.acknowledge_current():
+                    from PyQt5.QtWidgets import QMessageBox
+
+                    QMessageBox.warning(
+                        self.main_window,
+                        "Could not accept the scope optics",
+                        "The current optics could not be read, so there is "
+                        "nothing to acknowledge and acquisition is still "
+                        "blocked.\n\nReconnect to the microscope and try again.",
+                    )
 
             dlg = OpticsMismatchDialog(
                 mismatch=guard.mismatch,

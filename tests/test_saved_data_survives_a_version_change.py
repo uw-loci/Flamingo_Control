@@ -114,8 +114,25 @@ class TestUnreadableSettingsAreNotTreatedAsConfigured:
         assert service.is_configured is False
 
     def test_a_valid_file_stays_configured(self, tmp_path):
-        service = self._service(tmp_path, json.dumps({"version": "1.0"}))
+        service = self._service(
+            tmp_path,
+            json.dumps(
+                {
+                    "version": "1.0",
+                    "stage_limits": {
+                        "x": {"min": 1.0, "max": 12.0},
+                        "y": {"min": 5.0, "max": 25.0},
+                        "z": {"min": 12.5, "max": 26.0},
+                    },
+                }
+            ),
+        )
         assert service.is_configured is True
+
+    def test_a_file_without_stage_limits_is_not_configured(self, tmp_path):
+        """Same hazard as a corrupt file: placeholders live, flag still set."""
+        service = self._service(tmp_path, json.dumps({"version": "1.0"}))
+        assert service.is_configured is False
 
     def test_a_missing_file_is_unconfigured(self, tmp_path):
         (tmp_path / "microscope_settings").mkdir()

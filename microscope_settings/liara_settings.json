@@ -1,0 +1,38 @@
+{
+  "microscope_name": "liara",
+  "position_history": {
+    "max_size": 100,
+    "display_count": 20
+  },
+  "stage_limits": {
+    "x": {
+      "min": 0.0,
+      "max": 5.0,
+      "unit": "mm",
+      "note": "Liara's X travel is only 5 mm - a fifth of n7's. Taken verbatim from Liara's ScopeSettings.txt <Stage limits> (hard and soft both 0.000-5.000). Note the scope leaves NO margin of its own here, unlike n7 (soft z min 11.0 against hard 8.0), so this file is the only slack in the system."
+    },
+    "y": {
+      "min": 0.0,
+      "max": 14.999998,
+      "unit": "mm"
+    },
+    "z": {
+      "min": 0.0,
+      "max": 14.999998,
+      "unit": "mm"
+    },
+    "r": {
+      "min": -720.0,
+      "max": 720.0,
+      "unit": "degrees",
+      "note": "Edit > Microscope Setup only collects x/y/z, so r must be maintained by hand here."
+    }
+  },
+  "version": "1.0",
+  "last_updated": "2026-08-23",
+  "note": "Liara / CTLSM2 - high-res ASLM (single-sided illumination, no galvo; voice-coil swept waist). These stage limits are the ONLY thing that gates a stage move: position_controller.move_x/y/z/r raise on violation and movement_controller._clamp_to_limits clamps. microscope_hardware.yaml's stage_limits block is a tile-count estimate only, and ScopeSettings.txt's own limits are enforced by the server, not read by this app. Liara's scope Home is x 2.820, y 3.377, z 12.167, r -95.012 - recorded here for reference ONLY. It is deliberately NOT written as reference_position: Home is rewritten by the vendor control software without our knowledge, so it is not a vetted recovery anchor. Leave reference_position absent (Go To Reference Position will correctly refuse) until someone records a high, central, objective-clear position at the instrument via Edit > Microscope Setup.",
+  "display": {
+    "downsample_factor": 3,
+    "storage_voxel_size_um": 5
+  }
+}

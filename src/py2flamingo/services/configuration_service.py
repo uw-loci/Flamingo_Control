@@ -164,6 +164,132 @@ class ConfigurationService:
         microscope_name = type_settings.get("Microscope name", "default")
         return microscope_name.strip()
 
+    def reload_scope_settings(self) -> bool:
+        """Re-read ScopeSettings.txt and rebuild per-microscope settings if the name changed.
+
+        ``__init__`` populates ``self.config["scope_settings"]`` from disk ONCE.
+        Without this, starting the app with one scope's ScopeSettings.txt on
+        disk and then connecting to a DIFFERENT scope leaves
+        :meth:`get_microscope_name` returning the old name for the rest of the
+        session -- so the old scope's ``{name}_settings.json`` stage limits gate
+        the new scope's stage. n7 allows X to 12.31 mm; Liara's X axis stops at
+        5.0 mm.
+
+        Refuses to swap (keeping the previous, known-good limits) when the file
+        cannot be read or the name is unusable. That is deliberate: an unknown
+        name resolves to a missing settings file and therefore to the 0-26 mm
+        placeholders, which are WIDER than any real instrument. Widening the
+        only gate on the stage because a parse failed is the worst available
+        outcome -- worse than keeping limits belonging to the wrong scope, which
+        are at least a real instrument's.
+
+        Replaces the WHOLE ``scope_settings`` dict, not just the name:
+        ``zstack_panel`` reads ``Stage limits / Default velocity z-axis`` out of
+        the same snapshot.
+
+        Call on connect, after ScopeSettings.txt has been rewritten and before
+        anything downstream asks for the microscope name.
+
+        Returns:
+            bool: True if ``self.microscope_settings`` was replaced.
+        """
+        scope_settings = self._load_scope_settings()
+        if not scope_settings:
+            self.logger.warning(
+                "[ConfigurationService] Could not re-read ScopeSettings.txt; "
+                "keeping the settings already loaded for '%s'. Stage limits are "
+                "unchanged.",
+                getattr(self.microscope_settings, "microscope_name", "unknown"),
+            )
+            return False
+
+        old_name = getattr(self.microscope_settings, "microscope_name", None)
+        # Read the new name WITHOUT committing the snapshot. Committing first
+        # and validating after leaves every refusal path with the new
+        # scope_settings installed but the OLD settings service in force — so
+        # get_microscope_name() (and therefore the viz overlay, the acquisition
+        # manifest's `microscope` field, and Sample View's re-init) would name a
+        # scope whose stage limits are not the ones gating the stage. Commit
+        # both together or neither.
+        new_name = (
+            (scope_settings.get("Type") or {}).get("Microscope name") or ""
+        ).strip()
+
+        if not new_name or new_name == "default":
+            self.logger.error(
+                "[ConfigurationService] ScopeSettings.txt reports no usable "
+                "microscope name (got %r). KEEPING '%s' — both its stage limits "
+                "and its name — rather than falling back to the 0-26 mm "
+                "placeholders, which are wider than any real instrument.",
+                new_name,
+                old_name,
+            )
+            return False
+
+        if new_name == old_name:
+            # Same scope: safe to refresh the snapshot, and worth doing —
+            # zstack_panel reads `Default velocity z-axis` out of it.
+            self.config["scope_settings"] = scope_settings
+            return False
+
+        from py2flamingo.services.microscope_settings_service import (
+            MicroscopeSettingsService,
+        )
+
+        try:
+            new_service = MicroscopeSettingsService(new_name, self.base_path)
+        except Exception:
+            # Nothing is committed, so the app stays wholly on the old scope
+            # rather than half-switched.
+            self.logger.exception(
+                "[ConfigurationService] Could not load settings for '%s'; "
+                "keeping '%s' entirely (name and stage limits).",
+                new_name,
+                old_name,
+            )
+            return False
+
+        self.config["scope_settings"] = scope_settings
+        old_limits = self.microscope_settings.get_stage_limits()
+        new_limits = new_service.get_stage_limits()
+
+        # ERROR level on purpose: a stage-limit swap mid-session is the single
+        # most consequential thing this service does, and this line is its only
+        # audit trail.
+        self.logger.error(
+            "[ConfigurationService] MICROSCOPE CHANGED '%s' -> '%s'. Stage "
+            "limits now: X %.3f-%.3f (was %.3f-%.3f), Y %.3f-%.3f (was "
+            "%.3f-%.3f), Z %.3f-%.3f (was %.3f-%.3f)",
+            old_name,
+            new_name,
+            new_limits["x"]["min"],
+            new_limits["x"]["max"],
+            old_limits["x"]["min"],
+            old_limits["x"]["max"],
+            new_limits["y"]["min"],
+            new_limits["y"]["max"],
+            old_limits["y"]["min"],
+            old_limits["y"]["max"],
+            new_limits["z"]["min"],
+            new_limits["z"]["max"],
+            old_limits["z"]["min"],
+            old_limits["z"]["max"],
+        )
+
+        if not new_service.is_configured:
+            self.logger.critical(
+                "[ConfigurationService] No settings file for '%s' -- the stage "
+                "is now gated by the 0-26 mm PLACEHOLDER limits, which are "
+                "almost certainly wider than the instrument. Create "
+                "microscope_settings/%s_settings.json (Edit > Microscope Setup) "
+                "before moving the stage.",
+                new_name,
+                new_name,
+            )
+
+        self.microscope_settings = new_service
+        return True
+
     def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
         """
         Get stage movement limits from microscope-specific settings.
