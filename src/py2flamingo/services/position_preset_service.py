@@ -63,25 +63,182 @@ class PositionPresetService(QObject):
     #: Emitted after the preset set changes (save/delete/clear).
     presets_changed = pyqtSignal()
 
-    def __init__(self, presets_file: Optional[str] = None):
+    #: The shared file presets lived in before they were split per microscope.
+    LEGACY_FILENAME = "position_presets.json"
+
+    def __init__(
+        self,
+        presets_file: Optional[str] = None,
+        microscope_name: Optional[str] = None,
+    ):
         """
         Initialize position preset service.
 
         Args:
-            presets_file: Path to presets JSON file. If None, uses default location.
+            presets_file: Explicit path to a presets JSON file. Overrides the
+                per-microscope resolution below; mainly for tests.
+            microscope_name: Scope to load presets for. If None, read from
+                ScopeSettings.txt (the same source every other per-microscope
+                lookup uses).
+
+        Presets are stage coordinates, so they are per-instrument: n7's
+        ``CalibrationInsert`` sits at x 6.78, z 18.51, both outside Liara's
+        0-5 / 0-15 envelope. ``move_to_position(validate=True)`` CLAMPS rather
+        than refuses, so a shared file meant clicking a named preset moved the
+        stage to a silently different place while the UI reported the name.
         """
         super().__init__()
         self.logger = logging.getLogger(__name__)
 
-        if presets_file is None:
+        if presets_file is not None:
+            self.presets_file = Path(presets_file)
+        else:
             settings_dir = Path("microscope_settings")
             settings_dir.mkdir(exist_ok=True)
-            self.presets_file = settings_dir / "position_presets.json"
-        else:
-            self.presets_file = Path(presets_file)
+            name = microscope_name or self._resolve_microscope_name()
+            if name:
+                self.presets_file = settings_dir / f"{name}_position_presets.json"
+                self._migrate_legacy_presets(settings_dir, name)
+            else:
+                # No scope name to attribute them to (offline / headless): keep
+                # using the shared file rather than inventing an owner.
+                self.presets_file = settings_dir / self.LEGACY_FILENAME
 
         self._presets: Dict[str, PositionPreset] = {}
         self._load_presets()
+
+    @staticmethod
+    def _resolve_microscope_name() -> Optional[str]:
+        """Scope name from ScopeSettings.txt, or None."""
+        try:
+            from py2flamingo.configs.config_loader import _read_scope_microscope_name
+
+            return _read_scope_microscope_name()
+        except Exception:  # noqa: BLE001 - fall back to the shared file
+            return None
+
+    def _migrate_legacy_presets(self, settings_dir: Path, name: str) -> None:
+        """Adopt the pre-split ``position_presets.json`` for this scope, if it fits.
+
+        All-or-nothing, and only when every preset is reachable on THIS scope.
+        The legacy file carries no record of which instrument it came from, so
+        reachability is the only evidence available — and it is good evidence:
+        all 8 of the presets that existed at the split are inside n7's envelope
+        and every one of them is outside Liara's.
+
+        Adopting a partial subset was rejected: half of another instrument's
+        named positions is more confusing than none, and the ones that survive
+        the filter are not thereby correct.
+
+        The legacy file is COPIED, never moved or deleted, so the scope it
+        really belongs to can still adopt it. A target file is written either
+        way so the decision is made once rather than re-litigated on every
+        construction (this service is built in ~10 places).
+        """
+        target = settings_dir / f"{name}_position_presets.json"
+        legacy = settings_dir / self.LEGACY_FILENAME
+        if target.exists() or not legacy.is_file():
+            return
+
+        try:
+            data = json.loads(legacy.read_text()) or {}
+        except Exception as e:  # noqa: BLE001 - never break startup over this
+            self.logger.warning(
+                f"Could not read {legacy} to migrate presets for '{name}': {e}. "
+                f"Starting with no presets; the file is untouched."
+            )
+            return
+
+        limits = self._stage_limits(name)
+        if limits is None:
+            # Deliberately does NOT write the target file: the answer here is
+            # "not yet knowable", not "no presets". Writing one would lock in
+            # an empty set before the scope is configured, and the migration
+            # would never be retried once someone runs Microscope Setup.
+            self.logger.warning(
+                f"'{name}' has no stage-limit configuration, so there is no way "
+                f"to tell whether the presets in {legacy.name} belong to it. "
+                f"Not adopting them for now — run Edit > Microscope Setup and "
+                f"this is retried automatically."
+            )
+            return
+
+        unreachable = [
+            preset_name
+            for preset_name, p in data.items()
+            if not self._within(p, limits)
+        ]
+        if unreachable:
+            self.logger.warning(
+                f"Not adopting {legacy.name} for '{name}': {len(unreachable)} of "
+                f"{len(data)} preset(s) are outside this scope's stage limits "
+                f"({', '.join(sorted(unreachable)[:5])}"
+                f"{'...' if len(unreachable) > 5 else ''}), so the file belongs "
+                f"to a different instrument. Starting with no presets."
+            )
+            data = {}
+        else:
+            self.logger.info(
+                f"Adopted {len(data)} preset(s) from {legacy.name} for '{name}' "
+                f"— every one is within this scope's stage limits. The original "
+                f"is left in place and can be deleted once every microscope has "
+                f"its own file."
+            )
+
+        try:
+            target.write_text(json.dumps(data, indent=2))
+        except Exception as e:  # noqa: BLE001
+            self.logger.warning(f"Could not write {target}: {e}")
+
+    @staticmethod
+    def _stage_limits(name: str) -> Optional[Dict[str, Dict[str, float]]]:
+        """This scope's stage limits, or None when it has no settings file.
+
+        None matters: an unconfigured scope falls back to placeholder limits of
+        0-26 mm on every axis, which are WIDER than any real instrument. Judging
+        "reachable" against those would wave another scope's presets straight
+        through, which is the failure this split exists to prevent.
+        """
+        try:
+            from py2flamingo.services.microscope_settings_service import (
+                MicroscopeSettingsService,
+            )
+
+            svc = MicroscopeSettingsService(name)
+            if not svc.is_configured:
+                return None
+            return svc.get_stage_limits()
+        except Exception:  # noqa: BLE001
+            return None
+
+    #: Tolerance (mm) when testing a preset against a stage limit. A position
+    #: saved AT the limit comes back from the encoder a hair outside it —
+    #: `beadsA` sits 1.4 NANOMETRES past n7's own y max of 25.0, which was
+    #: enough to make n7 disown its own preset file. 1 um is far below stage
+    #: repeatability and nowhere near the millimetres that separate one
+    #: instrument's envelope from another's, so it cannot mask a real mismatch.
+    LIMIT_TOLERANCE_MM = 1e-3
+
+    @classmethod
+    def _within(cls, preset: dict, limits: Dict[str, Dict[str, float]]) -> bool:
+        """Is every linear axis of ``preset`` inside ``limits`` (within tolerance)?
+
+        Rotation is excluded: r is periodic and its limits are +/-720 on every
+        instrument, so it carries no information about which scope a preset
+        came from.
+        """
+        tol = cls.LIMIT_TOLERANCE_MM
+        for axis in ("x", "y", "z"):
+            try:
+                value = float(preset[axis])
+            except (KeyError, TypeError, ValueError):
+                return False
+            bound = limits.get(axis) or {}
+            lo = float(bound.get("min", 0.0)) - tol
+            hi = float(bound.get("max", 0.0)) + tol
+            if not (lo <= value <= hi):
+                return False
+        return True
 
     def _load_presets(self) -> None:
         """Load presets from JSON file.
