@@ -46,6 +46,9 @@ class LaserLEDControlPanel(QWidget):
     # Using a large negative number to avoid collision with laser indices (1-4).
     LED_BUTTON_ID = -100
 
+    # Minimum gap between LED_SET commands while the slider is being dragged.
+    LED_SEND_INTERVAL_MS = 120
+
     def __init__(self, laser_led_controller: LaserLEDController):
         """
         Initialize laser/LED control panel.
@@ -267,10 +270,36 @@ class LaserLEDControlPanel(QWidget):
         self._led_slider.sliderReleased.connect(self._on_led_slider_released)
         layout.addWidget(self._led_slider, row, 3)
 
+        # Intensity is meaningless while the LED itself is off, and the wire
+        # command still succeeds -- the server accepts a level for a lamp that
+        # is not lit. Without this the slider reads as broken hardware.
+        self._led_off_warning = QLabel(
+            "LED is off \u2014 tick <b>Select</b> above for the intensity to do anything."
+        )
+        self._led_off_warning.setWordWrap(True)
+        self._led_off_warning.setStyleSheet(
+            f"background-color: {WARNING_BG}; padding: 6px; "
+            f"border: 1px solid #ffeeba; border-radius: 4px;"
+        )
+        self._led_off_warning.setVisible(False)
+        self._led_off_warning_shown = False
+        layout.addWidget(self._led_off_warning, row + 1, 0, 1, 4)
+
         # Create log timer for LED
         self._led_log_timer = QTimer()
         self._led_log_timer.setSingleShot(True)
         self._led_log_timer.timeout.connect(self._log_led_intensity)
+
+        # Dragging the slider emits valueChanged once per percent, and each one
+        # was a separate command on the shared command socket -- 17 in a single
+        # second in the 2026-08-27 log. Only the value the user stops on
+        # matters, so send at most one every LED_SEND_INTERVAL_MS and always
+        # send the final one.
+        self._led_pending_send = None
+        self._led_send_timer = QTimer()
+        self._led_send_timer.setSingleShot(True)
+        self._led_send_timer.setInterval(self.LED_SEND_INTERVAL_MS)
+        self._led_send_timer.timeout.connect(self._on_led_send_timer)
 
         group.setLayout(layout)
         return group
@@ -447,8 +476,9 @@ class LaserLEDControlPanel(QWidget):
         # Get current LED color from combobox
         led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
 
-        # Send to controller immediately (for live feedback)
-        self.laser_led_controller.set_led_intensity(led_color, intensity_percent)
+        # Throttled: a drag emits one of these per percent.
+        self._request_led_send(led_color, intensity_percent)
+        self._update_led_off_warning()
 
         # Restart timer for delayed logging (1 second after last change)
         if self._led_log_timer:
@@ -472,8 +502,10 @@ class LaserLEDControlPanel(QWidget):
         # Get current LED color from combobox
         led_color = self._led_combobox.currentIndex() if self._led_combobox else 0
 
-        # Send to controller
-        self.laser_led_controller.set_led_intensity(led_color, intensity_percent)
+        # Send to controller. A typed value is a single edit, so it goes out
+        # at once rather than through the drag throttle.
+        self._send_led_intensity_now(led_color, intensity_percent)
+        self._update_led_off_warning()
 
         # Log immediately for spinbox changes (user typed it in)
         color_names = ["Red", "Green", "Blue", "White"]
@@ -482,11 +514,92 @@ class LaserLEDControlPanel(QWidget):
         )
 
     def _on_led_slider_released(self) -> None:
-        """Handle LED slider release - log final value immediately."""
+        """Handle LED slider release - send and log the final value immediately."""
+        # The throttle may be holding the value the user actually stopped on.
+        # Releasing the slider is the moment that value has to reach the lamp.
+        if self._led_slider and self._led_combobox:
+            self._send_led_intensity_now(
+                self._led_combobox.currentIndex(), float(self._led_slider.value())
+            )
+
         if self._led_log_timer:
             # Stop timer and log now
             self._led_log_timer.stop()
             self._log_led_intensity()
+
+    # ------------------------------------------------------------------ #
+    # LED command throttle
+    # ------------------------------------------------------------------ #
+
+    def _request_led_send(self, led_color: int, intensity_percent: float) -> None:
+        """Send an LED intensity, at most one per LED_SEND_INTERVAL_MS.
+
+        The first change goes out immediately so the lamp tracks the slider;
+        anything arriving while the timer runs is held and sent when it fires,
+        so the last value is never dropped.
+        """
+        timer = getattr(self, "_led_send_timer", None)
+        if timer is None:  # section not built (LED unavailable)
+            self._send_led_intensity_now(led_color, intensity_percent)
+            return
+
+        if timer.isActive():
+            self._led_pending_send = (led_color, intensity_percent)
+            return
+
+        self._send_led_intensity_now(led_color, intensity_percent)
+        timer.start()
+
+    def _on_led_send_timer(self) -> None:
+        """Trailing edge of the throttle: send whatever arrived during the gap."""
+        pending = self._led_pending_send
+        if pending is None:
+            return
+        self._led_pending_send = None
+        self._send_led_intensity_now(*pending)
+        self._led_send_timer.start()
+
+    def _send_led_intensity_now(self, led_color: int, intensity_percent: float) -> None:
+        """Send an LED intensity straight away, clearing any held value."""
+        self._led_pending_send = None
+        timer = getattr(self, "_led_send_timer", None)
+        if timer is not None:
+            timer.stop()
+        self.laser_led_controller.set_led_intensity(led_color, intensity_percent)
+
+    # ------------------------------------------------------------------ #
+    # "the LED is off" warning
+    # ------------------------------------------------------------------ #
+
+    def _led_is_selected(self) -> bool:
+        """Is the LED the currently checked light source?"""
+        radio = getattr(self, "_led_radio", None)
+        return bool(radio is not None and radio.isChecked())
+
+    def _update_led_off_warning(self) -> None:
+        """Show a warning if the intensity was changed while the LED is off.
+
+        Hidden again as soon as the LED is selected. Only shown once the user
+        has actually touched the control -- an untouched panel with the LED off
+        is the normal starting state, not a problem.
+        """
+        warning = getattr(self, "_led_off_warning", None)
+        if warning is None:
+            return
+
+        # Tracked explicitly rather than read back off the widget: `isVisible()`
+        # is False for a child of a window that has not been shown yet, which
+        # would make this log on every single slider step.
+        off = not self._led_is_selected()
+        if off and not self._led_off_warning_shown:
+            self.logger.warning(
+                "LED intensity changed while the LED is not selected as the "
+                "light source. The command is accepted by the server but the "
+                "lamp stays off, so the live view will not change. Tick the "
+                "LED checkbox to turn it on."
+            )
+        self._led_off_warning_shown = off
+        warning.setVisible(off)
 
     def _log_led_intensity(self) -> None:
         """Log LED intensity value (called after delay or slider release)."""
@@ -550,6 +663,10 @@ class LaserLEDControlPanel(QWidget):
                 )
                 color_names = ["Red", "Green", "Blue", "White"]
                 self.logger.info(f"{color_names[led_color]} LED selected for preview")
+                # Whatever the warning was complaining about is now true.
+                if getattr(self, "_led_off_warning", None) is not None:
+                    self._led_off_warning_shown = False
+                    self._led_off_warning.setVisible(False)
                 # Use async method to avoid blocking UI
                 self.laser_led_controller.enable_led_for_preview_async(led_color)
 

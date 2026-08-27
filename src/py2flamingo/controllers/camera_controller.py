@@ -50,6 +50,11 @@ class CameraController(QObject):
         np.ndarray, dict, int, int
     )  # (image, position, z_index, frame_num)
 
+    # How long live view may run without a single frame before it is called out.
+    # Generous next to a camera's first-frame latency, short next to the hours a
+    # silent dead stream has cost.
+    FIRST_FRAME_TIMEOUT_MS = 5000
+
     def __init__(self, camera_service: CameraService, laser_led_controller=None):
         """
         Initialize camera controller.
@@ -116,6 +121,19 @@ class CameraController(QObject):
         self._display_timer.timeout.connect(self._pull_and_display_frame)
         self._display_timer_interval_ms = int(1000 / self._max_display_fps)
 
+        # Live view can start cleanly and then deliver nothing: the display
+        # timer runs, `get_latest_frame` returns None every tick, and the path
+        # below simply returns. On 2026-08-26 that cost an LED overview 125
+        # minutes and 294 tiles before anyone noticed, because a stream that
+        # was never opened looks exactly like a stream with nothing in it.
+        # Starting the stream is a request, not a delivery -- so check that a
+        # frame actually arrives, and say so when one does not.
+        self._frames_displayed = 0
+        self._live_view_watchdog = QTimer()
+        self._live_view_watchdog.setSingleShot(True)
+        self._live_view_watchdog.setInterval(self.FIRST_FRAME_TIMEOUT_MS)
+        self._live_view_watchdog.timeout.connect(self._on_first_frame_timeout)
+
         # Connect camera service callback (lightweight notification only)
         self.camera_service.set_image_callback(self._on_image_received)
 
@@ -158,6 +176,7 @@ class CameraController(QObject):
 
             # Reset local frame counter for fresh start
             self._local_frame_counter = 0
+            self._frames_displayed = 0
 
             # Start camera streaming (fills buffer in background)
             self.camera_service.start_live_view_streaming()
@@ -165,6 +184,8 @@ class CameraController(QObject):
             # Start display timer (pulls and displays at target FPS)
             self._display_timer.start(self._display_timer_interval_ms)
             self.logger.info(f"Display timer started at {self._max_display_fps} FPS")
+
+            self._live_view_watchdog.start()
 
             self.set_state(CameraState.LIVE_VIEW)
             return True
@@ -175,6 +196,27 @@ class CameraController(QObject):
             self.error_occurred.emit(error_msg)
             self.set_state(CameraState.ERROR)
             return False
+
+    def _note_frame_displayed(self) -> None:
+        """Record that a frame reached the UI, and stand the watchdog down."""
+        self._frames_displayed += 1
+        if self._live_view_watchdog.isActive():
+            self._live_view_watchdog.stop()
+
+    def _on_first_frame_timeout(self) -> None:
+        """Live view has been running for a while with nothing to show."""
+        if self._frames_displayed:
+            return
+
+        error_msg = (
+            f"Live view has received no camera frames in "
+            f"{self.FIRST_FRAME_TIMEOUT_MS / 1000:.0f} s. The stream was "
+            f"started but nothing is arriving on it -- the most common cause "
+            f"is another client (the C++ GUI) holding the live port. Nothing "
+            f"that depends on the camera will work until this is fixed."
+        )
+        self.logger.error(error_msg)
+        self.error_occurred.emit(error_msg)
 
     def stop_live_view(self) -> bool:
         """
@@ -194,6 +236,7 @@ class CameraController(QObject):
 
             # Stop display timer
             self._display_timer.stop()
+            self._live_view_watchdog.stop()
             self.logger.info("Display timer stopped")
 
             # Stop camera streaming
@@ -518,6 +561,7 @@ class CameraController(QObject):
                     ):
                         self._display_min = header.image_scale_min
                         self._display_max = header.image_scale_max
+                    self._note_frame_displayed()
                     self.new_image.emit(image, header)
                     if header.frame_number % 10 == 0:
                         fps = self.get_frame_rate()
@@ -541,6 +585,7 @@ class CameraController(QObject):
                 self._display_max = header.image_scale_max
 
             # Emit to UI (Qt signal handles thread safety)
+            self._note_frame_displayed()
             self.new_image.emit(image, header)
 
             # Update frame rate every 10 frames

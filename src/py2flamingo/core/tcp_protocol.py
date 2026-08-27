@@ -270,10 +270,21 @@ class ProtocolEncoder:
                 axis = axis_names.get(params[3], f"?{params[3]}")
                 logger.debug(f"[TX] POSITION_GET: Axis={axis}")
             else:
-                # Summary at INFO, full dump at DEBUG
+                # Summary at INFO, full dump at DEBUG.
+                #
+                # int32Data1 is in here because for the illumination commands it
+                # is the whole payload: LED_SET puts the colour in int32Data0 and
+                # the intensity in int32Data1, and `value` is always 0.0. Without
+                # it the line reads "data0=0 value=0.0" for every intensity from
+                # 0% to 99% -- which is exactly what the 2026-08-27 log showed
+                # while the question being asked was what intensity got sent.
+                #
+                # int32Data2 only when set, to keep the quieter commands as they
+                # were.
+                extra = f" data2={params[5]}" if params[5] else ""
                 logger.info(
                     f"[TX] {cmd_name} (0x{code:04X})"
-                    f" data0={params[3]} value={value}"
+                    f" data0={params[3]} data1={params[4]}{extra} value={value}"
                 )
                 logger.debug(f"[TX] ========== SENDING COMMAND ==========")
                 logger.debug(f"[TX] Command: {cmd_name}")
