@@ -1016,7 +1016,7 @@ class MVCConnectionService:
         Register a callback handler for unsolicited messages.
 
         Args:
-            command_code: Command code to handle (e.g., 0x3011 for STACK_COMPLETE)
+            command_code: Command code to handle (e.g., 0x3014 for STACK_COMPLETE)
             handler: Callable that receives ParsedMessage
         """
         if self.tcp_connection and hasattr(self.tcp_connection, "register_callback"):

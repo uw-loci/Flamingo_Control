@@ -76,18 +76,36 @@ class StageCommands:
     POSITION_SET = 0x6005  # 24581 - Set stage position (slide control)
     POSITION_GET = 0x6008  # 24584 - Get current stage position
 
-    # Motion control commands
-    HOME = 0x6001  # 24577 - Home stage axes
-    HALT = 0x6002  # 24578 - Emergency stop stage motion
-    VELOCITY_SET = 0x6006  # 24582 - Set stage velocity
+    # Motion control commands.
+    #
+    # These were each off by one or more against the server's own header, found
+    # 2026-08-28 by cross-checking every client constant against
+    # `server-api/codes-tcp-server.json`. The block is NOT uniformly shifted --
+    # POSITION_SET_MOVE (0x6004), POSITION_GET (0x6008), WAIT_FOR_MOTION
+    # (0x600F) and MOTION_STOPPED (0x6010) all agree with the server and are
+    # exercised on every run. Only the entries nothing ever sent were wrong,
+    # which is exactly how they stayed wrong.
+    #
+    # HALT is the one that mattered: at 0x6002 the emergency stop was sending
+    # the server's STAGE_HOME, so the control whose entire job is to stop motion
+    # would have started a long one instead.
+    HOME = 0x6002  # 24578 - Home stage axes (was 0x6001 = FIND_REFERENCE)
+    HALT = 0x6003  # 24579 - Emergency stop stage motion (was 0x6002 = HOME)
+    VELOCITY_SET = (
+        0x6009  # 24585 - Set stage velocity (was 0x6006 = POSITION_SET_TEXT_CTRL)
+    )
 
     # Motion status commands
     WAIT_FOR_MOTION = 0x600F  # 24591 - Wait for motion to complete
     MOTION_STOPPED = 0x6010  # 24592 - Motion stopped callback
 
-    # Save location commands
-    SAVE_LOCATIONS_GET = 0x6009  # 24585 - Get saved stage positions
-    SAVE_LOCATIONS_SET = 0x600A  # 24586 - Save current positions
+    # Save location commands.
+    #
+    # The server header has no SAVE_LOCATIONS command at any value; 0x6009 and
+    # 0x600A are STAGE_VELOCITY_SET and STAGE_VELOCITY_GET. Nothing sends these,
+    # and inventing a number would be worse than saying so.
+    SAVE_LOCATIONS_GET = None  # no server equivalent - do not send
+    SAVE_LOCATIONS_SET = None  # no server equivalent - do not send
 
 
 class LaserCommands:
@@ -147,7 +165,9 @@ class CameraCommands:
     LIVE_VIEW_STOP = 0x3008  # 12296 - Stop continuous imaging
 
     # Camera parameter commands
-    EXPOSURE_SET = 0x3001  # 12289 - Set exposure time
+    # 0x3001 is CAMERA_ALL_SETTINGS_GET on the server; nothing sent this, so it
+    # went unnoticed. Corrected 2026-08-28.
+    EXPOSURE_SET = 0x3009  # 12297 - Set exposure time (was 0x3001)
     EXPOSURE_GET = 0x300A  # 12298 - Get exposure time (returns int32Data0 in us)
     IMAGE_SIZE_GET = 0x3027  # 12327 - Get image dimensions
     # Code actually sent at runtime for the per-pixel field of view (mm/px);
@@ -164,7 +184,12 @@ class CameraCommands:
     WORKFLOW_STOP = 0x3005  # 12293 - Stop image acquisition workflow
 
     # Stack/acquisition completion callbacks (sent by server)
-    STACK_COMPLETE = 0x3011  # 12305 - Stack acquisition complete callback
+    # 0x3011 is CAMERA_ROI_TOP_SET on the server. This one WAS live: the
+    # workflow queue registered a callback on it, so the backup completion
+    # signal could never fire from a stack finishing -- and a ROI_TOP_SET
+    # response would have looked like one. Only the primary signal
+    # (SYSTEM_STATE_IDLE, 0xA002) was holding the queue together.
+    STACK_COMPLETE = 0x3014  # 12308 - Stack acquisition complete callback (was 0x3011)
     # Response contains:
     #   int32Data0 = images acquired
     #   int32Data1 = images expected
@@ -213,7 +238,9 @@ class UICommands:
     # Progress bar commands (callbacks from server)
     SET_GAUGE_SIZE = 0x9003  # 36867 - Set progress bar maximum value
     SET_GAUGE_VALUE = 0x9004  # 36868 - Update progress bar current value
-    IMAGES_SAVED_TO_STORAGE = 0x9008  # 36872 - Images written notification
+    # 0x9008 is UI_END on the server; the notification is 0x9007. Also live --
+    # registered as an unsolicited callback. Corrected 2026-08-28.
+    IMAGES_SAVED_TO_STORAGE = 0x9007  # 36871 - Images written notification (was 0x9008)
 
     # Response contains:
     #   int32Data0 = current count
@@ -303,6 +330,11 @@ class CommandCode:
     CMD_WORKFLOW_START = CameraCommands.WORKFLOW_START
     CMD_WORKFLOW_STOP = CameraCommands.WORKFLOW_STOP
     CMD_STAGE_POSITION_GET = StageCommands.POSITION_GET
-    CMD_STAGE_POSITION_SET = StageCommands.POSITION_SET
+    # Every other definition of this name -- tcp_protocol.py:47,
+    # tcp_client.py:34, stage_service.py -- is 24580 (0x6004), the code that
+    # actually moves the stage and is proven on every run. This alias pointed at
+    # 0x6005 (the server's POSITION_SET_SLIDER), so the same name meant two
+    # different commands depending on which module you read.
+    CMD_STAGE_POSITION_SET = StageCommands.POSITION_SET_MOVE
     CMD_SYSTEM_STATE_GET = SystemCommands.STATE_GET
     CMD_SYSTEM_STATE_IDLE = SystemCommands.STATE_IDLE

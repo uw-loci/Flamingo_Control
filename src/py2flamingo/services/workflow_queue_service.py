@@ -8,13 +8,13 @@ waiting for each workflow to complete before starting the next. This is critical
 for tile collection where multiple Z-stack workflows must run one after another.
 
 Workflow completion is detected by:
-1. Listening for CAMERA_STACK_COMPLETE (0x3011) callback from server
+1. Listening for CAMERA_STACK_COMPLETE (0x3014) callback from server
 2. Fallback: Polling system state (SYSTEM_STATE_GET) if no callback received
 3. Optional timeout based on estimated workflow duration
 
 Progress tracking via:
 - UI_SET_GAUGE_VALUE (0x9004) callbacks for image acquisition progress
-- UI_IMAGES_SAVED_TO_STORAGE (0x9008) for disk write progress
+- UI_IMAGES_SAVED_TO_STORAGE (0x9007) for disk write progress
 
 Architecture:
     WorkflowQueueService
@@ -48,9 +48,14 @@ logger = logging.getLogger(__name__)
 
 # Command codes for workflow progress (from command_codes.py)
 SYSTEM_STATE_IDLE = 0xA002  # 40962 - System became idle (PRIMARY completion signal)
-CAMERA_STACK_COMPLETE = 0x3011  # 12305 - Stack acquisition complete (backup)
+# Corrected 2026-08-28 against the server header. 0x3011 is CAMERA_ROI_TOP_SET
+# and 0x9008 is UI_END, so both of these callbacks were registered on the wrong
+# codes: the backup completion signal could never fire from a stack finishing,
+# and only the primary signal (SYSTEM_STATE_IDLE) was holding the queue
+# together. The failure was invisible precisely because the primary works.
+CAMERA_STACK_COMPLETE = 0x3014  # 12308 - Stack acquisition complete (backup)
 UI_SET_GAUGE_VALUE = 0x9004  # 36868 - Progress bar update
-UI_IMAGES_SAVED = 0x9008  # 36872 - Images written to storage
+UI_IMAGES_SAVED = 0x9007  # 36871 - Images written to storage
 
 
 @dataclass

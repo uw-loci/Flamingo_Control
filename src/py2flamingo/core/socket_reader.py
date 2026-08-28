@@ -34,14 +34,16 @@ class ProtocolCommands(IntEnum):
     """Known command codes from the Flamingo protocol (for socket reader use)."""
 
     # Stage commands
-    STAGE_HOME = 0x6001  # 24577
-    STAGE_HALT = 0x6002  # 24578
-    STAGE_POSITION_SET_MOVE = 0x6004  # 24580
-    STAGE_POSITION_SET = 0x6005  # 24581
-    STAGE_VELOCITY_SET = 0x6006  # 24582
+    # Values checked against the server header 2026-08-28. This table is what
+    # `_command_name` resolves received codes through, so a wrong entry does not
+    # just mislabel a log line -- it mislabels it *plausibly*, which is worse.
+    STAGE_HOME = 0x6002  # 24578 (was 0x6001 = FIND_REFERENCE)
+    STAGE_HALT = 0x6003  # 24579 (was 0x6002 = HOME)
+    STAGE_POSITION_SET_MOVE = 0x6004  # 24580 - the code that actually moves
+    STAGE_POSITION_SET_SLIDER = 0x6005  # 24581 - server's name for this one
+    STAGE_VELOCITY_SET = 0x6009  # 24585 (was 0x6006 = POSITION_SET_TEXT_CTRL)
     STAGE_POSITION_GET = 0x6008  # 24584
-    STAGE_SAVE_LOCATIONS_GET = 0x6009  # 24585
-    STAGE_SAVE_LOCATIONS_SET = 0x600A  # 24586
+    STAGE_VELOCITY_GET = 0x600A  # 24586 (slot previously called SAVE_LOCATIONS_SET)
     STAGE_WAIT_FOR_MOTION = 0x600F  # 24591
     STAGE_MOTION_STOPPED = 0x6010  # 24592 - UNSOLICITED CALLBACK
 
@@ -51,7 +53,8 @@ class ProtocolCommands(IntEnum):
     SYSTEM_SCOPE_SETTINGS = 0x1007  # 4103
 
     # Camera commands
-    CAMERA_EXPOSURE_SET = 0x3001  # 12289
+    CAMERA_EXPOSURE_SET = 0x3009  # 12297 (was 0x3001 = ALL_SETTINGS_GET)
+    CAMERA_STACK_COMPLETE = 0x3014  # 12308 (was tracked as 0x3011 = ROI_TOP_SET)
     CAMERA_EXPOSURE_GET = 0x300A  # 12298
     CAMERA_WORKFLOW_START = 0x3004  # 12292
     CAMERA_WORKFLOW_STOP = 0x3005  # 12293
@@ -74,9 +77,11 @@ class ProtocolCommands(IntEnum):
     LED_ENABLE = 0x4002  # 16386
     LED_DISABLE = 0x4003  # 16387
 
-    # Filter wheel
-    FILTER_POSITION_SET = 0x5001  # 20481
-    FILTER_POSITION_GET = 0x5002  # 20482
+    # Filter wheel. The server puts these in the SERVO block: 0x5001/0x5002 are
+    # TRIGGER_EXE_CMD / TRIGGER_END. Nothing sends either, but a received 0x5001
+    # would have been logged as a filter-wheel message.
+    FILTER_POSITION_SET = 0x8001  # 32769 - SERVO_FILTER_WHEEL_POSITION_SET
+    FILTER_MOTION_STOPPED = 0x8002  # 32770 - SERVO_FILTER_WHEEL_MOTION_STOPPED
 
     # Illumination (TSPIM)
     ILLUMINATION_LEFT_ENABLE = 0x7004  # 28676
@@ -89,10 +94,10 @@ class ProtocolCommands(IntEnum):
 UNSOLICITED_COMMANDS: Set[int] = {
     ProtocolCommands.STAGE_MOTION_STOPPED,
     ProtocolCommands.SYSTEM_STATE_IDLE,  # 0xa002 - System became idle (workflow complete)
-    0x3011,  # CAMERA_STACK_COMPLETE - Workflow/stack acquisition complete
+    0x3014,  # CAMERA_STACK_COMPLETE - Workflow/stack acquisition complete
     0x9003,  # UI_SET_GAUGE_SIZE - Progress bar maximum
     0x9004,  # UI_SET_GAUGE_VALUE - Progress bar update
-    0x9008,  # UI_IMAGES_SAVED_TO_STORAGE - Images written notification
+    0x9007,  # UI_IMAGES_SAVED_TO_STORAGE - Images written notification
 }
 
 
