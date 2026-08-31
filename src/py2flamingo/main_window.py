@@ -609,6 +609,18 @@ class MainWindow(QMainWindow):
         self.stage_repeatability_action.setEnabled(False)
         lightsheet_tests_menu.addAction(self.stage_repeatability_action)
 
+        # Deliberately NOT gated on a connection, unlike the two above: this one
+        # is arithmetic, and its whole value is being able to check a plan
+        # before booking rig time.
+        self.aslm_timing_action = QAction("&Acquisition Timing Explorer...", self)
+        self.aslm_timing_action.setStatusTip(
+            "See how exposure, rolling-shutter slit width, AOI and plane "
+            "spacing combine into frame rate, stage sweep speed and total "
+            "acquisition time (works offline)"
+        )
+        self.aslm_timing_action.triggered.connect(self._on_aslm_timing)
+        lightsheet_tests_menu.addAction(self.aslm_timing_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -1415,6 +1427,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error opening Webcam Overview: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to open Webcam Overview:\n{e}")
+
+    def _on_aslm_timing(self):
+        """Open the offline acquisition-timing calculator."""
+        from py2flamingo.views.dialogs.aslm_timing_dialog import ASLMTimingDialog
+
+        dialog = ASLMTimingDialog(self)
+        dialog.exec_()
 
     def _on_pixel_calibrator(self):
         """Handle XY Pixel Calibrator menu action."""

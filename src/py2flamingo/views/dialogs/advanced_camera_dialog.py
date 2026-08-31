@@ -161,7 +161,9 @@ class AdvancedCameraDialog(PersistentDialog):
         self._cam1_percentage.setRange(0, 100)
         self._cam1_percentage.setValue(100)
         self._cam1_percentage.setSuffix(" %")
-        self._cam1_percentage.setToolTip("Percentage of Z-planes captured by Camera 1")
+        self._cam1_percentage.setToolTip(
+            'Share of the Z volume this camera acquires. On a two-camera system each camera takes the half of the volume nearest it, so neither has to image through the far side of the sample.\\n\\nThis is NOT a rolling-shutter slit width: it splits the STACK, not the sensor rows. Confirmed with the developer 2026-08-31, after the naming ("capture percentage", "from front"/"from back") had been read as a light-sheet control.'
+        )
         capture_grid.addWidget(self._cam1_percentage, 1, 1)
 
         capture_grid.addWidget(QLabel("Mode:"), 2, 0)
@@ -187,7 +189,9 @@ class AdvancedCameraDialog(PersistentDialog):
         self._cam2_percentage.setRange(0, 100)
         self._cam2_percentage.setValue(100)
         self._cam2_percentage.setSuffix(" %")
-        self._cam2_percentage.setToolTip("Percentage of Z-planes captured by Camera 2")
+        self._cam2_percentage.setToolTip(
+            'Share of the Z volume this camera acquires. On a two-camera system each camera takes the half of the volume nearest it, so neither has to image through the far side of the sample.\\n\\nThis is NOT a rolling-shutter slit width: it splits the STACK, not the sensor rows. Confirmed with the developer 2026-08-31, after the naming ("capture percentage", "from front"/"from back") had been read as a light-sheet control.'
+        )
         capture_grid.addWidget(self._cam2_percentage, 4, 1)
 
         capture_grid.addWidget(QLabel("Mode:"), 5, 0)
