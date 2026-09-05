@@ -1205,6 +1205,15 @@ class PositionController:
 
         ensure_motion_allowed()
 
+        # Drop a command the stage is already executing. One UI intent can
+        # produce two events (Enter then focus-loss), and re-sending an
+        # identical target makes the server tear down the in-flight motion and
+        # start over. See services/stage_command_dedup.
+        from py2flamingo.services import stage_command_dedup
+
+        if not stage_command_dedup.should_send(axis_code, value):
+            return
+
         # Validate inputs
         if not isinstance(axis_code, int) or axis_code not in [1, 2, 3, 4]:
             error_msg = f"Invalid axis_code {axis_code}, must be 1-4"

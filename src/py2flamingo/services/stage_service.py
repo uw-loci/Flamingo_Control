@@ -376,6 +376,14 @@ class StageService(MicroscopeCommandService):
 
         ensure_motion_allowed()
 
+        # Same duplicate suppression the controller path gets. This is the
+        # route workflow_queue_service and led_2d_overview_workflow take, and
+        # they never touch PositionController.
+        from py2flamingo.services import stage_command_dedup
+
+        if not stage_command_dedup.should_send(int(axis), float(position_mm)):
+            return
+
         self.logger.debug(f"Moving axis {axis} to {position_mm} mm...")
 
         result = self._send_movement_command(

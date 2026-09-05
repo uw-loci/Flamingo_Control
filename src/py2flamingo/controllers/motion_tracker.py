@@ -96,6 +96,14 @@ class MotionTracker:
         Args:
             message: ParsedMessage from socket_reader
         """
+        # Nothing is in flight once the stage reports it has stopped, so a
+        # later command to the same position must reach the hardware. Cleared
+        # here rather than on a timer: the callback IS the authoritative
+        # end-of-motion signal. See services/stage_command_dedup.
+        from py2flamingo.services import stage_command_dedup
+
+        stage_command_dedup.note_motion_stopped()
+
         # Only buffer while something is actually waiting. Callbacks that
         # arrive outside a wait are discarded by the next _wait_async() anyway
         # (see its stale-drain), so queueing them achieves nothing and fills a
