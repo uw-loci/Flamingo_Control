@@ -117,6 +117,42 @@ class CameraCommandCode:
     # SYMMETRIC ROI, so setting the left inset mirrors the right edge and the top
     # inset mirrors the bottom — together they define a CENTERED square. The
     # edge value (1-indexed pixel) is carried in int32Data0 (params[3]).
+    # --- ASLM light-sheet (swept-waist) control ---
+    #
+    # Verified against the ScopeControl 3.0.0 source, 2026-09-19
+    # (Linux/ControlSystem/Subsystems/Camera/PCOBase.cpp). Every one of these
+    # reads **int32Data0** and nothing else, and each maps onto one PCO SDK
+    # call, so the semantics are the SDK's rather than ours:
+    #
+    #   LIGHT_SHEET_MODE_ON_OFF        -> PCO_SetCmosLineTiming wParameter
+    #   LIGHT_SHEET_MODE_EXPOSURE_TIME -> PCO_SetCmosLineTiming dwLineTime
+    #   LIGHT_SHEET_MODE_LINES         -> PCO_SetCmosLineExposureDelay dwExposureLines
+    #   LIGHT_SHEET_MODE_DELAY_LINES   -> PCO_SetCmosLineExposureDelay dwDelayLines
+    #
+    # Naming trap worth stating once: the field the vendor GUI labels
+    # "Exposure Time (ns)" is the **line time**, not the exposure. The exposure
+    # is lines x line_time, which the GUI shows separately. Sending a real
+    # exposure here would set an absurd line time.
+    LIGHT_SHEET_MODE_ON_OFF = 12336  # 0x3030 - int32Data0: 1 = on, anything else = off
+    LIGHT_SHEET_MODE_LINES = 12337  # 0x3031 - slit width in sensor rows
+    LIGHT_SHEET_MODE_DELAY_LINES = 12338  # 0x3032 - delay lines (0 in normal use)
+    LIGHT_SHEET_MODE_EXPOSURE_TIME = (
+        12339  # 0x3033 - LINE time, in the camera's timebase
+    )
+
+    # Settable. 0x0002 is "external exposure start & software trigger", which
+    # the vendor GUI calls "Ext-Exp. Start" -- the mode real ASLM experiments run in.
+    TRIGGER_MODE_SET = 12301  # 0x300D
+    TRIGGER_MODE_GET = 12302  # 0x300E
+
+    # READ-ONLY over the socket, despite the names. PCOBase::ShutterModeSet and
+    # ::ReadoutFormatSet both just call their Get counterpart and report the
+    # camera's current state -- they set nothing. "Rolling Shutter" and
+    # "Single Top Down" have to be selected in the vendor software; this client
+    # can only read them back and say whether they are right.
+    SHUTTER_MODE_GET = 12334  # 0x302E
+    READOUT_FORMAT_GET = 12335  # 0x302F
+
     ROI_LEFT_SET = 12303  # 0x300F
     ROI_LEFT_GET = 12304  # 0x3010
     ROI_TOP_SET = 12305  # 0x3011
@@ -446,6 +482,139 @@ class CameraService(MicroscopeCommandService):
             f"Camera exposure: {exposure_us} us ({exposure_us/1000:.2f} ms)"
         )
         return exposure_us
+
+    # ------------------------------------------------------------------ #
+    # ASLM light-sheet (swept-waist) control
+    # ------------------------------------------------------------------ #
+
+    def set_light_sheet_mode(self, enabled: bool) -> dict:
+        """Turn the camera's rolling-slit light-sheet mode on or off.
+
+        With it off the whole AOI integrates together and sweeping the sheet
+        cannot sharpen anything, however the waist is driven.
+        """
+        return self._send_command(
+            CameraCommandCode.LIGHT_SHEET_MODE_ON_OFF,
+            "CAMERA_LIGHT_SHEET_MODE_ON_OFF",
+            params=[0, 0, 0, 1 if enabled else 0, 0, 0, 0],
+            value=0.0,
+        )
+
+    def set_light_sheet_line_time(self, line_time_ns: int) -> dict:
+        """Set the per-row line time -- the pace the slit sweeps the sensor.
+
+        This is the field the vendor GUI labels "Exposure Time (ns)", which it
+        is not: the exposure is ``lines x line_time``. It is the single number
+        that sets the frame rate, because a frame is
+        ``rows x line_time`` -- 2048 rows at 44364 ns gives 90.86 ms, i.e. the
+        11.00 fps a real ASLM run on this scope reports.
+
+        Sent in the camera's CURRENT timebase, which this command does not
+        change: `PCOBase::LightSheetModeExposureTimeSet` reads the timebase
+        back and reuses it. Nanoseconds on the rigs seen so far, but a camera
+        left in microseconds would read 44364 as 44 ms.
+        """
+        return self._send_command(
+            CameraCommandCode.LIGHT_SHEET_MODE_EXPOSURE_TIME,
+            "CAMERA_LIGHT_SHEET_MODE_EXPOSURE_TIME",
+            params=[0, 0, 0, int(line_time_ns), 0, 0, 0],
+            value=0.0,
+        )
+
+    def set_light_sheet_exposure_lines(self, lines: int) -> dict:
+        """Set the slit width, in sensor rows.
+
+        The sectioning/signal trade-off in one number: the slit is ``rows /
+        lines`` times thinner than the full frame and collects exactly that
+        fraction of the light. It does NOT change the frame rate -- the line
+        time does.
+        """
+        return self._send_command(
+            CameraCommandCode.LIGHT_SHEET_MODE_LINES,
+            "CAMERA_LIGHT_SHEET_MODE_LINES",
+            params=[0, 0, 0, int(lines), 0, 0, 0],
+            value=0.0,
+        )
+
+    def set_light_sheet_delay_lines(self, delay_lines: int = 0) -> dict:
+        """Offset the slit from the sweep, in rows. 0 in normal use.
+
+        Non-zero shifts which part of the sample the open slit is looking at
+        relative to where the waist is, so it is the knob for correcting a
+        sheet that leads or lags the readout.
+        """
+        return self._send_command(
+            CameraCommandCode.LIGHT_SHEET_MODE_DELAY_LINES,
+            "CAMERA_LIGHT_SHEET_MODE_DELAY_LINES",
+            params=[0, 0, 0, int(delay_lines), 0, 0, 0],
+            value=0.0,
+        )
+
+    def set_trigger_mode(self, mode: int) -> dict:
+        """Set the camera trigger mode (PCO values).
+
+        2 = "external exposure start & software trigger", the vendor GUI's
+        "Ext-Exp. Start" and what real ASLM experiments use.
+
+        The server calls ``PCO_SetRecordingState(handle, 0)`` before this, so
+        it stops recording as a side effect. Not a command to send mid-stack.
+        """
+        return self._send_command(
+            CameraCommandCode.TRIGGER_MODE_SET,
+            "CAMERA_TRIGGER_MODE_SET",
+            params=[0, 0, 0, int(mode), 0, 0, 0],
+            value=0.0,
+        )
+
+    def configure_light_sheet(
+        self,
+        *,
+        line_time_ns: int,
+        exposure_lines: int,
+        delay_lines: int = 0,
+        enabled: bool = True,
+    ) -> dict:
+        """Apply a complete light-sheet configuration, in a deliberate order.
+
+        Ordered so the camera is never briefly running a slit geometry nobody
+        asked for: the geometry is set first, the mode switched last. Turning
+        it off reverses that, so the slit stops governing before the numbers
+        move underneath it.
+
+        Returns the first failure encountered rather than pressing on, because
+        a half-applied light-sheet configuration still acquires -- it just
+        acquires the wrong thing, which is the failure mode this whole area
+        keeps producing.
+        """
+        steps = [
+            ("line time", lambda: self.set_light_sheet_line_time(line_time_ns)),
+            (
+                "exposure lines",
+                lambda: self.set_light_sheet_exposure_lines(exposure_lines),
+            ),
+            ("delay lines", lambda: self.set_light_sheet_delay_lines(delay_lines)),
+        ]
+        if enabled:
+            steps.append(("mode on", lambda: self.set_light_sheet_mode(True)))
+        else:
+            steps.insert(0, ("mode off", lambda: self.set_light_sheet_mode(False)))
+
+        for label, step in steps:
+            result = step()
+            if not result.get("success"):
+                self.logger.error(
+                    f"Light-sheet configuration failed at '{label}': "
+                    f"{result.get('error', 'unknown error')}. The camera is now "
+                    f"in a partly-applied state -- do not acquire."
+                )
+                return {"success": False, "failed_step": label, **result}
+
+        self.logger.info(
+            f"Light sheet {'on' if enabled else 'off'}: line time "
+            f"{line_time_ns} ns, {exposure_lines} exposure line(s), "
+            f"{delay_lines} delay line(s)"
+        )
+        return {"success": True}
 
     def take_snapshot(self) -> None:
         """

@@ -58,10 +58,30 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
 
-# Row period for this camera, derived from the two recorded operating points
-# above. Kept as a module constant so a different camera is a one-line change and
-# so tests can state the derivation rather than restate the number.
+# Row period at the camera's own free-running readout rate, derived from the two
+# recorded operating points above. This is the FLOOR -- the fastest the sensor
+# will clock a row out.
+#
+# In light-sheet mode it is not what the camera uses. `PCO_SetCmosLineTiming`
+# takes `dwLineTime` as an explicit parameter, so the line time becomes a knob:
+# it is slowed down until the slit sweeps at the pace the waist can follow. A
+# measured ASLM run on Liara (2026-09-19) uses 44364 ns -- 3.6x slower than the
+# floor -- which by itself produces the 11.00 fps that run reports. Pass it in
+# via `line_time_us` whenever light-sheet mode is on; the constant below only
+# describes free-running readout.
 DEFAULT_LINE_TIME_US = 25_000.0 / 2048.0  # 12.207 us
+
+#: A real ASLM operating point, from the instrument rather than from theory.
+#: Liara, 2026-09-19: light sheet mode on, trigger "Ext-Exp. Start" (PCO mode 2),
+#: rolling shutter, single top down. The model reproduces the reported 11.00 fps
+#: from `line_time` and the row count alone.
+MEASURED_ASLM_OPERATING_POINT = {
+    "line_time_ns": 44364,
+    "exposure_lines": 128,
+    "delay_lines": 0,
+    "rows": 2048,
+    "reported_fps": 11.00,
+}
 
 # Full sensor, from microscope_hardware.yaml.
 DEFAULT_SENSOR_ROWS = 2048
@@ -230,6 +250,29 @@ class TimingResult:
     @property
     def total_seconds(self) -> float:
         return self.stack_seconds * self.plan.stacks
+
+
+def from_light_sheet_settings(
+    *,
+    line_time_ns: float,
+    exposure_lines: int,
+    rows: int = DEFAULT_SENSOR_ROWS,
+    **kwargs,
+) -> "TimingResult":
+    """Evaluate from the numbers the camera is actually given.
+
+    The vendor GUI and the wire protocol both work in line time and exposure
+    lines, not in exposure. This converts once, in the one place that knows the
+    relationship, so no caller has to remember that the field labelled
+    "Exposure Time (ns)" is the line time.
+    """
+    line_time_us = float(line_time_ns) / 1000.0
+    return evaluate(
+        rows=rows,
+        exposure_us=exposure_lines * line_time_us,
+        line_time_us=line_time_us,
+        **kwargs,
+    )
 
 
 def evaluate(
