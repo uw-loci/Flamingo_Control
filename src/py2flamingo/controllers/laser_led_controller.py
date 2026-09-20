@@ -116,22 +116,48 @@ class LEDEnableWorker(QRunnable):
                 laser_led_service.disable_led_preview()
             laser_led_service.disable_illumination()
 
-            # Step 2: Set LED intensity
-            intensity = controller._led_intensities.get(self.led_color, 50.0)
-            controller.logger.info(
-                f"[ASYNC] Step 2: Setting {color_name} LED intensity to {intensity:.1f}%"
-            )
-            laser_led_service.set_led_intensity(self.led_color, intensity)
+            # Steps 2-4. Each return value is CHECKED, which it was not until
+            # 2026-09-20.
+            #
+            # The rig's own server log for 2026-09-03 shows the cost: two
+            # `led enable` commands arrived and **zero** `LED_SET` commands did,
+            # across 1115 commands in the whole session. So the lamp was
+            # switched on at whatever intensity the scope had stored and the
+            # slider was never in the loop -- with no error anywhere, because
+            # this worker discarded the result of every step and then reported
+            # success regardless.
+            #
+            # The synchronous `enable_led_for_preview` has always raised on each
+            # of these. This is the path the Select checkbox actually uses, so
+            # it was the one that mattered and the one that stayed quiet.
+            steps = [
+                (
+                    f"set {color_name} LED intensity",
+                    lambda: laser_led_service.set_led_intensity(
+                        self.led_color,
+                        controller._led_intensities.get(self.led_color, 50.0),
+                    ),
+                ),
+                ("enable LED preview", laser_led_service.enable_led_preview),
+                ("enable illumination", laser_led_service.enable_illumination),
+            ]
 
-            # Step 3: Enable LED preview
-            controller.logger.info(f"[ASYNC] Step 3: Enabling LED preview")
-            laser_led_service.enable_led_preview()
+            for index, (label, step) in enumerate(steps, start=2):
+                controller.logger.info(f"[ASYNC] Step {index}: {label}")
+                if not step():
+                    error_msg = (
+                        f"Could not {label}. The {color_name} LED is NOT ready: "
+                        f"the earlier steps were applied but this one failed, so "
+                        f"the lamp is in a partly-configured state. Nothing is "
+                        f"illuminated as requested."
+                    )
+                    controller.logger.error(f"[ASYNC] {error_msg}")
+                    controller.error_occurred.emit(error_msg)
+                    return
 
-            # Step 4: Enable illumination
-            controller.logger.info(f"[ASYNC] Step 4: Enabling illumination")
-            laser_led_service.enable_illumination()
-
-            # Update state and emit success
+            # Only now is the source genuinely active. Setting this before the
+            # steps succeeded is what let `get_active_source()` -- and the panel
+            # reading it -- report a lamp that was never lit.
             controller._active_source = f"led_{color_name[0]}"
             controller._active_laser_index = None
 
