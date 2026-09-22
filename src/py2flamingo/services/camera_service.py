@@ -103,6 +103,22 @@ class CameraCommandCode:
         12298  # 0x300A - get exposure time (returns int32Data0 in microseconds)
     )
 
+    # The only way to confirm a light-sheet line time actually took effect.
+    #
+    # None of the four LIGHT_SHEET_MODE_* commands has a GET counterpart in the
+    # 3.0.0 server header -- they are write-only, so the camera will never say
+    # what slit geometry it is running. Readout time is the back door: a rolling
+    # shutter reads one row per line time, so `readout / rows` IS the line time,
+    # and the line time is the setting that matters most because it alone sets
+    # the frame rate and therefore the stage speed.
+    READ_OUT_TIME_GET = 12332  # 0x302C - returns readout time (microseconds)
+
+    # The camera's own idea of its frame rate. In an external trigger mode this
+    # is its FREE-RUNNING period, not what it is delivering -- it has no way to
+    # know the master clock. Worth reading precisely so it can be compared
+    # against measured delivery rather than trusted.
+    FPS_GET = 12312  # 0x3018
+
     # Action commands
     SNAPSHOT = 12294  # 0x3006 - take single image
     LIVE_VIEW_START = 12295  # 0x3007 - start continuous imaging
@@ -615,6 +631,108 @@ class CameraService(MicroscopeCommandService):
             f"{delay_lines} delay line(s)"
         )
         return {"success": True}
+
+    # ------------------------------------------------------------------ #
+    # Light-sheet verification
+    #
+    # All four LIGHT_SHEET_MODE_* commands are write-only: the 3.0.0 server
+    # header has no GET for any of them. So "did the command take effect?"
+    # cannot be answered directly, only inferred from the three things the
+    # camera WILL report -- readout time, trigger mode, and its own frame rate.
+    # ------------------------------------------------------------------ #
+
+    def get_readout_time_us(self) -> Optional[float]:
+        """Sensor readout time in microseconds, or None if the camera won't say.
+
+        The indirect read-back of the line time: a rolling shutter reads one row
+        per line time, so ``readout / rows`` recovers it. A previous run of this
+        query returned 24854.528 us at 2048 rows -- 12.136 us/row, which is the
+        free-running floor and independently confirms the 12.207 us/row derived
+        from the two frame-rate operating points.
+
+        Returns None rather than raising: this is a diagnostic, and a camera
+        that does not implement the query should not take down the caller.
+        """
+        try:
+            result = self._query_command(
+                CameraCommandCode.READ_OUT_TIME_GET, "CAMERA_READ_OUT_TIME_GET"
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostic path
+            self.logger.warning(f"Readout time query failed: {exc}")
+            return None
+        if not result.get("success"):
+            return None
+        params = result.get("parsed", {}).get("params", [])
+        if len(params) <= 3:
+            return None
+        # Microseconds in int32Data0, matching EXPOSURE_GET. The double `value`
+        # field carries the sub-microsecond part when the server populates it.
+        value = result.get("parsed", {}).get("value", 0.0)
+        return float(value) if value else float(params[3])
+
+    def get_reported_fps(self) -> Optional[float]:
+        """The camera's own frame rate, which is NOT necessarily what it delivers.
+
+        In an external trigger mode the camera reports the rate it would
+        free-run at, because it cannot observe the master clock. Compare it with
+        measured delivery (:mod:`py2flamingo.models.frame_delivery`) rather than
+        building a workflow from it -- frame rate is stage speed.
+        """
+        try:
+            result = self._query_command(CameraCommandCode.FPS_GET, "CAMERA_FPS_GET")
+        except Exception as exc:  # noqa: BLE001 - diagnostic path
+            self.logger.warning(f"FPS query failed: {exc}")
+            return None
+        if not result.get("success"):
+            return None
+        parsed = result.get("parsed", {})
+        value = parsed.get("value", 0.0)
+        if value:
+            return float(value)
+        params = parsed.get("params", [])
+        return float(params[3]) if len(params) > 3 else None
+
+    def get_trigger_mode(self) -> Optional[int]:
+        """Current PCO trigger mode, or None if unavailable.
+
+        The one light-sheet-adjacent setting with a real GET (0x300E). 2 is
+        "external exposure start", which is what real ASLM runs use.
+        """
+        try:
+            result = self._query_command(
+                CameraCommandCode.TRIGGER_MODE_GET, "CAMERA_TRIGGER_MODE_GET"
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostic path
+            self.logger.warning(f"Trigger mode query failed: {exc}")
+            return None
+        if not result.get("success"):
+            return None
+        params = result.get("parsed", {}).get("params", [])
+        return int(params[3]) if len(params) > 3 else None
+
+    def read_light_sheet_state(self, rows: int) -> Dict[str, Any]:
+        """Everything the camera will admit about its current light-sheet state.
+
+        Args:
+            rows: AOI height, needed to turn readout time back into a line time.
+                Pass the height actually in force, not the sensor height -- a
+                cropped AOI reads out proportionally faster.
+
+        Returns a dict whose values are None where the camera offers no answer.
+        ``line_time_ns`` is derived, not reported, and is the only handle we
+        have on the setting that governs the frame rate.
+        """
+        readout_us = self.get_readout_time_us()
+        line_time_ns = None
+        if readout_us and rows > 0:
+            line_time_ns = readout_us * 1000.0 / rows
+        return {
+            "readout_time_us": readout_us,
+            "line_time_ns": line_time_ns,
+            "reported_fps": self.get_reported_fps(),
+            "trigger_mode": self.get_trigger_mode(),
+            "rows": rows,
+        }
 
     def take_snapshot(self) -> None:
         """

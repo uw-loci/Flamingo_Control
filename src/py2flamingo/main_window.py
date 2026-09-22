@@ -621,6 +621,19 @@ class MainWindow(QMainWindow):
         self.aslm_timing_action.triggered.connect(self._on_aslm_timing)
         lightsheet_tests_menu.addAction(self.aslm_timing_action)
 
+        # Needs the microscope: it measures what the camera actually delivered
+        # and reads back what it will admit to, neither of which can be
+        # answered offline.
+        self.frame_probe_action = QAction("&Frame Delivery Probe...", self)
+        self.frame_probe_action.setStatusTip(
+            "Measure the delivered frame rate against the rate the camera "
+            "reports, apply and verify an ASLM light-sheet configuration, and "
+            "trace the commands being sent"
+        )
+        self.frame_probe_action.triggered.connect(self._on_frame_probe)
+        self.frame_probe_action.setEnabled(False)
+        lightsheet_tests_menu.addAction(self.frame_probe_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -850,6 +863,7 @@ class MainWindow(QMainWindow):
         # Lightsheet Tests need the microscope (stage + camera), not Sample View
         self.pixel_calibrator_action.setEnabled(connected)
         self.stage_repeatability_action.setEnabled(connected)
+        self.frame_probe_action.setEnabled(connected)
 
     def _on_voxel_test(self):
         """Handle 3D voxel rotation test menu action."""
@@ -1434,6 +1448,26 @@ class MainWindow(QMainWindow):
 
         dialog = ASLMTimingDialog(self)
         dialog.exec_()
+
+    def _on_frame_probe(self):
+        """Open the Frame Delivery Probe."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.info("Frame Delivery Probe menu action triggered")
+
+        try:
+            from py2flamingo.views.dialogs.frame_delivery_probe_dialog import (
+                FrameDeliveryProbeDialog,
+            )
+
+            dialog = FrameDeliveryProbeDialog(app=self.app, parent=None)
+            self._show_as_panel("frame_probe", "Frame Delivery Probe", dialog)
+        except Exception as e:
+            logger.error(f"Error opening Frame Delivery Probe: {e}", exc_info=True)
+            QMessageBox.critical(
+                self, "Error", f"Failed to open Frame Delivery Probe:\n{e}"
+            )
 
     def _on_pixel_calibrator(self):
         """Handle XY Pixel Calibrator menu action."""
