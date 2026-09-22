@@ -386,3 +386,109 @@ class TestTheVelocityFloorDoesNotBlockTheFix:
 
         with _pytest.raises(ValidationError):
             StackSettings(num_planes=10, z_step_um=1.0, z_velocity_mm_s=0.0)
+
+
+# A third stack, and the one that shows the cadence is QUANTISED to the clock.
+#
+# Different spacing (5 um), different requested rate (6.972 fps), different
+# camera timing (152 ms) -- and a delivered cadence of 218.17 ms, which is
+# 1.9999x the 109.09 ms of the first two. The camera needs 152 ms, the clock
+# ticks every 109 ms, so it misses an edge and fires on every second one. A
+# continuous bottleneck does not land on an integer multiple; a camera waiting
+# for trigger edges does exactly this.
+STACK3_PLANES = 276
+STACK3_CYCLE_US = 60_214_108 / STACK3_PLANES  # 218.17 ms
+STACK3_VELOCITY = 0.034860  # server-computed: 5 um x 6.972 fps
+STACK3_SPACING_UM = 5.0
+STACK3_OBSERVED_PARK = 183
+CLOCK_PERIOD_US = 109_090.0
+
+
+class TestTheCadenceIsQuantisedToTheClock:
+    def test_the_third_stack_runs_at_exactly_twice_the_clock(self):
+        assert STACK3_CYCLE_US / CLOCK_PERIOD_US == pytest.approx(2.0, abs=0.005)
+
+    def test_the_first_two_stacks_run_at_exactly_one_clock_period(self):
+        for cycle in (STACK1_CYCLE_US, STACK2_CYCLE_US):
+            assert cycle / CLOCK_PERIOD_US == pytest.approx(1.0, abs=0.005)
+
+    def test_the_park_point_is_predicted_at_the_doubled_cadence(self):
+        predicted = check_sweep_feasible(
+            readout_us=152_000.0,
+            z_velocity_mm_s=STACK3_VELOCITY,
+            plane_spacing_um=STACK3_SPACING_UM,
+            planes=STACK3_PLANES,
+            measured_frame_period_us=STACK3_CYCLE_US,
+        ).frames_before_park
+        assert predicted == pytest.approx(STACK3_OBSERVED_PARK, abs=3)
+
+    def test_lowering_the_requested_rate_did_not_fix_it(self):
+        """6.972 fps was already a big reduction from 40.213 and still failed.
+
+        It was derived from the camera's readout (143 ms -> 6.99 fps), and the
+        camera is not what sets the rate. Against the delivered 4.584 fps it is
+        still 1.5x too fast, which is why a third of the stack is duplicates.
+        """
+        feasibility = check_sweep_feasible(
+            readout_us=152_000.0,
+            z_velocity_mm_s=STACK3_VELOCITY,
+            plane_spacing_um=STACK3_SPACING_UM,
+            planes=STACK3_PLANES,
+            measured_frame_period_us=STACK3_CYCLE_US,
+        )
+        assert not feasibility.feasible
+        assert feasibility.overspeed_factor == pytest.approx(1.52, abs=0.03)
+        assert feasibility.duplicate_frames == pytest.approx(94, abs=3)
+
+    def test_the_camera_readout_would_have_passed_this_one(self):
+        """The readout bound calls a 34%-duplicate stack acceptable.
+
+        152 ms readout implies 6.58 fps against 6.972 requested -- 6% over,
+        inside no useful margin. Only the measured cadence catches it.
+        """
+        weak = check_sweep_feasible(
+            readout_us=152_000.0,
+            z_velocity_mm_s=STACK3_VELOCITY,
+            plane_spacing_um=STACK3_SPACING_UM,
+            planes=STACK3_PLANES,
+        )
+        assert weak.duplicate_frames < 20  # vs 93 actually observed
+
+    def test_the_correct_velocity_for_this_stack(self):
+        """spacing x delivered rate, and our floor must accept it."""
+        from py2flamingo.workflows.workflow_validator import HardwareConstraints
+
+        correct = STACK3_SPACING_UM / 1000.0 * (1e6 / STACK3_CYCLE_US)
+        assert correct == pytest.approx(0.02292, abs=0.0002)
+        assert correct >= HardwareConstraints().min_z_velocity_mm_s
+        feasibility = check_sweep_feasible(
+            readout_us=152_000.0,
+            z_velocity_mm_s=correct,
+            plane_spacing_um=STACK3_SPACING_UM,
+            planes=STACK3_PLANES,
+            measured_frame_period_us=STACK3_CYCLE_US,
+        )
+        assert feasibility.feasible
+        assert feasibility.duplicate_frames == 0
+
+    def test_all_three_stacks_predicted_by_their_own_cadence(self):
+        cases = [
+            (PLANES, Z_VELOCITY, 1.0, STACK1_CYCLE_US, OBSERVED_PARK_INDEX),
+            (STACK2_PLANES, Z_VELOCITY, 1.0, STACK2_CYCLE_US, STACK2_OBSERVED_PARK),
+            (
+                STACK3_PLANES,
+                STACK3_VELOCITY,
+                STACK3_SPACING_UM,
+                STACK3_CYCLE_US,
+                STACK3_OBSERVED_PARK,
+            ),
+        ]
+        for planes, velocity, spacing, cycle, observed in cases:
+            predicted = check_sweep_feasible(
+                readout_us=90857.0,
+                z_velocity_mm_s=velocity,
+                plane_spacing_um=spacing,
+                planes=planes,
+                measured_frame_period_us=cycle,
+            ).frames_before_park
+            assert predicted == pytest.approx(observed, abs=3)
