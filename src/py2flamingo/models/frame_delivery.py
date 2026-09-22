@@ -464,3 +464,138 @@ def check_light_sheet(
         ),
     ]
     return checks
+
+
+# --------------------------------------------------------------------------- #
+# Pre-flight: can the camera keep up with the sweep it is being asked to track?
+#
+# Two real CTLSM1 stacks (2026-09), both asking for 40.213 fps, both driving the
+# stage at 0.040213 mm/s, both reporting complete success -- images requested ==
+# acquired == processed == saved, 0 errors -- and both mostly duplicates:
+#
+#     planes   readout    delivered   stage parked at   duplicates
+#       704    90.9 ms    109.15 ms       161            543
+#      1382    26.0 ms    109.03 ms       317           1065
+#
+# The readout time differs by 3.5x between those runs. **The delivered cadence
+# does not differ at all.** So the camera's readout is NOT what paces this rig;
+# something external holds it at ~109 ms (9.17 fps) whatever the camera is
+# configured to do. The first run looked like it was explained by its 90.9 ms
+# ASLM readout, and the second one proves it was not.
+#
+# That matters for what this check can promise. Readout is a genuine floor -- a
+# rolling shutter cannot beat it -- so a request that fails against readout
+# alone is definitely impossible. But passing it means nothing: run 2 sat only
+# 4.6% over its readout ceiling and still came back 77% duplicates. Only a
+# MEASURED cadence predicts the real outcome, which is what
+# :func:`measure` exists to obtain (and what the Frame Delivery Probe collects).
+#
+# Feed a measured period in whenever one is known. Without one this check is a
+# lower bound on how wrong things are, not an estimate of it.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class SweepFeasibility:
+    """Whether a requested sweep speed is physically possible for this camera."""
+
+    requested_fps: float
+    frame_period_us: float
+    readout_us: float
+    planes: int
+    z_velocity_mm_s: float
+    plane_spacing_um: float
+    period_is_measured: bool
+
+    @property
+    def max_fps(self) -> float:
+        """Ceiling set by readout alone. A rolling shutter cannot beat it."""
+        return 1e6 / self.readout_us if self.readout_us > 0 else 0.0
+
+    @property
+    def achievable_fps(self) -> float:
+        return 1e6 / self.frame_period_us if self.frame_period_us > 0 else 0.0
+
+    @property
+    def feasible(self) -> bool:
+        """Whether the request fits. Only trustworthy when the period is measured.
+
+        A False here is conclusive. A True here means only that nothing was
+        proved impossible -- see :attr:`bound_is_weak`.
+        """
+        return self.requested_fps <= self.achievable_fps * (1.0 + DEAD_TIME_TOLERANCE)
+
+    @property
+    def bound_is_weak(self) -> bool:
+        """True when this verdict rests on readout alone and so proves little."""
+        return not self.period_is_measured
+
+    @property
+    def overspeed_factor(self) -> float:
+        """How many times faster the stage runs than the frames arrive."""
+        if self.achievable_fps <= 0:
+            return 0.0
+        return self.requested_fps / self.achievable_fps
+
+    @property
+    def frames_before_park(self) -> float:
+        """Frames acquired before the stage reaches the end of its path.
+
+        The stage is given a position, so it stops there. Everything after this
+        images the same plane.
+        """
+        if self.z_velocity_mm_s <= 0 or self.frame_period_us <= 0:
+            return float(self.planes)
+        travel_s = (self.planes * self.plane_spacing_um / 1000.0) / self.z_velocity_mm_s
+        return travel_s / (self.frame_period_us / 1e6)
+
+    @property
+    def duplicate_frames(self) -> int:
+        return max(0, int(round(self.planes - self.frames_before_park)))
+
+    @property
+    def real_plane_spacing_um(self) -> float:
+        """Spacing the sample actually gets, before the stage parks."""
+        return self.z_velocity_mm_s * (self.frame_period_us / 1e6) * 1000.0
+
+
+def check_sweep_feasible(
+    *,
+    readout_us: float,
+    z_velocity_mm_s: float,
+    plane_spacing_um: float,
+    planes: int,
+    measured_frame_period_us: Optional[float] = None,
+) -> SweepFeasibility:
+    """Compare a workflow's implied frame rate against what the camera can do.
+
+    Args:
+        readout_us: The camera's readout time, ideally read back live
+            (``CameraService.get_readout_time_us``) rather than assumed -- in
+            light-sheet mode it is a knob, and a stale value is how this goes
+            wrong in the first place.
+        measured_frame_period_us: The real per-frame period if known, and the
+            only input that predicts the actual outcome. Without it the readout
+            floor is used, which can understate the problem enormously: a real
+            run 4.6% over its readout ceiling returned 77% duplicate frames,
+            because the rig was paced at 109 ms by something that had nothing to
+            do with readout. Treat a readout-only verdict as "at least this
+            bad", never as "this bad".
+
+    The requested frame rate is derived from the stage, not read from a field,
+    because the stage speed is the thing that actually has to be kept up with:
+    ``z_velocity / plane_spacing``.
+    """
+    requested_fps = (
+        z_velocity_mm_s / (plane_spacing_um / 1000.0) if plane_spacing_um > 0 else 0.0
+    )
+    period = measured_frame_period_us or readout_us
+    return SweepFeasibility(
+        requested_fps=requested_fps,
+        frame_period_us=period,
+        readout_us=readout_us,
+        planes=planes,
+        z_velocity_mm_s=z_velocity_mm_s,
+        plane_spacing_um=plane_spacing_um,
+        period_is_measured=measured_frame_period_us is not None,
+    )

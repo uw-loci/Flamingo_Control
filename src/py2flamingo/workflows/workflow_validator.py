@@ -19,6 +19,7 @@ from ..models.data.workflow import (
     WorkflowState,
     WorkflowType,
 )
+from ..models.frame_delivery import check_sweep_feasible
 from ..models.hardware.laser import PowerLimits
 from ..models.hardware.stage import Position, StageLimits
 
@@ -74,6 +75,20 @@ class HardwareConstraints:
     camera_roi_width: int = 2048
     camera_roi_height: int = 2048
     max_file_size_gb: float = 100.0
+
+    # Readout time, ideally read back live via CameraService.get_readout_time_us
+    # (READ_OUT_TIME_GET, 0x302C). None means unknown, and the sweep-speed check
+    # is skipped rather than run against a guess -- in light-sheet mode readout
+    # is a knob, and a stale assumption is exactly how a stack ends up asking
+    # for 40 fps from a camera that can only do 11.
+    camera_readout_us: Optional[float] = None
+
+    # Measured per-frame cadence, if one has been taken on this rig (the Frame
+    # Delivery Probe reports it). Preferred over readout whenever it is known,
+    # because readout is only a floor: two CTLSM1 stacks whose readout differed
+    # 3.5x were both delivered at 109 ms, so readout predicted one of them
+    # within 6% and the other 17x wrong.
+    camera_frame_period_us: Optional[float] = None
 
 
 class WorkflowValidationError(ValidationError):
@@ -374,10 +389,66 @@ class WorkflowValidator:
                 f"(max: {self.constraints.max_z_velocity_mm_s} mm/s)"
             )
 
+        # Can the camera actually keep up with the sweep?
+        #
+        # z_velocity = plane_spacing x frame_rate, so the stage speed IS a
+        # frame-rate request. When it exceeds what the camera can deliver the
+        # stage finishes its path early and parks, and the rest of the stack is
+        # the same plane over and over. Nothing errors: a real 704-plane run
+        # reported 704 requested, 704 acquired, 704 saved, 0 errors, and ~540
+        # of them were duplicates at the end position.
+        self._validate_sweep_speed(stack, result)
+
         # Check total Z range
         total_range = stack.calculate_z_range()
         if total_range > 10000:  # 10mm
             result.add_warning(f"Large Z range ({total_range/1000:.1f} mm)")
+
+    def _validate_sweep_speed(self, stack, result: ValidationResult):
+        """Error if the stage outruns the camera, with what it would cost."""
+        readout_us = self.constraints.camera_readout_us
+        if not readout_us or readout_us <= 0:
+            return
+        if stack.z_velocity_mm_s <= 0 or stack.z_step_um <= 0:
+            return
+
+        feasibility = check_sweep_feasible(
+            readout_us=readout_us,
+            z_velocity_mm_s=stack.z_velocity_mm_s,
+            plane_spacing_um=stack.z_step_um,
+            planes=stack.num_planes,
+            measured_frame_period_us=self.constraints.camera_frame_period_us,
+        )
+        if feasibility.feasible:
+            return
+
+        # Name the limit that actually applies. Quoting the readout ceiling while
+        # holding a measured cadence would understate it by the whole gap
+        # between them -- 38 fps against 9 on the rig this was written for.
+        source = (
+            f"a {readout_us / 1000:.1f} ms readout"
+            if feasibility.bound_is_weak
+            else f"a measured {feasibility.frame_period_us / 1000:.1f} ms cadence"
+        )
+        result.add_error(
+            f"Stage outruns the camera: the sweep asks for "
+            f"{feasibility.requested_fps:.2f} fps but {source} "
+            f"caps it at {feasibility.achievable_fps:.2f} fps "
+            f"({feasibility.overspeed_factor:.1f}x too fast). The stage would "
+            f"reach the end of its path after about "
+            f"{feasibility.frames_before_park:.0f} of {stack.num_planes} planes "
+            f"and park, making the remaining ~{feasibility.duplicate_frames} "
+            f"frames duplicates of the last one, at a real plane spacing of "
+            f"{feasibility.real_plane_spacing_um:.2f} um instead of "
+            f"{stack.z_step_um:.2f} um. Lower the frame rate or the plane "
+            f"spacing."
+            + (
+                "  (Bound from readout only, so this is a floor on how wrong it "
+                "is -- measure the delivered cadence for the real figure.)"
+                if feasibility.bound_is_weak
+                else ""
+            )
+        )
 
     # ==================== Tile Settings Validation ====================
 

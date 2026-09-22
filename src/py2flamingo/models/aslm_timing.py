@@ -347,6 +347,29 @@ def evaluate(
             "sectioning gain."
         )
 
+    # The dangerous direction, and the one that was missing until 2026-09-22:
+    # a configured rate ABOVE what the camera can deliver. The camera cannot
+    # comply, so the stage -- which is driven at plane_spacing x the configured
+    # rate -- simply outruns it, reaches the end of its path and parks. A real
+    # 704-plane run asked for 40.213 fps against a 90.857 ms readout (11.006 fps
+    # ceiling), covered its whole 0.704 mm in 17.5 s, and returned ~540 copies
+    # of the last plane. The server reported 704 acquired, 704 saved, 0 errors.
+    if (
+        configured_frame_rate_hz
+        and configured_frame_rate_hz > camera.frame_rate_hz * 1.001
+    ):
+        overspeed = configured_frame_rate_hz / camera.frame_rate_hz
+        warnings.append(
+            f"The acquisition asks for {configured_frame_rate_hz:.2f} fps but "
+            f"this camera timing tops out at {camera.frame_rate_hz:.2f} fps "
+            f"({overspeed:.1f}x too fast). Frame rate is stage speed, so the "
+            f"stage will reach the end of its path after about "
+            f"{plan.planes / overspeed:.0f} of {plan.planes} planes and park -- "
+            f"the rest of the stack will be the same plane repeated, at a real "
+            f"spacing of {plan.plane_spacing_um * overspeed:.2f} um instead of "
+            f"{plan.plane_spacing_um:.2f} um."
+        )
+
     if (
         configured_frame_rate_hz
         and camera.frame_rate_hz > configured_frame_rate_hz * 1.001
