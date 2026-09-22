@@ -344,3 +344,45 @@ class TestReadoutIsNotWhatPacesTheRig:
                 measured_frame_period_us=109_090.0,
             ).frames_before_park
             assert predicted == pytest.approx(park, abs=3)
+
+
+class TestTheVelocityFloorDoesNotBlockTheFix:
+    """The correct velocity for these stacks must not be rejected as too slow.
+
+    `velocity = plane_spacing x frame_rate`, so a floor on velocity is a floor
+    on frame rate. Ours was 0.01 mm/s, i.e. 10 fps at 1 um spacing -- above the
+    9.17 fps this rig actually delivers. The 4.4x-too-fast velocity passed that
+    check and the correct one would have been refused.
+    """
+
+    CORRECT_VELOCITY = 0.00917  # 1 um x 9.17 fps
+    SERVER_FLOOR = 0.000001  # Teensy SystemLimits.h:13
+
+    def test_the_correct_velocity_is_accepted(self):
+        from py2flamingo.workflows.workflow_validator import HardwareConstraints
+
+        assert self.CORRECT_VELOCITY >= HardwareConstraints().min_z_velocity_mm_s
+
+    def test_our_floor_is_not_stricter_than_the_server(self):
+        from py2flamingo.workflows.workflow_validator import HardwareConstraints
+
+        assert HardwareConstraints().min_z_velocity_mm_s <= self.SERVER_FLOOR
+
+    def test_the_gui_does_not_clamp_it_away(self):
+        from py2flamingo.views.workflow_panels.zstack_panel import Z_VELOCITY_MIN_MM_S
+
+        assert self.CORRECT_VELOCITY >= Z_VELOCITY_MIN_MM_S
+
+    def test_a_genuinely_stopped_stage_is_still_rejected(self):
+        """Lowering the floor must not let a zero velocity through.
+
+        It does not: StackSettings validates on construction, well before the
+        validator's floor is consulted.
+        """
+        import pytest as _pytest
+
+        from py2flamingo.models.base import ValidationError
+        from py2flamingo.models.data.workflow import StackSettings
+
+        with _pytest.raises(ValidationError):
+            StackSettings(num_planes=10, z_step_um=1.0, z_velocity_mm_s=0.0)

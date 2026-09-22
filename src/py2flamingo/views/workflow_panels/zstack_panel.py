@@ -25,7 +25,12 @@ from PyQt5.QtWidgets import (
 from py2flamingo.models.data.workflow import StackSettings
 
 # System limits for Z velocity (from C++ SystemLimits.h)
-Z_VELOCITY_MIN_MM_S = 0.001
+# Matches the server's own floor (Teensy SystemLimits.h:13, Z_VELOCITY_MIN).
+# This clamps silently-with-a-warning, so a value that is legitimate for a slow
+# ASLM sweep must not be clamped away: velocity = plane_spacing x frame_rate, so
+# 1 um spacing at 9.17 fps is 0.00917 mm/s, which the old 0.001 floor happened to
+# allow and the validator's 0.01 did not.
+Z_VELOCITY_MIN_MM_S = 0.000001
 Z_VELOCITY_MAX_MM_S = 1.0
 
 # Stack option values

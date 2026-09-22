@@ -71,7 +71,13 @@ class HardwareConstraints:
     max_exposure_ms: float = 10000.0
     min_exposure_ms: float = 0.1
     max_z_velocity_mm_s: float = 2.0
-    min_z_velocity_mm_s: float = 0.01
+    # The server's own floor is 0.000001 (Teensy SystemLimits.h:13,
+    # Z_VELOCITY_MIN). Ours was 0.01, which is 10,000x stricter and rejects
+    # legitimate ASLM sweeps: velocity = plane_spacing x frame_rate, so at 1 um
+    # spacing 0.01 mm/s is a 10 fps floor -- and the rig that prompted this runs
+    # at 9.17 fps, needing 0.00917. The correct velocity for Arin's stacks was
+    # refused by this check while the 4x-too-fast one passed.
+    min_z_velocity_mm_s: float = 0.000001
     camera_roi_width: int = 2048
     camera_roi_height: int = 2048
     max_file_size_gb: float = 100.0
