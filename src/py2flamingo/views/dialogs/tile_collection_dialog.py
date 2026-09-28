@@ -54,6 +54,7 @@ from py2flamingo.utils.limited_acquisition import (
 )
 from py2flamingo.utils.tile_folder_organizer import (
     ReorganizeResult,
+    acquisition_root,
     reorganization_skip_reason,
     reorganize_tile_folders,
 )
@@ -2263,6 +2264,21 @@ class TileCollectionDialog(PersistentDialog):
                 "Sample View does not have prepare_for_tile_workflows method"
             )
 
+    def _session_user_name(self):
+        """The operator named at startup, or None for no user folder.
+
+        Read at use rather than cached at construction: this dialog can outlive
+        a settings change, and filing data under a stale name is worse than the
+        extra lookup.
+        """
+        try:
+            config_service = getattr(self._app, "config_service", None)
+            if config_service is not None:
+                return config_service.get_user_name()
+        except Exception as e:
+            logger.warning(f"Could not read session user name: {e}")
+        return None
+
     def _reorganize_after_collection(self) -> ReorganizeResult:
         """Move the server's flat tile folders into the nested layout.
 
@@ -2275,11 +2291,16 @@ class TileCollectionDialog(PersistentDialog):
         lost, leaving the data flat with nothing in the log to say why.
         """
         try:
+            # Reached defensively like every other attribute here: this runs
+            # from a Qt slot, and the wrapper's job is that nothing in it can
+            # leave a finished run silently flat.
+            get_user = getattr(self, "_session_user_name", None)
             result = reorganize_tile_folders(
                 getattr(self, "_local_path", None),
                 getattr(self, "_base_save_directory", ""),
                 getattr(self, "_tile_folder_mapping", {}),
                 getattr(self, "_local_access_enabled", False),
+                user_name=get_user() if callable(get_user) else None,
             )
         except Exception as e:
             logger.error(f"Folder reorganization failed: {e}", exc_info=True)
@@ -2332,7 +2353,15 @@ class TileCollectionDialog(PersistentDialog):
                     f"({getattr(reorg, 'skip_reason', None) or 'local access off'})"
                 )
                 return
-            root = Path(local_path) / base / date_folder
+            # Same helper the reorganizer used, so the manifest cannot land
+            # one level away from the tiles it describes.
+            get_user = getattr(self, "_session_user_name", None)
+            root = acquisition_root(
+                local_path,
+                base,
+                date_folder,
+                get_user() if callable(get_user) else None,
+            )
 
             manifest = AcquisitionManifest(
                 acquisition_dir=str(root),

@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from py2flamingo.utils.file_handlers import text_to_dict, workflow_to_dict
 
@@ -453,6 +453,11 @@ class ConfigurationService:
     # (save format, camera AOI, ...). One persisted key holding many sub-keys,
     # so adding a remembered control does not mean touching this service.
     WORKFLOW_PREFS_KEY = "workflow_panel_prefs"
+    # Who is at the microscope. Chosen once at startup and used as the top
+    # level of the acquisition folder tree; None means "no user folder", which
+    # is a real answer and not a missing one.
+    USER_NAME_KEY = "user_name"
+    USER_NAME_HISTORY_KEY = "user_name_history"
     _SESSION_PATHS_FILE = "session_paths.json"
 
     def _persisted_keys(self) -> tuple:
@@ -473,6 +478,8 @@ class ConfigurationService:
             self.STITCHED_DATA_PATH_KEY,
             self.WEBCAM_SESSION_PATH_KEY,
             self.WORKFLOW_PREFS_KEY,
+            self.USER_NAME_KEY,
+            self.USER_NAME_HISTORY_KEY,
         )
 
     def _session_paths_file(self) -> Path:
@@ -666,6 +673,51 @@ class ConfigurationService:
         self.config[self.WORKFLOW_PREFS_KEY] = prefs
         self._save_session_paths()
         self.logger.debug(f"Saved workflow preference {key}={value!r}")
+
+    # Current operator (see models/user_name.py for the folder-name rules)
+    def get_user_name(self) -> Optional[str]:
+        """The operator chosen at startup, or None when they chose "None".
+
+        Returns:
+            The stored name as it was typed, or None for no user folder.
+        """
+        from py2flamingo.models.user_name import normalize_stored_name
+
+        return normalize_stored_name(self.config.get(self.USER_NAME_KEY))
+
+    def set_user_name(self, name: Optional[str]) -> None:
+        """Remember the operator and move them to the front of the dropdown.
+
+        Persisting None is meaningful and is written like any other value: it
+        is how the next launch knows the last answer was "no user folder"
+        rather than that nobody has ever been asked.
+
+        Args:
+            name: Name as the operator typed it, or None for no user folder.
+        """
+        from py2flamingo.models.user_name import (
+            merge_into_history,
+            normalize_stored_name,
+        )
+
+        stored = normalize_stored_name(name)
+        self.config[self.USER_NAME_KEY] = stored
+        self.config[self.USER_NAME_HISTORY_KEY] = merge_into_history(
+            self.get_user_name_history(), stored
+        )
+        self._save_session_paths()
+        self.logger.info(f"Set user name: {stored!r}")
+
+    def get_user_name_history(self) -> List[str]:
+        """Previously used operator names, most recent first.
+
+        Returns:
+            Names for the startup dropdown; empty before anyone has been asked.
+        """
+        stored = self.config.get(self.USER_NAME_HISTORY_KEY)
+        if not isinstance(stored, list):
+            return []
+        return [str(n) for n in stored if isinstance(n, str) and n.strip()]
 
     # Thresholder preset path (for Save/Load Preset in Union of Thresholders)
     def get_thresholder_preset_path(self) -> Optional[str]:

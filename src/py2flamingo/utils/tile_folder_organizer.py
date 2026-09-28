@@ -14,6 +14,15 @@ After the run we move those into the nested layout every downstream tool
 
     D:/CTLSM1/BrainSingleChannel2/2026-08-05/X4.47_Y17.17/
 
+When an operator was named at startup, their folder becomes the top level::
+
+    D:/CTLSM1/sam_nelson/BrainSingleChannel2/2026-08-05/X4.47_Y17.17/
+
+That level exists only here, on this side of the move. The server cannot make
+it: ``SystemSupport::makeDirectory`` is a bare non-recursive ``mkdir``, so
+asking it to write one level deeper than an existing drive fails the whole
+workflow at stack check rather than creating the parent.
+
 That move is only possible when this PC can see the server's drive, so the
 skip reasons are reported rather than silently swallowed -- a skipped
 reorganization looks exactly like a successful run until the user goes
@@ -26,6 +35,8 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from py2flamingo.models.user_name import folder_name_for
 
 logger = logging.getLogger(__name__)
 
@@ -153,11 +164,41 @@ def infer_local_drive_root(
     return root
 
 
+def acquisition_root(
+    local_path: str,
+    base_save_directory: str,
+    date_folder: str,
+    user_name: Optional[str] = None,
+) -> Path:
+    """The folder a reorganized acquisition lands in: the parent of X..._Y....
+
+    The reorganizer and the acquisition manifest both need this path, and they
+    used to build it separately -- which is exactly how a tree ends up with the
+    manifest written one level away from the tiles it describes.
+
+    Args:
+        local_path: Local mount of the server's save drive, e.g. ``D:/CTLSM1``.
+        base_save_directory: The run's save directory name.
+        date_folder: Date folder as recorded in the tile folder mapping.
+        user_name: Operator as they typed it, or None for no user folder.
+
+    Returns:
+        ``<local>/<user>/<base>/<date>``, with the user level omitted entirely
+        when no operator was named.
+    """
+    root = Path(local_path)
+    folder = folder_name_for(user_name)
+    if folder:
+        root = root / folder
+    return root / base_save_directory / date_folder
+
+
 def reorganize_tile_folders(
     local_path: str,
     base_save_directory: str,
     tile_folder_mapping: Dict[str, Tuple[str, str]],
     local_access_enabled: bool = False,
+    user_name: Optional[str] = None,
 ) -> ReorganizeResult:
     """Reorganize flattened folders into nested structure for MIP Overview compatibility.
 
@@ -172,6 +213,9 @@ def reorganize_tile_folders(
         base_save_directory: Base save directory name
         tile_folder_mapping: Maps flattened_name -> (date_folder, tile_folder)
         local_access_enabled: Whether local access was enabled in save settings
+        user_name: Operator named at startup, or None for no user folder. The
+            default keeps the pre-existing layout byte for byte, so a facility
+            that has not adopted user folders sees no change.
 
     Returns:
         A :class:`ReorganizeResult`. It is falsey when nothing moved, so the
@@ -209,8 +253,13 @@ def reorganize_tile_folders(
             if not src_folder.is_dir():
                 continue
 
-            # Target nested structure: base/date/tile/
-            dest_folder = local_base / base_save_directory / date_folder / tile_folder
+            # Target nested structure: [user/]base/date/tile/
+            dest_folder = (
+                acquisition_root(
+                    local_path, base_save_directory, date_folder, user_name
+                )
+                / tile_folder
+            )
 
             try:
                 dest_folder.mkdir(parents=True, exist_ok=True)
@@ -238,8 +287,12 @@ def reorganize_tile_folders(
                         f"Could not remove source folder (not empty): {src_folder}"
                     )
 
+                # Log the path actually written, not a recomposed one: with a
+                # user folder in play those two can disagree, and the log is
+                # where someone looks when the data is "missing".
                 logger.info(
-                    f"Reorganized: {src_folder.name} -> {base_save_directory}/{date_folder}/{tile_folder}/ ({items_moved} items)"
+                    f"Reorganized: {src_folder.name} -> {dest_folder} "
+                    f"({items_moved} items)"
                 )
                 result.moved += 1
 

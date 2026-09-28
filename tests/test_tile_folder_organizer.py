@@ -31,6 +31,56 @@ def _make_server_folder(root: Path, timestamp: str, flat_name: str, files=("a.ti
     return folder
 
 
+class TestUserFolder:
+    """The user name adds exactly one level, and only when there is a name."""
+
+    def _run(self, tmp_path, user_name):
+        flat = "BrainSingleChannel2_2026-08-05_X4.47_Y17.17"
+        _make_server_folder(tmp_path, "20260805_011617", flat, ("t.raw",))
+        return reorganize_tile_folders(
+            str(tmp_path),
+            "BrainSingleChannel2",
+            {flat: ("2026-08-05", "X4.47_Y17.17")},
+            local_access_enabled=True,
+            user_name=user_name,
+        )
+
+    def test_data_lands_under_the_user_folder(self, tmp_path):
+        result = self._run(tmp_path, "Sam Nelson")
+        dest = (
+            tmp_path
+            / "Sam_Nelson"
+            / "BrainSingleChannel2"
+            / "2026-08-05"
+            / "X4.47_Y17.17"
+        )
+        assert result.moved == 1
+        assert (dest / "t.raw").exists()
+
+    def test_no_user_reproduces_the_previous_layout(self, tmp_path):
+        # The regression that matters: a site that never names a user must see
+        # the same tree it saw before this feature existed.
+        result = self._run(tmp_path, None)
+        assert result.moved == 1
+        dest = tmp_path / "BrainSingleChannel2" / "2026-08-05" / "X4.47_Y17.17"
+        assert (dest / "t.raw").exists()
+        assert not (tmp_path / "None").exists()
+
+    def test_the_default_is_no_user(self, tmp_path):
+        # Callers that were never updated must not gain a folder.
+        flat = "S_2026-08-05_X1_Y1"
+        _make_server_folder(tmp_path, "20260805_011617", flat, ("t.raw",))
+        reorganize_tile_folders(
+            str(tmp_path), "S", {flat: ("2026-08-05", "X1_Y1")}, True
+        )
+        assert (tmp_path / "S" / "2026-08-05" / "X1_Y1" / "t.raw").exists()
+
+    def test_a_name_cannot_add_more_than_one_level(self, tmp_path):
+        result = self._run(tmp_path, "a/b/c")
+        assert result.moved == 1
+        assert (tmp_path / "abc" / "BrainSingleChannel2").is_dir()
+
+
 class TestReorganize:
     def test_moves_flat_folders_into_nested_layout(self, tmp_path):
         flat = "BrainSingleChannel2_2026-08-05_X4.47_Y17.17"

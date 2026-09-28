@@ -879,6 +879,9 @@ class FlamingoApplication(QObject):
         # Setup all dependencies
         self.setup_dependencies()
 
+        # Ask who is at the microscope before anything can be saved.
+        self.prompt_for_user_name()
+
         # Create and show main window
         self.create_main_window()
         self.main_window.show()
@@ -892,6 +895,40 @@ class FlamingoApplication(QObject):
         self.shutdown()
 
         return exit_code
+
+    def prompt_for_user_name(self) -> None:
+        """Ask who is collecting, and remember the answer for next time.
+
+        Runs after dependencies exist (the answer is stored through the
+        configuration service) and before the main window is shown, so it is
+        the first thing the operator sees and no acquisition can start without
+        the question having been asked.
+
+        Never fatal. A microscope that will not start because it could not ask
+        for a name is a far worse failure than a run filed in the wrong folder,
+        so any problem here leaves the name unset -- which is exactly the
+        pre-existing layout.
+        """
+        config_service = getattr(self, "config_service", None)
+        if config_service is None:
+            self.logger.warning("No configuration service - skipping user name prompt")
+            return
+
+        try:
+            from py2flamingo.views.dialogs.user_name_dialog import UserNameDialog
+
+            name = UserNameDialog.ask(
+                history=config_service.get_user_name_history(),
+                current=config_service.get_user_name(),
+            )
+            config_service.set_user_name(name)
+            self.logger.info(
+                f"Session user: {name!r}"
+                if name
+                else "Session user: none (no user folder)"
+            )
+        except Exception as e:
+            self.logger.error(f"Could not prompt for user name: {e}", exc_info=True)
 
     def shutdown(self):
         """Clean up resources before application exit.
