@@ -27,3 +27,11 @@ src/py2flamingo/views/workflow_view.py::WorkflowView.tiling_panel
 src/py2flamingo/views/workflow_view.py::WorkflowView.timelapse_panel
 src/py2flamingo/views/workflow_view.py::WorkflowView.zstack_panel
 src/py2flamingo/visualization/dual_resolution_storage.py::DualResolutionConfig.from_settings
+# ast.NodeVisitor dispatches these by name (visit_<NodeType>), so no static
+# caller exists. They are live: tests/test_python_function_node.py proves each
+# one rejects what it is there to reject.
+src/py2flamingo/pipeline/models/python_function.py::_Validator.visit_Attribute
+src/py2flamingo/pipeline/models/python_function.py::_Validator.visit_Global
+src/py2flamingo/pipeline/models/python_function.py::_Validator.visit_ImportFrom
+src/py2flamingo/pipeline/models/python_function.py::_Validator.visit_Name
+src/py2flamingo/pipeline/models/python_function.py::_Validator.visit_Nonlocal

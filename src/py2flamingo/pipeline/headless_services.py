@@ -41,6 +41,9 @@ from py2flamingo.pipeline.engine.node_runners.overview_analysis_runner import (
 from py2flamingo.pipeline.engine.node_runners.post_processing_runner import (
     PostProcessingRunner,
 )
+from py2flamingo.pipeline.engine.node_runners.python_function_runner import (
+    PythonFunctionRunner,
+)
 from py2flamingo.pipeline.engine.node_runners.sample_view_data_runner import (
     SampleViewDataRunner,
 )
@@ -312,6 +315,7 @@ def _build_runners(
         NodeType.OVERVIEW_ANALYSIS: OverviewAnalysisRunner(),
         NodeType.POST_PROCESSING: PostProcessingRunner(),
         NodeType.TIMED_LOOP: TimedLoopRunner(),
+        NodeType.PYTHON_FUNCTION: PythonFunctionRunner(),
     }
     for nt in skip_set:
         runners[nt] = NoOpRunner()

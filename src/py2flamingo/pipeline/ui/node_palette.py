@@ -26,6 +26,7 @@ _NODE_DESCRIPTIONS = {
     NodeType.OVERVIEW_ANALYSIS: "Analyze 2D overview image to detect sample tiles",
     NodeType.POST_PROCESSING: "Stitch + process raw tiles (destripe, fuse, deconvolve, stitch)",
     NodeType.TIMED_LOOP: "Repeat body N times on a timed schedule (timelapse, monitoring)",
+    NodeType.PYTHON_FUNCTION: "Write your own step in Python (custom thresholds, true/false tests)",
 }
 
 MIME_TYPE = "application/x-pipeline-node-type"

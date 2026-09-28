@@ -31,6 +31,7 @@ class NodeType(Enum):
     OVERVIEW_ANALYSIS = auto()
     POST_PROCESSING = auto()
     TIMED_LOOP = auto()
+    PYTHON_FUNCTION = auto()
 
 
 class PortDirection(Enum):
@@ -49,6 +50,7 @@ NODE_COLORS: Dict[NodeType, str] = {
     NodeType.OVERVIEW_ANALYSIS: "#8d6e63",  # Brown — earth tone for image analysis
     NodeType.POST_PROCESSING: "#e57373",  # Red — post-acquisition processing
     NodeType.TIMED_LOOP: "#7e57c2",  # Deep purple — time-based iteration
+    NodeType.PYTHON_FUNCTION: "#78909c",  # Blue grey — operator-written code
 }
 
 
@@ -241,6 +243,28 @@ def create_default_ports(node_type: NodeType) -> Tuple[List[Port], List[Port]]:
         outputs = [
             _make_port("iteration", PortType.SCALAR, out),
             _make_port("elapsed_seconds", PortType.SCALAR, out),
+            _make_port("completed", PortType.TRIGGER, out),
+        ]
+
+    elif node_type == NodeType.PYTHON_FUNCTION:
+        # Deliberately the union of what THRESHOLD and CONDITIONAL offer: the
+        # node exists for the analyses we did not anticipate, so which outputs
+        # a given body uses is not knowable here. Unused ports stay unconnected
+        # and cost nothing.
+        inputs = [
+            _make_port("volume", PortType.VOLUME, inp),
+            _make_port("value", PortType.ANY, inp),
+            _make_port("objects", PortType.OBJECT_LIST, inp),
+            _make_port("trigger", PortType.TRIGGER, inp),
+        ]
+        outputs = [
+            _make_port("value", PortType.SCALAR, out),
+            _make_port("boolean", PortType.BOOLEAN, out),
+            _make_port("mask", PortType.VOLUME, out),
+            _make_port("objects", PortType.OBJECT_LIST, out),
+            _make_port("result", PortType.ANY, out),
+            _make_port("true_branch", PortType.TRIGGER, out),
+            _make_port("false_branch", PortType.TRIGGER, out),
             _make_port("completed", PortType.TRIGGER, out),
         ]
 

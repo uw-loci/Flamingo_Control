@@ -47,6 +47,7 @@ NODE_TYPE_TO_RUNNER_FILE = {
     NodeType.OVERVIEW_ANALYSIS: "overview_analysis_runner.py",
     NodeType.POST_PROCESSING: "post_processing_runner.py",
     NodeType.TIMED_LOOP: "timed_loop_runner.py",
+    NodeType.PYTHON_FUNCTION: "python_function_runner.py",
 }
 
 # Matches static-key gets via ``node.config.get("name")``, ``config.get("name")``,

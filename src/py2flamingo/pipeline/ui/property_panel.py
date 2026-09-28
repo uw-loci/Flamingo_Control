@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -28,6 +29,13 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline, PipelineNode
+from py2flamingo.pipeline.models.python_function import (
+    ALLOWED_LIBRARIES,
+    DEFAULT_CODE,
+    RESULT_KEYS,
+    validate_code,
+)
+from py2flamingo.views.colors import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +57,12 @@ LEGACY_KEYS: Dict[NodeType, set] = {
     },
     NodeType.WORKFLOW: {
         "config_mode",  # legacy: only honored to warn-and-skip
+    },
+    NodeType.PYTHON_FUNCTION: {
+        # Passed to the body as `params`. No widget yet: a node's own knobs are
+        # only worth a form once someone wants to reuse one body with two
+        # settings, and until then the values belong in the code.
+        "params",
     },
 }
 
@@ -76,6 +90,9 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
         ("default_threshold", "Default Threshold", "int", 100),
     ],
     NodeType.FOR_EACH: [],
+    NodeType.PYTHON_FUNCTION: [
+        ("code", "Code", "code", DEFAULT_CODE),
+    ],
     NodeType.CONDITIONAL: [
         (
             "comparison_op",
@@ -335,6 +352,54 @@ class PropertyPanel(QWidget):
         if node.node_type == NodeType.WORKFLOW:
             self._add_workflow_configure_button(node)
 
+    def _create_code_widget(self, value, key: str) -> QWidget:
+        """A code box that says what is available and what is wrong, as you type.
+
+        The validation label is the point. Without it the first sign of a typo
+        is a pipeline failing partway through a run, which on this instrument
+        can mean a stack that has already started.
+        """
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        available = QLabel(
+            "Available: " + ", ".join(sorted(ALLOWED_LIBRARIES)) + ", log()\n"
+            "Inputs: volume, value, objects, params\n"
+            "Return a value, or a dict of: " + ", ".join(RESULT_KEYS)
+        )
+        available.setWordWrap(True)
+        available.setStyleSheet("color: gray; font-size: 8pt;")
+        layout.addWidget(available)
+
+        editor = QPlainTextEdit(str(value))
+        editor.setTabChangesFocus(False)
+        editor.setMinimumHeight(180)
+        font = editor.font()
+        font.setFamily("Courier New")
+        font.setStyleHint(font.Monospace)
+        editor.setFont(font)
+        layout.addWidget(editor)
+
+        errors = QLabel()
+        errors.setWordWrap(True)
+        layout.addWidget(errors)
+
+        def on_changed():
+            text = editor.toPlainText()
+            self._on_config_changed(key, text)
+            problems = validate_code(text)
+            if problems:
+                errors.setText("\n".join(str(e) for e in problems[:5]))
+                errors.setStyleSheet(f"color: {ERROR_COLOR}; font-size: 9pt;")
+            else:
+                errors.setText("Code is valid.")
+                errors.setStyleSheet("color: gray; font-size: 9pt;")
+
+        editor.textChanged.connect(on_changed)
+        on_changed()
+        return container
+
     def _create_widget(self, widget_type: str, value, options, key: str) -> QWidget:
         """Create an appropriate input widget."""
         if widget_type == "str":
@@ -374,6 +439,9 @@ class PropertyPanel(QWidget):
                     w.setCurrentIndex(idx)
             w.currentTextChanged.connect(lambda v, k=key: self._on_config_changed(k, v))
             return w
+
+        elif widget_type == "code":
+            return self._create_code_widget(value, key)
 
         elif widget_type == "file":
             container = QWidget()
