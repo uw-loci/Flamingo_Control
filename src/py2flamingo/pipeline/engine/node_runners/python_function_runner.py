@@ -4,10 +4,17 @@ Config:
     code: str — the function body, as typed in the node's editor
 
 Inputs:
-    volume  — VOLUME      (available in the body as ``volume``)
+    volume  — VOLUME      (body gets ``volume`` AND ``volumes``, see below)
     value   — ANY         (available as ``value``)
     objects — OBJECT_LIST (available as ``objects``)
     trigger — TRIGGER     (execution order only)
+
+A VOLUME port may carry a single array or a ``{channel_id: array}`` dict --
+``SAMPLE_VIEW_DATA`` emits the dict, ``--input`` with one channel emits an
+array, and ``ThresholdRunner`` handles both at ``threshold_runner.py:85``.
+Passing that straight through would make every body guess, so this runner
+normalizes: ``volume`` is always one 3-D array (the lowest channel id when a
+dict arrives) and ``volumes`` is always the full mapping.
 
 Outputs:
     value / boolean / mask / objects / result — whatever the body returned
@@ -30,6 +37,29 @@ from py2flamingo.pipeline.models.python_function import NodeCodeError, run_code
 logger = logging.getLogger(__name__)
 
 
+def _normalize_volume_input(raw):
+    """Split a VOLUME port value into (one array, {channel: array}).
+
+    Returns ``(None, {})`` for an unconnected port so a body can test
+    ``volume is None`` instead of catching a TypeError. The single array is the
+    LOWEST channel id rather than whatever the dict happens to iterate first,
+    so the same pipeline picks the same channel on every run.
+    """
+    if raw is None:
+        return None, {}
+    if isinstance(raw, dict):
+        if not raw:
+            return None, {}
+        try:
+            first = min(raw)
+        except TypeError:
+            # Mixed or unorderable keys: fall back to insertion order rather
+            # than failing, and let the body use `volumes` if it cares.
+            first = next(iter(raw))
+        return raw[first], dict(raw)
+    return raw, {0: raw}
+
+
 class PythonFunctionRunner(AbstractNodeRunner):
     """Runs the node's code and maps what it returned onto the output ports."""
 
@@ -48,10 +78,15 @@ class PythonFunctionRunner(AbstractNodeRunner):
     ) -> None:
         code = (node.config or {}).get("code", "")
 
+        volume, volumes = _normalize_volume_input(
+            self._get_input(node, pipeline, context, "volume")
+        )
+
         try:
             result = run_code(
                 code,
-                volume=self._get_input(node, pipeline, context, "volume"),
+                volume=volume,
+                volumes=volumes,
                 value=self._get_input(node, pipeline, context, "value"),
                 objects=self._get_input(node, pipeline, context, "objects"),
                 params=dict(node.config or {}).get("params") or {},

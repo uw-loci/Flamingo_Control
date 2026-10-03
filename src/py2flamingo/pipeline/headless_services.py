@@ -328,12 +328,23 @@ def _build_runners(
 
 
 def _ensure_qapplication():
-    """Construct a ``QApplication`` if none exists.
+    """Construct a ``QApplication`` if none exists, without needing a display.
 
     ``pyqtSignal`` *class* attributes need a ``QApplication`` instance to exist
     at the time their owning class is constructed; signals fire synchronously
     to connected slots without an event loop, so we never call ``exec_()``.
+
+    The platform is forced to ``offscreen`` when nothing has chosen one,
+    because ``QApplication([])`` otherwise tries to open an X11 connection and
+    aborts the process -- which made the *headless* entry point unusable over
+    SSH, in CI, and to an agent, the three places it exists for. An explicit
+    ``QT_QPA_PLATFORM`` in the environment is honoured, so a caller that does
+    have a display and wants it keeps it.
     """
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
     from PyQt5.QtWidgets import QApplication
 
     return QApplication.instance() or QApplication([])

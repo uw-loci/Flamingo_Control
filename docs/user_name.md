@@ -73,7 +73,7 @@ anywhere.
 
 | Concern | Location |
 |---|---|
-| Name rules (sanitising, history, None) | `src/py2flamingo/models/user_name.py` |
+| Name rules (sanitizing, history, None) | `src/py2flamingo/models/user_name.py` |
 | Startup dialog | `src/py2flamingo/views/dialogs/user_name_dialog.py` |
 | Prompt at launch | `FlamingoApplication.prompt_for_user_name` |
 | Storage | `ConfigurationService.get_user_name` / `set_user_name` |

@@ -17,7 +17,7 @@ Two rules are worth stating outright, because both are load-bearing:
   not adopted the convention yet must see byte-identical paths to before.
 * **The stored name and the folder name are different strings.** What the
   operator typed is kept verbatim for display and for the acquisition manifest;
-  :func:`folder_name_for` is what may touch a filesystem. Sanitising on the way
+  :func:`folder_name_for` is what may touch a filesystem. Sanitizing on the way
   in would quietly rewrite someone's name in the UI and in the history list.
 """
 
@@ -83,7 +83,7 @@ def _to_ascii(text: str) -> str:
 def folder_name_for(name: Optional[str]) -> Optional[str]:
     """The directory name for a user, or ``None`` when no folder should exist.
 
-    ``None`` in, ``None`` out -- and also ``None`` for any name that sanitises
+    ``None`` in, ``None`` out -- and also ``None`` for any name that sanitizes
     away to nothing, because a folder named after a punctuation-only string is
     worse than no folder at all.
 
@@ -111,7 +111,7 @@ def folder_name_for(name: Optional[str]) -> Optional[str]:
         return None
     if folder.upper() in _RESERVED_NAMES:
         # Suffixing beats rejecting: the operator gets their run, and the name
-        # is still recognisably theirs.
+        # is still recognizably theirs.
         folder = f"{folder}_user"
     return folder
 

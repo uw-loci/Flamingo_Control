@@ -365,7 +365,8 @@ class PropertyPanel(QWidget):
 
         available = QLabel(
             "Available: " + ", ".join(sorted(ALLOWED_LIBRARIES)) + ", log()\n"
-            "Inputs: volume, value, objects, params\n"
+            "Inputs: volume (3-D array), volumes ({channel: array}), "
+            "value, objects, params\n"
             "Return a value, or a dict of: " + ", ".join(RESULT_KEYS)
         )
         available.setWordWrap(True)

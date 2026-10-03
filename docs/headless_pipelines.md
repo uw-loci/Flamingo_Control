@@ -33,7 +33,16 @@ py2flamingo-pipeline list
 
 # Run a pipeline on a data file
 py2flamingo-pipeline run my.json --input volume.ome.tif --output-json out.json
+
+# Pick a timepoint from a timelapse (volume ports are 3-D, so one is chosen)
+py2flamingo-pipeline run my.json --input timelapse.tif --timepoint 5
 ```
+
+**No display required.** The headless entry point selects Qt's `offscreen`
+platform when nothing else is set, so this works over SSH, in CI, and from an
+agent. A `QApplication` still has to exist — `pyqtSignal` needs one — but no
+window is ever opened and no event loop runs. Setting `QT_QPA_PLATFORM`
+yourself overrides the choice.
 
 ## End-to-end with a collagen phantom
 
@@ -53,10 +62,25 @@ py2flamingo-pipeline run /tmp/p.json --input /tmp/ph/wave.ome.tif \
 The `run` output lists each node's state and output port values, e.g.:
 
 ```
-Loaded wave.ome.tif → ch0: shape=(1, 128, 128) dtype=uint8
+Loaded wave.ome.tif → ch0: shape=(64, 128, 128) dtype=uint8
 Skipping (no-op): WORKFLOW
 [Threshold] state=completed objects=<list len=5> mask=<ndarray ...> count=5
 ```
+
+### Axis metadata matters — check the shape it prints
+
+A volume port is 3-D, so anything with more axes gets reduced, and **every
+reduction is logged**. Read the `shape=` it prints before trusting a result:
+
+| What you see | What it means |
+| --- | --- |
+| `Reducing T axis (10 points) to index 0` | A timelapse; only that one timepoint was analyzed. Choose with `--timepoint`. |
+| `Reading unlabelled axis as Z (QYX -> ZYX)` | The file carries no ImageJ/OME axis metadata, so `tifffile` could not name its first axis. It is read as Z, which is the only sensible reading of a plain stack. |
+| `loaded as N channels of a single Z plane each` | Almost certainly a Z stack whose axis metadata is missing, read as N channels. Re-save with ImageJ or OME axis metadata, or pass `--channel-axis`. **Nothing is guessed here** — the load is left as-is and only warned about, because N real channels of one plane is a legitimate acquisition. |
+
+A `shape=(1, Y, X)` from a file you know is a stack is the signature of lost
+planes: every object volume, centroid and count downstream would be computed on
+one slice.
 
 ### Input formats (`--input`)
 
@@ -65,8 +89,8 @@ Skipping (no-op): WORKFLOW
 - `.npy` — a single numpy array.
 - `.tif` / `.tiff` / `.ome.tif(f)` — read with `tifffile`; channel/spatial axes
   are inferred from the series `axes` string. Phantom ImageJ hyperstacks use
-  `TZCYX` (channel 0 = collagen, 1 = tumor); the leading `T` is reduced to index
-  0 and each channel becomes its own `(Z,Y,X)` volume.
+  `TZCYX` (channel 0 = collagen, 1 = tumor); each channel becomes its own
+  `(Z,Y,X)` volume and the `T` axis is reduced to `--timepoint` (default 0).
 - `.zarr` / `.ome.zarr` (a directory) — opened via the same helpers the 3-D
   viewer uses (`session_manager._find_zarr_array`), so ngff / sharded stores
   resolve identically to the GUI **Load Stitched** path.

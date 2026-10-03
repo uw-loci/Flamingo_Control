@@ -139,6 +139,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override channel-axis index when it can't be inferred from --input",
     )
     run_p.add_argument(
+        "--timepoint",
+        type=int,
+        default=0,
+        help=(
+            "Timepoint to analyse from a timelapse (default 0). Volume ports "
+            "are 3-D, so a 4-D/5-D input is reduced to one point; a reduction "
+            "is always logged."
+        ),
+    )
+    run_p.add_argument(
         "--skip-tag",
         type=str,
         default=None,
@@ -347,6 +357,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 args.input,
                 channel=args.volume_channel,
                 channel_axis=args.channel_axis,
+                timepoint=args.timepoint,
             )
         except (ValueError, FileNotFoundError, ImportError) as e:
             print(f"error: could not load --input: {e}", file=sys.stderr)

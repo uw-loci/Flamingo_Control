@@ -35,7 +35,7 @@ class TestNoUserIsARealAnswer:
         assert folder_name_for(empty) is None
         assert normalize_stored_name(empty) is None
 
-    def test_a_name_that_sanitises_away_is_also_no_folder(self):
+    def test_a_name_that_sanitizes_away_is_also_no_folder(self):
         # Better no folder than one called "" or "." next to the real data.
         assert folder_name_for("...") is None
         assert folder_name_for("///") is None
@@ -89,7 +89,7 @@ class TestTheFolderNameIsSafeToWrite:
 
 class TestTheStoredNameIsNotTheFolderName:
     def test_the_typed_spelling_survives_for_display(self):
-        # Sanitising on the way in would rewrite someone's name in the UI.
+        # Sanitizing on the way in would rewrite someone's name in the UI.
         assert normalize_stored_name("Müller") == "Müller"
         assert folder_name_for("Müller") == "Muller"
 

@@ -1,6 +1,6 @@
 # Pipeline: Python Function node
 
-A node you fill in yourself, for the analyses the built-in nodes don't cover —
+A node you fill in yourself, for the analyzes the built-in nodes don't cover —
 a thresholding rule nobody anticipated, a "is this tile worth imaging" test, a
 scalar derived from a volume in whatever way this week's science needs.
 
@@ -37,8 +37,24 @@ nothing to import, and nothing else to reach:
 | `math` | math |
 | `log(...)` | writes to the run log |
 
-**Inputs** are the node's input ports, by name: `volume`, `value`, `objects`,
-and `params` (the node's own config dict). An unconnected input is `None`.
+**Inputs** are the node's input ports, by name:
+
+| Name | Is |
+|---|---|
+| `volume` | one 3-D `(Z, Y, X)` array |
+| `volumes` | every channel, as `{channel_id: array}` |
+| `value` | whatever is wired to the `value` port |
+| `objects` | whatever is wired to the `objects` port |
+| `params` | the node's own config dict |
+
+An unconnected input is `None` (and `volumes` is `{}`).
+
+**Why both `volume` and `volumes`:** a VOLUME port can carry either a single
+array or a channel dict depending on what is upstream — a Sample View Data node
+emits the dict, a single-channel `--input` emits an array. Rather than make
+every body guess, the node normalizes: `volume` is always one array (the lowest
+channel id when a dict arrives), and `volumes` is always the full mapping for
+when you need the other channels.
 
 ## What you return
 

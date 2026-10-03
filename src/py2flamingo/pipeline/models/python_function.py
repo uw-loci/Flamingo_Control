@@ -1,6 +1,6 @@
 """Run a short piece of operator-written Python as a pipeline step.
 
-The pipeline's built-in nodes cover the analyses we anticipated. This node
+The pipeline's built-in nodes cover the analyzes we anticipated. This node
 covers the ones we did not: a thresholding rule nobody asked for yet, a
 "is this tile worth imaging" test, a scalar derived from a volume in whatever
 way the science needs this week. Writing it here beats adding a node type for
@@ -153,7 +153,8 @@ RESULT_KEYS = ("value", "boolean", "mask", "objects", "result")
 #: the signature, the available names and the return shape in one read, and it
 #: runs as-is so a new node can be wired up before it is written.
 DEFAULT_CODE = """\
-# volume, value, objects, params are the inputs; log() writes to the run log.
+# Inputs: volume (one 3-D array), volumes ({channel: array}), value,
+# objects, params.  log() writes to the run log.
 # Available: np, ndi, filters, measure, morphology, exposure, math
 
 threshold = filters.threshold_otsu(volume)
@@ -186,7 +187,7 @@ class NodeCodeError(Exception):
 
 @dataclass
 class NodeResult:
-    """What a body returned, normalised into the node's output ports.
+    """What a body returned, normalized into the node's output ports.
 
     Attributes:
         value: Scalar output.
@@ -315,7 +316,9 @@ def validate_code(code: str) -> List[NodeCodeError]:
 def _wrap(code: str) -> str:
     """Put the body inside a function so ``return`` means what it looks like."""
     body = "\n".join("    " + line for line in code.splitlines())
-    return f"def {_WRAPPER_NAME}(volume, value, objects, params, log):\n{body}\n"
+    return (
+        f"def {_WRAPPER_NAME}(volume, volumes, value, objects, params, log):\n{body}\n"
+    )
 
 
 def _as_bool(returned: Any) -> Optional[bool]:
@@ -340,7 +343,7 @@ def _as_bool(returned: Any) -> Optional[bool]:
     return None
 
 
-def _normalise(returned: Any, log_lines: List[str]) -> NodeResult:
+def _normalize(returned: Any, log_lines: List[str]) -> NodeResult:
     """Turn what the body returned into typed outputs.
 
     A dict maps onto the named ports; anything else is the untyped ``result``,
@@ -373,6 +376,7 @@ def run_code(
     code: str,
     *,
     volume: Any = None,
+    volumes: Optional[Dict[int, Any]] = None,
     value: Any = None,
     objects: Any = None,
     params: Optional[Dict[str, Any]] = None,
@@ -382,7 +386,12 @@ def run_code(
 
     Args:
         code: The body the operator typed.
-        volume: Value on the node's ``volume`` input.
+        volume: A single 3-D ``(Z, Y, X)`` array for the body to work on.
+        volumes: Every channel as ``{channel_id: array}``. A VOLUME port may
+            carry either one array or a channel dict (see
+            ``threshold_runner.py:85``), so the runner normalizes both and the
+            body gets one of each: ``volume`` for the common single-channel
+            case, ``volumes`` when it needs the others.
         value: Value on the node's ``value`` input.
         objects: Value on the node's ``objects`` input.
         params: The node's own parameters, as a plain dict.
@@ -390,7 +399,7 @@ def run_code(
             loop cannot exhaust memory.
 
     Returns:
-        The normalised outputs.
+        The normalized outputs.
 
     Raises:
         NodeCodeError: If the body is rejected, or raises while running.
@@ -413,13 +422,15 @@ def run_code(
 
     try:
         exec(compile(_wrap(code), "<node>", "exec"), namespace)  # noqa: S102
-        returned = namespace[_WRAPPER_NAME](volume, value, objects, params or {}, log)
+        returned = namespace[_WRAPPER_NAME](
+            volume, dict(volumes or {}), value, objects, params or {}, log
+        )
     except NodeCodeError:
         raise
     except Exception as e:
         raise NodeCodeError(f"{type(e).__name__}: {e}", _failing_line(e)) from e
 
-    return _normalise(returned, log_lines)
+    return _normalize(returned, log_lines)
 
 
 def _failing_line(exc: BaseException) -> Optional[int]:

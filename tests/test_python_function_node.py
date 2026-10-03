@@ -217,3 +217,61 @@ class TestTheNodeIsWiredUp:
             / "src/py2flamingo/pipeline/ui/node_palette.py"
         ).read_text()
         assert "NodeType.PYTHON_FUNCTION:" in source
+
+
+class TestTheVolumePortCarriesEitherShape:
+    """A VOLUME port may hold one array OR a {channel: array} dict.
+
+    SAMPLE_VIEW_DATA emits the dict, a single-channel ``--input`` emits an
+    array, and ThresholdRunner handles both (threshold_runner.py:85). Passing
+    the raw value through made ``volume > 200`` raise
+    ``TypeError: '>' not supported between 'dict' and 'int'`` for any body fed
+    by a Sample View Data node -- which is the first thing anyone wires up.
+    """
+
+    @staticmethod
+    def _normalize(raw):
+        from py2flamingo.pipeline.engine.node_runners.python_function_runner import (
+            _normalize_volume_input,
+        )
+
+        return _normalize_volume_input(raw)
+
+    def test_a_bare_array_is_passed_through_and_also_offered_as_channel_zero(
+        self, volume
+    ):
+        one, many = self._normalize(volume)
+        assert one is volume
+        assert many == {0: volume}
+
+    def test_a_channel_dict_yields_an_array_for_volume(self, volume):
+        one, many = self._normalize({0: volume, 1: volume * 2})
+        assert one is volume
+        assert set(many) == {0, 1}
+
+    def test_the_chosen_channel_is_the_lowest_id_not_insertion_order(self, volume):
+        # Same pipeline must pick the same channel on every run.
+        hi, lo = volume * 2, volume
+        one, _ = self._normalize({3: hi, 1: lo})
+        assert one is lo
+
+    def test_an_unconnected_port_is_none_and_an_empty_mapping(self):
+        # So a body can test `volume is None` rather than catch a TypeError.
+        assert self._normalize(None) == (None, {})
+        assert self._normalize({}) == (None, {})
+
+    def test_a_body_can_reach_the_other_channels(self, volume):
+        from py2flamingo.pipeline.models.python_function import run_code
+
+        r = run_code(
+            "return {'value': float(len(volumes))}",
+            volume=volume,
+            volumes={0: volume, 1: volume},
+        )
+        assert r.value == 2.0
+
+    def test_volumes_defaults_to_empty_rather_than_none(self, volume):
+        from py2flamingo.pipeline.models.python_function import run_code
+
+        # An unset `volumes` must still be iterable in a body.
+        assert run_code("return float(len(volumes))", volume=volume).result == 0.0
