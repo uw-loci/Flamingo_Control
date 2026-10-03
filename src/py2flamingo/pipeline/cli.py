@@ -86,6 +86,7 @@ _NODE_TYPE_TAGS: Dict[str, NodeType] = {
     "overview_analysis": NodeType.OVERVIEW_ANALYSIS,
     "post_processing": NodeType.POST_PROCESSING,
     "timed_loop": NodeType.TIMED_LOOP,
+    "python_function": NodeType.PYTHON_FUNCTION,
 }
 
 
@@ -577,9 +578,20 @@ def _cmd_collect(args: argparse.Namespace) -> int:
     print(f"Wrote raw acquisition folder: {acq}")
     print("\nStitch it, then analyze the result:")
     print(f"  python -m py2flamingo.stitching {acq} --output-format ome-zarr-sharded")
+    # Neither path can be printed literally: the stitcher names its output
+    # after the acquisition folder and writes it INSIDE that folder, and raw
+    # mode emits no pipeline.json to point at. Printing a wrong path is worse
+    # than printing the step that produces the right one.
+    print("  # a synthetic acquisition has no microscope name, so name an")
+    print("  # orientation explicitly -- the stitcher will not guess:")
     print(
-        f"  py2flamingo-pipeline run <pipeline.json> "
-        f"--input {acq}_stitched/stitched.ome.zarr"
+        f"  python -m py2flamingo.stitching {acq} "
+        f"--output-format ome-zarr-sharded --tile-orientation identity"
+    )
+    print("  py2flamingo-pipeline create --template threshold --out p.json")
+    print(
+        "  py2flamingo-pipeline run p.json --input "
+        "<the 'Stitched output:' path the stitcher logs>"
     )
     return 0
 

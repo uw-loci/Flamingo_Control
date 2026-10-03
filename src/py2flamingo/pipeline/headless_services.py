@@ -6,7 +6,7 @@ test suite, or the bundled CLI. The two entry points are:
     services = build_headless_services(volumes={0: vol}, ...)
     context  = run_pipeline_headless(pipeline, services=services)
 
-``run_pipeline_headless`` builds the same 9-runner registry that
+``run_pipeline_headless`` builds the same 10-runner registry that
 ``PipelineController._execute_pipeline`` (``pipeline_controller.py:89-155``)
 constructs in the GUI path. It then calls ``PipelineExecutor.run()``
 synchronously on the calling thread — ``PipelineExecutor`` is a ``QThread``
@@ -299,7 +299,7 @@ def build_headless_services(
 def _build_runners(
     skip_node_types: Optional[Iterable[NodeType]] = None,
 ) -> Dict[NodeType, AbstractNodeRunner]:
-    """Build the same 9-runner registry the controller does, with optional
+    """Build the same 10-runner registry the controller does, with optional
     no-op overrides.
 
     Mirrors ``pipeline_controller.py:122-133``.

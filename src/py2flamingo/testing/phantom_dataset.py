@@ -404,6 +404,36 @@ def write_raw_acquisition(
 # ---------------------------------------------------------------------------
 
 
+def _retarget_thresholds(pipeline, arr) -> None:
+    """Point every THRESHOLD node in ``pipeline`` at this phantom's intensities.
+
+    The floor is read from the data rather than passed in, because a phantom's
+    background is flat by construction, so ``min`` IS the background and the
+    two cannot drift apart. The threshold sits a quarter of the way from there
+    to the brightest voxel: high enough that flat background fails, low enough
+    that dim fiber edges still pass.
+
+    A pipeline with no THRESHOLD node is left alone.
+    """
+    from py2flamingo.pipeline.models.pipeline import NodeType
+
+    floor = float(np.min(arr))
+    peak = float(np.max(arr))
+    threshold = int(floor + 0.25 * max(peak - floor, 1.0))
+    n_channels = arr.shape[0] if arr.ndim == 4 else 1
+    for node in pipeline.nodes.values():
+        if node.node_type is NodeType.THRESHOLD:
+            node.config["channel_thresholds"] = {
+                c: threshold for c in range(n_channels)
+            }
+    logger.info(
+        "Phantom thresholds set to %d (background %.0f, peak %.0f)",
+        threshold,
+        floor,
+        peak,
+    )
+
+
 def write_stitched_dataset(
     out_dir,
     *,
@@ -453,6 +483,12 @@ def write_stitched_dataset(
     )
 
     pipeline = make_template(pipeline_template)
+    # The template's default threshold is tuned for 8-bit phantoms on a near-
+    # black background. This phantom is uint16 on a flat `background` floor, so
+    # that default passes EVERY voxel and the quickstart reports one "object"
+    # covering the whole volume -- a result that looks like success. Pin the
+    # threshold to the data actually written instead.
+    _retarget_thresholds(pipeline, arr)
     pipe_path = out_dir / "pipeline.json"
     pipe_path.write_text(json.dumps(pipeline.to_dict(), indent=2))
 

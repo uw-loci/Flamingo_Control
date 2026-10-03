@@ -62,10 +62,17 @@ py2flamingo-pipeline run /tmp/p.json --input /tmp/ph/wave.ome.tif \
 The `run` output lists each node's state and output port values, e.g.:
 
 ```
-Loaded wave.ome.tif → ch0: shape=(64, 128, 128) dtype=uint8
+Loaded wave.ome.tif → ch0: shape=(1, 128, 128) dtype=uint8
 Skipping (no-op): WORKFLOW
 [Threshold] state=completed objects=<list len=5> mask=<ndarray ...> count=5
 ```
+
+`--pattern wave --size 128` with no `--z-slices` makes a **single-plane**
+phantom, so `shape=(1, 128, 128)` is correct here — this is not the lost-planes
+symptom described below. Add `--z-slices 64` for a real stack; note the
+generator then writes `wave.tif` rather than `wave.ome.tif` (the `.ome.tif`
+name is used only for 2-D single-channel output), so step 3's `--input` has to
+change with it.
 
 ### Axis metadata matters — check the shape it prints
 
@@ -110,12 +117,43 @@ There is no microscope here, so `collect` synthesizes a phantom dataset on disk
 # Best for iterating on analysis pipelines without re-stitching every time.
 py2flamingo-pipeline collect --mode stitched --out /tmp/ds
 py2flamingo-pipeline run /tmp/ds/pipeline.json --input /tmp/ds/stitched.ome.tif
+```
 
+Expected output from that run:
+
+```
+[Threshold] state=completed objects=<list len=1> mask=<ndarray shape=(8, 256, 256) dtype=bool> count=1
+```
+
+`count=1` is correct here, not a failure. `collect` writes its thresholds from
+the data it just generated (a quarter of the way from the background floor to
+the brightest voxel), so background no longer passes — but this phantom's
+fibers touch, and objects are 6-connected components, so the whole fiber
+network is one object covering roughly a third of the volume. Raising the
+threshold further does not split it — measured identical at 300, 600, 1164,
+2000 and 3000.
+
+For separable objects use the collagen recipe above, or
+`py2flamingo.testing.phantom_dataset.write_bead_dataset()` from Python —
+discrete beads, but not reachable through `collect`, which offers only
+`--mode stitched` and `--mode raw`.
+
+```bash
 # Gold standard: a native raw acquisition folder (X{x}_Y{y}/Workflow.txt/.raw).
 # Exercises the real chain: discover_tiles → stitching → analysis.
 py2flamingo-pipeline collect --mode raw --out /tmp/acq --grid 2,2 --planes 4
-python -m py2flamingo.stitching /tmp/acq --output-format ome-zarr-sharded
-py2flamingo-pipeline run <pipeline.json> --input /tmp/acq_stitched/stitched.ome.zarr
+
+# A synthetic acquisition carries no microscope name, so no saved orientation
+# preset can match it and the stitcher refuses to guess. Any orientation suits
+# a phantom, so name one explicitly:
+python -m py2flamingo.stitching /tmp/acq --output-format ome-zarr-sharded \
+    --tile-orientation identity
+
+# The output is written INSIDE the acquisition folder and named after it:
+#   <acq>/stitched/<name>.ome.zarr
+# The stitcher's final "Stitched output:" log line gives the exact path.
+py2flamingo-pipeline create --template threshold --out /tmp/p.json
+py2flamingo-pipeline run /tmp/p.json --input /tmp/acq/stitched/<name>.ome.zarr
 ```
 
 Notes:

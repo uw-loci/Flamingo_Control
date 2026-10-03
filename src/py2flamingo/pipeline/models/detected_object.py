@@ -20,7 +20,7 @@ class DetectedObject:
         bounding_box: Axis-aligned bounding box as (z_slice, y_slice, x_slice)
         volume_voxels: Number of voxels in this object
         volume_mm3: Physical volume in cubic millimeters
-        source_channel: Channel ID that contributed most voxels (optional)
+        source_channel: Channel id (0-based) that contributed most voxels (optional)
         mean_intensity: Mean intensity within the object mask
         max_intensity: Maximum intensity within the object mask
         min_intensity: Minimum intensity within the object mask
@@ -28,7 +28,7 @@ class DetectedObject:
         surface_area_voxels: Number of boundary voxels (surface estimate)
         sphericity: 0-1 measure of how spherical the object is
         elongation: Ratio of longest to shortest principal axis (>=1)
-        principal_axis_lengths: (major, mid, minor) axis lengths in voxels
+        principal_axis_lengths: (major, mid, minor) axis lengths in MICROMETRES -- coordinates are scaled by voxel_size_um before the covariance. Each is 2*sqrt(variance) of the voxel positions, about 2.24x smaller than a uniform solid's extent
     """
 
     label_id: int

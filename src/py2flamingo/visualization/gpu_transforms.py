@@ -442,7 +442,7 @@ def label_auto(
     Args:
         mask: Boolean or integer array to label.
         structure: Structuring element defining connectivity.
-            None → full connectivity (default from scipy/cupy).
+            None → the scipy/cupy default, which is 6-connectivity (faces only); pass np.ones((3,3,3)) for full 26-connectivity.
 
     Returns:
         (labels, num_features) — labelled array and count of objects.

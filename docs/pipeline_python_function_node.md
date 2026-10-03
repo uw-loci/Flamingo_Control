@@ -22,7 +22,11 @@ return {
 }
 ```
 
-That is the default a new node starts with, and it runs as-is.
+That is the default a new node starts with. It needs a volume on the
+`volume` input port: unlike the Threshold node, Python Function does **not**
+fall back to the current view or to `--input` on its own, so wire a Sample
+View Data or Workflow node into it first. With nothing connected `volume` is
+`None` and the body fails with `Either image or hist must be provided.`
 
 ## What's available
 
@@ -35,7 +39,17 @@ are what a body has by name:
 | `ndi` | scipy.ndimage |
 | `filters`, `measure`, `morphology`, `exposure` | scikit-image submodules |
 | `math` | math |
-| `log(...)` | writes to the run log |
+| `log(...)` | writes to the run log, capped at 200 lines per run |
+
+**Builtins are a short allowlist**, not Python's usual set: `abs any all bool
+dict divmod enumerate filter float int isinstance len list map max min pow range
+reversed round set slice sorted str sum tuple zip`, plus `ValueError TypeError
+RuntimeError Exception`. Anything else is absent — **including `print`; use
+`log()`**. A missing builtin fails when the pipeline runs, not while you type,
+so the editor will say "Code is valid." first. A further set is rejected
+outright when you save (`eval`, `exec`, `open`, `getattr`, `setattr`, `type`,
+`dir`, `vars`, `globals`, `locals`, `super`, `object`, `compile`, `input`), as
+are `global`, `nonlocal`, and any dunder name or attribute.
 
 **Inputs** are the node's input ports, by name:
 

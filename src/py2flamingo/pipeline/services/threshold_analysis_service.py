@@ -233,7 +233,14 @@ class ThresholdAnalysisService:
                 if region_labels.size > 0:
                     counts = np.bincount(region_labels[region_labels > 0])
                     if counts.size > 0:
-                        source_channel = int(np.argmax(counts))
+                        # Label values are `ch_id + 1` (see where `labels` is
+                        # filled), so argmax gives the LABEL, not the channel.
+                        # Returning it raw made `source_channel` off by one
+                        # against its own documented meaning -- and on this
+                        # instrument channel+4 is the right-side illumination
+                        # path, so the wrong value names a real but different
+                        # channel rather than failing visibly.
+                        source_channel = int(np.argmax(counts)) - 1
 
             # --- Intensity features ---
             mean_intensity = None
