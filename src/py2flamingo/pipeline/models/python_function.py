@@ -1,6 +1,6 @@
 """Run a short piece of operator-written Python as a pipeline step.
 
-The pipeline's built-in nodes cover the analyzes we anticipated. This node
+The pipeline's built-in nodes cover the analyses we anticipated. This node
 covers the ones we did not: a thresholding rule nobody asked for yet, a
 "is this tile worth imaging" test, a scalar derived from a volume in whatever
 way the science needs this week. Writing it here beats adding a node type for

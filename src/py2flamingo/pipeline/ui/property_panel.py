@@ -328,7 +328,16 @@ class PropertyPanel(QWidget):
             options = entry[4] if len(entry) > 4 else None
 
             current_val = node.config.get(key, default)
-            widget = self._create_widget(widget_type, current_val, options, key)
+            # A header has no config value -- its text is the label. Passing
+            # current_val rendered the DEFAULT, so POST_PROCESSING's three
+            # sections ("Voxel Geometry", "Preprocessing", "Output") drew as
+            # unlabelled horizontal rules: their defaults are "".
+            widget = self._create_widget(
+                widget_type,
+                label if widget_type == "header" else current_val,
+                options,
+                key,
+            )
             if widget_type == "header":
                 self._config_layout.addRow(widget)
             else:

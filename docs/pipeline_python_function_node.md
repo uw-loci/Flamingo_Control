@@ -1,6 +1,6 @@
 # Pipeline: Python Function node
 
-A node you fill in yourself, for the analyzes the built-in nodes don't cover —
+A node you fill in yourself, for the analyses the built-in nodes don't cover —
 a thresholding rule nobody anticipated, a "is this tile worth imaging" test, a
 scalar derived from a volume in whatever way this week's science needs.
 
