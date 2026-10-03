@@ -14,6 +14,20 @@ Everything is exposed through the `py2flamingo-pipeline` CLI (entry point
 | `pipeline/builder.py` | `PipelineBuilder` + `make_template` to author pipelines without the editor |
 | `pipeline/headless_services.py` | `build_headless_services` + `run_pipeline_headless` (synchronous, no Qt event loop) |
 
+## Before you start
+
+The `py2flamingo-pipeline` console script exists once the package is installed
+into the active environment:
+
+```bash
+pip install -e .          # from the repo root
+py2flamingo-pipeline --help
+```
+
+If the script is not on your `PATH`, every command below also works as
+`python -m py2flamingo.pipeline.cli <sub-command>`. In this repo there is no
+`python` on the path — use `.venv/bin/python`.
+
 ## CLI quick reference
 
 ```bash
@@ -37,6 +51,23 @@ py2flamingo-pipeline run my.json --input volume.ome.tif --output-json out.json
 # Pick a timepoint from a timelapse (volume ports are 3-D, so one is chosen)
 py2flamingo-pipeline run my.json --input timelapse.tif --timepoint 5
 ```
+
+### Every flag
+
+`run`: `--input`, `--volume-channel`, `--channel-axis`, `--timepoint`,
+`--skip-tag`, `--output-json`, `--enable-workflow`, `--verbose`/`-v` (DEBUG
+logging).
+
+`list`: `--dir PATH` reads a directory other than `~/.flamingo/pipelines/` —
+e.g. `py2flamingo-pipeline list --dir docs/sample_pipelines`.
+
+`create`: `--list`, `--template`, `--out`, `--acq-dir`, `--name` (the
+pipeline's display name, which is separate from the filename).
+
+`collect`: `--mode`, `--out`, `--channels` (comma-separated ids; default
+`0,1` for stitched, `1` for raw), `--seed`, `--shape Z,Y,X` (stitched, default
+`8,256,256` — **this is the knob that keeps the dataset small**), `--grid`,
+`--planes`, `--overlap` (raw), `--verbose`/`-v`.
 
 **No display required.** The headless entry point selects Qt's `offscreen`
 platform when nothing else is set, so this works over SSH, in CI, and from an
@@ -82,7 +113,7 @@ reduction is logged**. Read the `shape=` it prints before trusting a result:
 | What you see | What it means |
 | --- | --- |
 | `Reducing T axis (10 points) to index 0` | A timelapse; only that one timepoint was analyzed. Choose with `--timepoint`. |
-| `Reading unlabelled axis as Z (QYX -> ZYX)` | The file carries no ImageJ/OME axis metadata, so `tifffile` could not name its first axis. It is read as Z, which is the only sensible reading of a plain stack. |
+| `Reading unlabeled axis as Z (QYX -> ZYX)` | The file carries no ImageJ/OME axis metadata, so `tifffile` could not name its first axis. It is read as Z, which is the only sensible reading of a plain stack. |
 | `loaded as N channels of a single Z plane each` | Almost certainly a Z stack whose axis metadata is missing, read as N channels. Re-save with ImageJ or OME axis metadata, or pass `--channel-axis`. **Nothing is guessed here** — the load is left as-is and only warned about, because N real channels of one plane is a legitimate acquisition. |
 
 A `shape=(1, Y, X)` from a file you know is a stack is the signature of lost
@@ -185,7 +216,7 @@ b = PipelineBuilder("detect_collagen")
 b.add(NodeType.THRESHOLD, channel_thresholds={0: 100}, min_object_size=8)
 pipeline = b.build()                       # validates the graph
 
-volumes = load_volumes("phantom.ome.tif")  # {0: (Z,Y,X)}
+volumes = load_volumes("/tmp/ph/wave.ome.tif")  # {0: (Z,Y,X)}
 services = build_headless_services(volumes=volumes)
 run = run_pipeline_headless(pipeline, services=services)
 
@@ -197,17 +228,36 @@ print(run.succeeded, run.node_states)
 
 ## Node-type coverage when headless
 
-| Runs from data/config | Needs hardware or live viewer (stubbed) |
+| Runs for real | Needs the microscope |
 | --- | --- |
-| THRESHOLD, OVERVIEW_ANALYSIS, EXTERNAL_COMMAND, CONDITIONAL, FOR_EACH, TIMED_LOOP, POST_PROCESSING | WORKFLOW (microscope), SAMPLE_VIEW_DATA (live 3-D viewer) |
+| THRESHOLD, OVERVIEW_ANALYSIS, EXTERNAL_COMMAND, CONDITIONAL, FOR_EACH, TIMED_LOOP, POST_PROCESSING, SAMPLE_VIEW_DATA, PYTHON_FUNCTION | WORKFLOW |
 
-- `run` **auto-skips WORKFLOW** (replaces it with a no-op) unless you pass
-  `--enable-workflow`, which injects a stub facade so WORKFLOW nodes complete
-  immediately without touching the microscope.
-- `SAMPLE_VIEW_DATA` reads `voxel_storage`, so it works headless when you supply
-  `--input` (the volume is served from the in-memory store).
+- **`SAMPLE_VIEW_DATA` runs for real** — it reads `voxel_storage`, which
+  `--input` fills. **Without `--input` it fails** with
+  `No volume data available in any selected channel` rather than no-opping, and
+  every node downstream reports `skipped`. Its `position` output is also
+  `(0, 0, 0, 0)` headless unless you pass `position_controller=` to
+  `build_headless_services` yourself — the CLI never does — so do not wire it
+  into a WORKFLOW `position` input in a headless run.
+- `run` **auto-skips WORKFLOW** unless you pass `--enable-workflow`. The two
+  paths differ more than the names suggest:
+  - **Skipped** (the default): a `NoOpRunner` emits type-appropriate blanks —
+    `None` for VOLUME, `""` for FILE_PATH, `True` for TRIGGER. A THRESHOLD
+    downstream of a skipped WORKFLOW therefore falls back to the `--input`
+    volume and still reports `completed`, so the run looks the same whether it
+    analyzed your data or nothing. Check the `shape=` the loader logs.
+  - **`--enable-workflow`**: the real `WorkflowRunner` executes against a stub
+    facade, so position override, auto Z-range and auto-tiling all compute for
+    real and log what they decided. Nothing reaches the microscope. This is the
+    useful mode for testing acquisition geometry.
+- **`PYTHON_FUNCTION` runs for real** — its body has no hardware dependency.
+  A body with no terminating condition will hang a headless run exactly as it
+  would a GUI one; there is no timeout.
 - Use `--skip-tag a,b` to no-op additional node types (e.g.
-  `--skip-tag post_processing` for a hardware-free CI run).
+  `--skip-tag post_processing` for a hardware-free CI run). Valid tags are the
+  ten node-type names in lower case: `workflow`, `threshold`, `for_each`,
+  `conditional`, `external_command`, `sample_view_data`, `overview_analysis`,
+  `post_processing`, `timed_loop`, `python_function`.
 
 ## Stitching headless
 
@@ -239,3 +289,42 @@ shelling out to the real generator when present). The broader
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
     tests/test_headless_phantom_e2e.py tests/test_pipeline_smoke.py -q
 ```
+
+## Shipped example pipelines
+
+Three worked pipelines ship in `docs/sample_pipelines/`, and the test suite runs
+all three:
+
+| File | What it does |
+| --- | --- |
+| `acquire_analyze_reacquire.json` | Acquire, threshold, then re-image each object found (4 nodes) |
+| `conditional_reacquire.json` | The same, but only when the object count clears a threshold (5 nodes) |
+| `detect_and_reimage_ch3.json` | Threshold channel 3 of the current view and re-image what it finds (4 nodes) |
+
+```bash
+py2flamingo-pipeline list --dir docs/sample_pipelines
+py2flamingo-pipeline describe docs/sample_pipelines/conditional_reacquire.json
+```
+
+`describe` prints every node, its typed ports, its config and the connection
+list — the quickest way to read a pipeline without opening the editor.
+
+## Troubleshooting
+
+| Message | Cause | What to do |
+| --- | --- | --- |
+| `Unsupported input type '.png' for … Supported: .npy, .tif/.tiff/.ome.tif, .zarr/.ome.zarr` | `--input` is dispatched on the file extension alone | Convert to TIFF or `.npy`. A 2-D image is fine — it gains a singleton Z. |
+| `timepoint 99 is out of range: the T axis has 8 point(s) (0-7)` | `--timepoint` past the end of the series | Indices are 0-based. Check the `axes=` and `shape=` the loader logs. |
+| `Required input 'collection' on 'ForEach' is not connected` (exit 1) | a required input port has no connection | Wire it, or mark it optional in the JSON with `"required": false`. |
+| `Type mismatch on connection <id>: SCALAR -> VOLUME` | incompatible port types | See the compatibility table in [the JSON format reference](pipeline_json_format.md#port-type-compatibility). |
+| `Pipeline contains a cycle` | the graph is not a DAG | `describe` prints the connection list; remove the back-edge. |
+| `No volume data available in any selected channel` | a SAMPLE_VIEW_DATA node with no `--input` | Pass `--input`, or skip the node with `--skip-tag sample_view_data`. |
+| `Python function 'X': line N: Exception: Either image or hist must be provided.` | a PYTHON_FUNCTION node whose `volume` input is unconnected | Wire a volume source in. This node has no fallback to `--input`. |
+| `import is not allowed - the libraries are already available (…)` | an `import` in a node body | Use the provided names; the message lists them. |
+| `NameError: name 'print' is not defined` | `print` in a node body | Use `log()`. Builtins are a short allowlist. |
+| `unknown output key(s): maks. Use one of: value, boolean, mask, objects, result` | a misspelled return key | Use one of the five. |
+| `Tile orientation not set … Refusing to stitch with a guessed orientation.` (exit 2) | no saved orientation preset for this microscope, and a synthetic acquisition has no microscope name | Pass `--tile-orientation identity`, or pick one with `--preview-orientations`. |
+
+**A `shape=(1, Y, X)` from a file you believe is a stack** means the axis
+metadata was misread — see
+[Axis metadata matters](#axis-metadata-matters--check-the-shape-it-prints).
