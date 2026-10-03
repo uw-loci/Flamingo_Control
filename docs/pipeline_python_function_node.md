@@ -26,8 +26,8 @@ That is the default a new node starts with, and it runs as-is.
 
 ## What's available
 
-**The libraries are provided, never imported.** `import` is rejected — there is
-nothing to import, and nothing else to reach:
+**The libraries are provided, never imported.** `import` is rejected, so these
+are what a body has by name:
 
 | Name | Is |
 |---|---|
@@ -97,9 +97,11 @@ things follow:
 - **Treat a pipeline file like a script, not like data.** Opening someone
   else's pipeline means running their Python. Read it first.
 - **A loop has no timeout.** `while True` hangs the acquisition, because the
-  node runs in the calling thread.
+  node runs in the calling thread. **Stop will not break out of it** — the
+  executor only checks for cancellation between nodes
+  (`engine/executor.py:94,145`), so you will have to kill the application.
 
-Both are addressed by the planned change below.
+Both are on the roadmap; see the planned change below.
 
 ## TODO: Appose-powered execution
 

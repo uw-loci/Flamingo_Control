@@ -81,7 +81,7 @@ Reports are stored **outside** this git repository at `/home/msnelson/LSControl/
 | `views/chamber_visualization_manager.py` (wireframe, holder, Y inversion) | `claude-reports/coordinate_system_reference.md` section 6 |
 | `stitching/pipeline.py` (tile positions, origin_um, metadata) | `claude-reports/coordinate_system_reference.md` section 5; `claude-reports/lightsheet_stitching_options.md` |
 | `configs/visualization_3d_config.yaml` (ranges, centers, voxel sizes) | `claude-reports/coordinate_system_reference.md` section 8 (key constants) |
-| Pipeline nodes or `pipeline/` package | `claude-reports/pipeline-system.md` |
+| Pipeline nodes or `pipeline/` package | `claude-reports/design/pipeline-system.md` |
 | Workflow.txt format or generation | `claude-reports/workflow_file_format.md` |
 | Left/right illumination, dual-side channels | `claude-reports/dual_side_illumination.md` |
 
@@ -224,7 +224,7 @@ Visual DAG-based processing pipelines for automated microscope workflows. Access
 - Pipeline files saved to `~/.flamingo/pipelines/` as JSON with `format_version: "1.0"`
 - Source code: `src/py2flamingo/pipeline/`
 
-**Nine NodeTypes** — `WORKFLOW`, `THRESHOLD`, `FOR_EACH`, `CONDITIONAL`, `EXTERNAL_COMMAND`, `SAMPLE_VIEW_DATA`, `OVERVIEW_ANALYSIS`, `POST_PROCESSING`, `TIMED_LOOP`. Each has a runner under `pipeline/engine/node_runners/`.
+**Ten NodeTypes** — `WORKFLOW`, `THRESHOLD`, `FOR_EACH`, `CONDITIONAL`, `EXTERNAL_COMMAND`, `SAMPLE_VIEW_DATA`, `OVERVIEW_ANALYSIS`, `POST_PROCESSING`, `TIMED_LOOP`, `PYTHON_FUNCTION`. Each has a runner under `pipeline/engine/node_runners/`. Adding one means touching **both** runner maps (`controllers/pipeline_controller.py` AND `headless_services.py`), the `_CONFIG_SCHEMAS` schema, `ui/node_palette.py`, and the runner-file map in `tests/test_pipeline_property_panel_coverage.py` — missing one map makes the node a no-op in exactly one execution mode. `PYTHON_FUNCTION` runs operator-written Python; see `docs/pipeline_python_function_node.md`.
 
 **Headless / CLI execution.** Pipelines run without the editor dialog via the public API in `src/py2flamingo/pipeline/headless_services.py`:
 
