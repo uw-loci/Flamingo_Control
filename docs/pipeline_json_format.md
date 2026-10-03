@@ -442,7 +442,8 @@ actually produces:
 |-------|-------|------------|
 | `label_id` | — | Index within this run. Not stable across runs. |
 | `centroid_voxel` | voxels, (z, y, x) | Center of mass on the analysis grid. |
-| `centroid_stage` | **mm**, (x, y, z) | Center of mass in stage coordinates. **`(0, 0, 0)` means no coordinate config was available, not an object at the origin.** |
+| `centroid_stage` | **mm**, (x, y, z) | Center of mass in stage coordinates. `(0, 0, 0)` when unmeasured, so check `stage_coords_available` before using it. |
+| `stage_coords_available` | bool | **`false` means `centroid_stage` is unknown**, not that the object sits at the stage origin. A WORKFLOW node refuses to move to an unmeasured position rather than driving to the chamber corner. |
 | `bounding_box` | voxels | `((z0, z1), (y0, y1), (x0, x1))`, end-exclusive. |
 | `volume_voxels` | voxels | Count of voxels in the object. |
 | `volume_mm3` | **mm³** | `volume_voxels` × the nominal voxel volume. No partial-volume or surface correction — see [Limitations](#limitations). |
@@ -451,7 +452,7 @@ actually produces:
 | `surface_area_voxels` | **a count, not an area** | Number of 6-connected boundary voxels. Dimensionless; does not scale with voxel size; about 20% low for a sphere. |
 | `sphericity` | dimensionless, ≤ 1 | `π^(1/3)·(6V)^(2/3) / surface_area_voxels`. **Computed from the mask alone and so blind to voxel anisotropy**, and the clamp saturates — see [Limitations](#limitations). |
 | `principal_axis_lengths` | **µm**, (major, mid, minor) | Each is 2·√variance of the voxel positions along that axis — about 2.24× smaller than a uniform solid's extent, so **not a diameter**. |
-| `elongation` | dimensionless, ≥ 1 | major / minor of the above. **`Infinity` for an object one voxel thick**, which is not valid strict JSON. |
+| `elongation` | dimensionless, ≥ 1 | major / minor of the above. `null` for an object one voxel thick, whose minor axis is zero. |
 
 The last five are `null` for objects smaller than 8 voxels, and are omitted from
 the serialized form entirely.
@@ -497,10 +498,10 @@ publish it as a shape metric.
 3-D. The reduction is always logged, and `py2flamingo-pipeline run --timepoint N`
 chooses which point.
 
-**OVERVIEW_ANALYSIS analyses one plane and clips the edges.** A 3-D input is
-reduced to its **first Z plane** with no log line, and the tile grid uses floor
-division, so the remainder strip at the bottom and right of the image is never
-analyzed — up to `tiles-1` pixels on each axis.
+**OVERVIEW_ANALYSIS analyzes one plane and clips the edges.** A 3-D input is
+reduced to its **first Z plane** (logged as a warning), and the tile grid uses
+floor division, so the remainder strip at the bottom and right of the image is
+never analyzed, up to `tiles-1` pixels on each axis.
 
 **A saved pipeline does not record enough to reproduce a result.** The file
 carries `format_version`, `name`, `nodes` and `connections` — no software

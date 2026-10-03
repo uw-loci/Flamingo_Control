@@ -47,6 +47,10 @@ class PipelineGraphScene(QGraphicsScene):
     connection_removed = pyqtSignal(str)
     node_added = pyqtSignal(str)
     node_removed = pyqtSignal(str)
+    #: Why a wire the user just drew was refused. The model already phrases
+    #: these well; they used to go only to the Python log, where the operator
+    #: never sees them, so a refused drop looked like nothing happening.
+    connection_rejected = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -269,6 +273,10 @@ class PipelineGraphScene(QGraphicsScene):
         target = self._find_port_at(scene_pos)
         if target and target.can_accept(self._drag_source_port):
             self._create_connection(self._drag_source_port, target)
+        elif target is not None:
+            self.connection_rejected.emit(
+                self._describe_refusal(self._drag_source_port, target)
+            )
 
         self._drag_source_port = None
 
@@ -278,6 +286,41 @@ class PipelineGraphScene(QGraphicsScene):
             self.removeItem(self._drag_wire)
             self._drag_wire = None
         self._drag_source_port = None
+
+    @staticmethod
+    def _describe_refusal(source: PortItem, target: PortItem) -> str:
+        """Say why this port will not take that wire, in node and port names.
+
+        ``can_accept`` returns a bool, so the reason is re-derived here from the
+        same three conditions it tests. Naming the nodes matters: the operator
+        is looking at two boxes, not at port objects.
+        """
+        from py2flamingo.pipeline.models.port_types import (
+            can_connect,
+            describe_port_type,
+        )
+
+        src_name = source.node_item.pipeline_node.name
+        tgt_name = target.node_item.pipeline_node.name
+        src = f"{src_name}.{source.port.name}"
+        tgt = f"{tgt_name}.{target.port.name}"
+
+        # These are exactly the three conditions can_accept tests, in order.
+        # An already-connected input is refused by the model instead, and its
+        # message reaches the same signal through _create_connection.
+        if target.is_output:
+            return f"{tgt} is an output. Wires run from an output to an input."
+        if source.is_input:
+            return f"{src} is an input. Start the wire at an output."
+        if source.node_item is target.node_item:
+            return f"Cannot wire '{src_name}' to itself."
+        if not can_connect(source.port.port_type, target.port.port_type):
+            return (
+                f"Cannot connect {src} to {tgt}: "
+                f"{describe_port_type(source.port.port_type)} cannot feed "
+                f"{describe_port_type(target.port.port_type)}."
+            )
+        return f"Cannot connect {src} to {tgt}."
 
     def _find_port_at(self, scene_pos: QPointF) -> Optional[PortItem]:
         """Find a PortItem near the given scene position."""
@@ -302,7 +345,10 @@ class PipelineGraphScene(QGraphicsScene):
             self._add_connection_item(conn)
             self.connection_created.emit(conn.id)
         except ValueError as e:
+            # The model's messages are already written for a reader; losing
+            # them to logger.info is what made a refusal unexplainable.
             logger.info(f"Connection rejected: {e}")
+            self.connection_rejected.emit(str(e))
 
     # ---- Selection ----
 

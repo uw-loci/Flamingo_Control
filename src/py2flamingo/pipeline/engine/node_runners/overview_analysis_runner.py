@@ -63,12 +63,30 @@ class OverviewAnalysisRunner(AbstractNodeRunner):
                 "No input image available. Connect an image input or specify image_path."
             )
 
-        # Ensure 2D
+        # Ensure 2D. This node analyses an overview image, so a volume has to
+        # be reduced to one plane -- but it was reduced silently, and a result
+        # computed on plane 0 of a 300-plane stack reads exactly like a result
+        # about the stack.
         if image.ndim == 3 and image.shape[2] in (3, 4):
-            pass  # RGB/RGBA — service handles conversion
+            # A trailing axis of 3 or 4 is assumed to be RGB(A). A volume
+            # shaped (Z, Y, 3) is indistinguishable from an RGB image by shape
+            # alone, so say which reading was taken.
+            logger.info(
+                "Treating trailing axis of %d as colour channels (shape %s); "
+                "if this is a %d-plane volume, pass one plane instead",
+                image.shape[2],
+                image.shape,
+                image.shape[0],
+            )
         elif image.ndim > 2:
-            # Take first slice if 3D volume
+            original_shape = image.shape
             image = image[0] if image.ndim == 3 else image[0, 0]
+            logger.warning(
+                "Reducing %s input to its first plane %s - OVERVIEW_ANALYSIS "
+                "analyses one 2-D image, not a volume",
+                original_shape,
+                image.shape,
+            )
 
         # Build settings from config
         settings = TileAnalysisSettings(

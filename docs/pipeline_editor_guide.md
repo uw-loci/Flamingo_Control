@@ -64,11 +64,13 @@ using two nodes.
 
 6. **Click Run.** The status word turns blue and reads *Running...*, each node
    shows a colored dot as it goes, and the log fills in. When it finishes the
-   status returns to *Ready*.
+   status reads *Completed*, *Failed - see log*, or *Stopped*.
 
-**Save early.** The editor has **no unsaved-changes warning**: clicking New, or
-closing the window, discards your pipeline without asking. Click **Save**, pick
-a location you will find again, and save often.
+**Save early.** An asterisk appears in the window title while the pipeline has
+changes that are not on disk, and clicking New, Open or the window's close
+button offers to save first. Click **Save**, pick a location you will find
+again, and save often anyway: the prompt protects you from losing the file, not
+from losing your place.
 
 ## Reading the canvas
 
@@ -77,8 +79,10 @@ right, each labeled with its name. Hover one to see its direction, its name,
 its data type, and whether it is required.
 
 A port only accepts certain types. A `VOLUME` output cannot feed an
-`OBJECT_LIST` input, and the editor will refuse the wire **silently**, without
-saying why. The full table of what may connect to what is in
+`OBJECT_LIST` input, and the editor refuses the wire and writes the reason in
+the log along the bottom, naming both ends: *"Cannot connect Threshold.objects
+to Threshold.volume: a list of detected objects cannot feed a 3-D image
+stack."* The full table of what may connect to what is in
 [the JSON format reference](pipeline_json_format.md#port-type-compatibility).
 The commonest mistakes:
 
@@ -111,15 +115,15 @@ Nothing on screen says this, so:
 
 ## When Validate complains
 
-Validate checks four things. Three of its messages name the node and port, and
-one does not:
+Validate checks four things, and every message names the nodes and ports
+involved:
 
 | Message | What to do |
 |---|---|
 | `Required input 'X' on 'Y' is not connected` | Wire something into that port on that node. A Post Processing node's `acquisition_dir` is required. |
-| `Type mismatch on connection <id>: A -> B` | Two incompatible ports are joined. The id is not shown on the canvas, so find the wire by the two type names. |
-| `Pipeline contains a cycle` | A wire leads back to a node it came from. Follow the wires round and remove one. |
-| `Connection <id> references missing node/port` | A node was deleted leaving a wire behind. Re-save, or delete and redraw that wire. |
+| `Type mismatch: cannot connect A.x (a number) to B.y (a 3-D image stack)` | Two incompatible ports are joined. Both ends and both types are named. |
+| `Pipeline contains a cycle: ... A -> B -> C -> A` | A wire leads back to a node it came from. The loop is listed; remove one of its wires. |
+| `A wire attached to 'X' leads to a node that no longer exists` | A node was deleted leaving a wire behind. Delete and redraw that wire. |
 
 Run validates first too, and refuses with a **Cannot Run** dialog if anything
 is wrong. Using Validate early saves you the round trip.
@@ -138,8 +142,9 @@ What it will and will not tell you:
 
 - **The log pane is short and does not scroll itself.** Scroll back if a run
   produced more than a few lines.
-- **The status word says *Ready* whether the run succeeded or failed.** Only a
-  red dot and the log distinguish them, so check both.
+- **The status word reports the outcome**: *Completed*, *Failed - see log* in
+  red, or *Stopped* in amber. A failure also raises a dialog naming the node
+  that failed. *Ready* means idle, not finished.
 - **Nothing tells you where output files went.** A Post Processing node writes
   to the folder in its `output_dir` setting; note it before you run, because
   the editor will not repeat it afterwards.

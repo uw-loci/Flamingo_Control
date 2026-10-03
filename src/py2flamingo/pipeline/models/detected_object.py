@@ -16,7 +16,9 @@ class DetectedObject:
     Attributes:
         label_id: Unique integer label from ndimage.label()
         centroid_voxel: Center of mass in voxel coords (z, y, x)
-        centroid_stage: Center of mass in stage coords (x, y, z) in mm
+        centroid_stage: Center of mass in stage coords (x, y, z) in mm.
+            (0, 0, 0) when stage_coords_available is False, meaning unknown.
+        stage_coords_available: Whether centroid_stage was actually measured
         bounding_box: Axis-aligned bounding box as (z_slice, y_slice, x_slice)
         volume_voxels: Number of voxels in this object
         volume_mm3: Physical volume in cubic millimeters
@@ -38,6 +40,11 @@ class DetectedObject:
     volume_voxels: int
     volume_mm3: float
     source_channel: Optional[int] = None
+    #: False when no coordinate transform was available, in which case
+    #: ``centroid_stage`` is (0, 0, 0) because it is unknown -- not because the
+    #: object sits at the stage origin. Consumers that drive the stage must
+    #: check this rather than trusting the tuple.
+    stage_coords_available: bool = True
 
     # Intensity features (from original pre-threshold volume)
     mean_intensity: Optional[float] = None
@@ -61,6 +68,7 @@ class DetectedObject:
             "volume_voxels": self.volume_voxels,
             "volume_mm3": self.volume_mm3,
             "source_channel": self.source_channel,
+            "stage_coords_available": self.stage_coords_available,
         }
         # Optional intensity features
         if self.mean_intensity is not None:
@@ -102,6 +110,7 @@ class DetectedObject:
             surface_area_voxels=d.get("surface_area_voxels"),
             sphericity=d.get("sphericity"),
             elongation=d.get("elongation"),
+            stage_coords_available=d.get("stage_coords_available", True),
             principal_axis_lengths=tuple(pal) if pal is not None else None,
         )
 

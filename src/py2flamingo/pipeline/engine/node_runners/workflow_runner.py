@@ -78,6 +78,17 @@ class WorkflowRunner(AbstractNodeRunner):
         if position_data is not None and config.get("use_input_position", True):
             # position_data may be a DetectedObject or a tuple (x, y, z, r)
             if hasattr(position_data, "centroid_stage"):
+                # A DetectedObject whose stage coordinates were never measured
+                # carries (0, 0, 0). Driving there is a real move to the corner
+                # of the chamber, so refuse instead of taking it literally.
+                if not getattr(position_data, "stage_coords_available", True):
+                    raise RuntimeError(
+                        f"Workflow '{node.name}': the object on the position "
+                        "input has no stage coordinates (no coordinate config "
+                        "was available when it was detected), so there is no "
+                        "position to move to. Untick 'Override Position from "
+                        "Input' to use the template's own position."
+                    )
                 # DetectedObject — convert to Position
                 sx, sy, sz = position_data.centroid_stage
                 from py2flamingo.models import Position

@@ -60,6 +60,9 @@ class PipelineEditorDialog(PersistentDialog):
         self._pipeline = Pipeline(name="New Pipeline")
         self._current_file: Optional[Path] = None
         self._running = False
+        self._dirty = False
+        self._last_error_node: Optional[str] = None
+        self._stop_requested = False
 
         self.setWindowTitle("Pipeline Editor")
         self.setMinimumSize(1000, 600)
@@ -127,6 +130,21 @@ class PipelineEditorDialog(PersistentDialog):
 
         # Wire scene selection to property panel
         self._scene.node_selected.connect(self._on_node_selected)
+
+        # A refused wire used to vanish with no explanation anywhere the
+        # operator could see.
+        self._scene.connection_rejected.connect(self._on_connection_rejected)
+
+        # Unsaved-changes tracking. The scene already emits everything that
+        # constitutes an edit, so the flag rides on signals that exist.
+        for signal in (
+            self._scene.node_added,
+            self._scene.node_removed,
+            self._scene.connection_created,
+            self._scene.connection_removed,
+            self._property_panel.node_edited,
+        ):
+            signal.connect(self._mark_dirty)
 
     def _setup_toolbar(self):
         """Create toolbar actions."""
@@ -207,7 +225,8 @@ class PipelineEditorDialog(PersistentDialog):
         self._pipeline = pipeline
         self._scene.set_pipeline(pipeline)
         self._property_panel.set_pipeline(pipeline)
-        self.setWindowTitle(f"Pipeline Editor - {pipeline.name}")
+        self._last_error_node = None
+        self._mark_clean()
 
     # ---- Drag & Drop from palette ----
 
@@ -244,11 +263,15 @@ class PipelineEditorDialog(PersistentDialog):
     # ---- Toolbar actions ----
 
     def _on_new(self):
+        if not self._confirm_discard("Create a new pipeline"):
+            return
         self._current_file = None
         self._load_pipeline(Pipeline(name="New Pipeline"))
         self._log("Created new pipeline")
 
     def _on_open(self):
+        if not self._confirm_discard("Open another pipeline"):
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Pipeline", "", "Pipeline files (*.json);;All files (*)"
         )
@@ -280,6 +303,7 @@ class PipelineEditorDialog(PersistentDialog):
             with open(path, "w") as f:
                 json.dump(data, f, indent=2)
             self._current_file = Path(path)
+            self._mark_clean()
             self._log(f"Saved: {path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save pipeline:\n{e}")
@@ -302,6 +326,8 @@ class PipelineEditorDialog(PersistentDialog):
             )
 
     def _on_run(self):
+        self._stop_requested = False
+        self._last_error_node = None
         errors = self._pipeline.validate()
         if errors:
             QMessageBox.warning(
@@ -316,24 +342,39 @@ class PipelineEditorDialog(PersistentDialog):
         self.run_requested.emit(self._pipeline.to_dict())
 
     def _on_stop(self):
+        self._stop_requested = True
         self.stop_requested.emit()
         self._log("Stop requested")
 
-    def _set_running(self, running: bool):
-        """Update UI state for running/stopped."""
+    #: Status word and colour per outcome. "Ready" is the idle state; a run
+    #: that ended must not land back on it, because a green "Ready" after a
+    #: failed acquisition is indistinguishable from a clean finish.
+    _STATUS_STYLES = {
+        "ready": ("Ready", "#8abf8a"),
+        "running": ("Running...", "#64b5f6"),
+        "completed": ("Completed", "#8abf8a"),
+        "failed": ("Failed - see log", "#ef5350"),
+        "stopped": ("Stopped", "#ffb74d"),
+    }
+
+    def _set_running(self, running: bool, outcome: str = None):
+        """Update UI state for running/stopped.
+
+        Args:
+            running: Whether a run is in progress.
+            outcome: Which finished state to show when ``running`` is False -
+                one of "completed", "failed", "stopped". Defaults to "ready",
+                which is the idle state rather than a result.
+        """
         self._running = running
         self._run_btn.setEnabled(not running)
         self._stop_btn.setEnabled(running)
-        if running:
-            self._status_label.setText("Running...")
-            self._status_label.setStyleSheet(
-                "color: #64b5f6; font-weight: bold; padding-left: 12px;"
-            )
-        else:
-            self._status_label.setText("Ready")
-            self._status_label.setStyleSheet(
-                "color: #8abf8a; font-weight: bold; padding-left: 12px;"
-            )
+        key = "running" if running else (outcome or "ready")
+        text, color = self._STATUS_STYLES.get(key, self._STATUS_STYLES["ready"])
+        self._status_label.setText(text)
+        self._status_label.setStyleSheet(
+            f"color: {color}; font-weight: bold; padding-left: 12px;"
+        )
 
     # ---- Execution feedback (called by controller) ----
 
@@ -350,15 +391,106 @@ class PipelineEditorDialog(PersistentDialog):
         self._scene.set_node_status(node_id, "error")
         node = self._pipeline.get_node(node_id)
         name = node.name if node else node_id
+        self._last_error_node = name
         self._log(f"ERROR in {name}: {error}")
 
     def on_pipeline_completed(self):
-        self._set_running(False)
+        self._set_running(False, "completed")
         self._log("Pipeline completed successfully")
 
     def on_pipeline_error(self, error: str):
-        self._set_running(False)
+        # The executor reports a user-requested cancel through this same
+        # signal, so a deliberate Stop would otherwise read as a failure and
+        # raise an alarming modal.
+        if self._stop_requested:
+            self._stop_requested = False
+            self._set_running(False, "stopped")
+            self._log(f"Stopped: {error}")
+            return
+
+        self._set_running(False, "failed")
         self._log(f"Pipeline error: {error}")
+        # Open, save and validate failures all raise a modal; a failed run,
+        # which is the costliest of the four, raised none - leaving a green
+        # status and a few lines in an 80px log pane as the only evidence.
+        failed = self._failed_node_name()
+        detail = f" in '{failed}'" if failed else ""
+        QMessageBox.warning(
+            self,
+            "Run Failed",
+            f"The pipeline stopped{detail}.\n\n{error}\n\n"
+            "The log below the canvas has the full sequence.",
+        )
+
+    def _failed_node_name(self) -> Optional[str]:
+        """Name of the node that reported the error, if one did."""
+        return self._last_error_node
+
+    # ---- Edit tracking ----
+
+    def _confirm_discard(self, action: str) -> bool:
+        """Ask before throwing away unsaved work. True means carry on.
+
+        Returns True immediately when there is nothing to lose, so the prompt
+        only appears when it is earned.
+        """
+        if not self._dirty:
+            return True
+        choice = QMessageBox.warning(
+            self,
+            "Unsaved pipeline",
+            f"{action} without saving?\n\n"
+            "This pipeline has changes that are not on disk.",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save,
+        )
+        if choice == QMessageBox.Cancel:
+            return False
+        if choice == QMessageBox.Save:
+            self._on_save()
+            # Save can still be abandoned at the file dialog.
+            return not self._dirty
+        return True
+
+    def closeEvent(self, event):
+        """Offer to save before the window goes away.
+
+        Must call super() regardless of the outcome: PersistentDialog saves
+        window geometry from here.
+        """
+        if self._running:
+            choice = QMessageBox.warning(
+                self,
+                "Pipeline running",
+                "A pipeline is still running. Close the editor anyway?\n\n"
+                "The run is not cancelled by closing this window.",
+                QMessageBox.Close | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            if choice == QMessageBox.Cancel:
+                event.ignore()
+                return
+        if not self._confirm_discard("Close the editor"):
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def _mark_dirty(self, *_args) -> None:
+        """Record that the pipeline differs from what is on disk."""
+        if not self._dirty:
+            self._dirty = True
+            self._refresh_title()
+
+    def _mark_clean(self) -> None:
+        self._dirty = False
+        self._refresh_title()
+
+    def _refresh_title(self) -> None:
+        name = self._pipeline.name if self._pipeline else "New Pipeline"
+        self.setWindowTitle(f"Pipeline Editor - {name}{'*' if self._dirty else ''}")
+
+    def _on_connection_rejected(self, reason: str) -> None:
+        self._log(f"Wire refused: {reason}")
 
     def on_foreach_iteration(self, node_id: str, current: int, total: int):
         node = self._pipeline.get_node(node_id)

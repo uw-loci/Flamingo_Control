@@ -220,11 +220,16 @@ class ThresholdAnalysisService:
             region_mask = labeled_arr[bb] == label_id
             volume_voxels = int(np.sum(region_mask))
 
-            # Convert centroid to stage coordinates
+            # Convert centroid to stage coordinates. With no transform the
+            # value is (0, 0, 0), which is indistinguishable from an object
+            # genuinely at the stage origin -- so record which it is rather
+            # than leaving a consumer to drive there.
             if voxel_to_stage_fn:
                 centroid_stage = voxel_to_stage_fn(*centroid_voxel)
+                stage_coords_available = True
             else:
                 centroid_stage = (0.0, 0.0, 0.0)
+                stage_coords_available = False
 
             # Determine which channel contributed most voxels
             source_channel = None
@@ -278,6 +283,7 @@ class ThresholdAnalysisService:
                 volume_voxels=volume_voxels,
                 volume_mm3=volume_voxels * voxel_vol_mm3,
                 source_channel=source_channel,
+                stage_coords_available=stage_coords_available,
                 mean_intensity=mean_intensity,
                 max_intensity=max_intensity,
                 min_intensity=min_intensity,
@@ -361,6 +367,11 @@ def _compute_principal_axes(
     # Return in descending order: (major, mid, minor)
     major, mid, minor = axis_lengths[2], axis_lengths[1], axis_lengths[0]
 
-    elongation = float(major / minor) if minor > 1e-6 else float("inf")
+    # None, not inf, for an object with no measurable minor axis. json.dumps
+    # writes float("inf") as the bare literal `Infinity`, which is not valid
+    # JSON -- a strict parser rejects the whole --output-json file over one
+    # one-voxel-thick object. None is already how every other unmeasurable
+    # morphology field reports itself, and to_dict() omits it.
+    elongation = float(major / minor) if minor > 1e-6 else None
 
     return (float(major), float(mid), float(minor)), elongation

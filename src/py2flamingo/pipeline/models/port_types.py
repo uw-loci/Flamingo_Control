@@ -86,6 +86,31 @@ PORT_COLORS: dict[PortType, str] = {
     PortType.ANY: "#ffffff",  # White
 }
 
+#: What each port type is, in words a reader can use. The enum name leaks into
+#: the interface otherwise -- hovering a port showed "Type: OBJECT_LIST", a
+#: string that appears nowhere else on screen and never says what it holds.
+PORT_TYPE_DESCRIPTIONS: dict[PortType, str] = {
+    PortType.VOLUME: "a 3-D image stack",
+    PortType.OBJECT_LIST: "a list of detected objects",
+    PortType.OBJECT: "one detected object",
+    PortType.POSITION: "a stage position",
+    PortType.SCALAR: "a number",
+    PortType.BOOLEAN: "true or false",
+    PortType.STRING: "text",
+    PortType.FILE_PATH: "a file path",
+    PortType.TRIGGER: "run-order only, carrying no data",
+    PortType.ANY: "any kind of value",
+}
+
+
+def describe_port_type(port_type: PortType) -> str:
+    """Human phrase for a port type, falling back to its name.
+
+    The fallback matters: a port type added later must not make a message
+    unprintable, only less friendly.
+    """
+    return PORT_TYPE_DESCRIPTIONS.get(port_type, port_type.name)
+
 
 @dataclass
 class PortValue:

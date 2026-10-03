@@ -12,7 +12,12 @@ from PyQt5.QtGui import QBrush, QColor, QPen
 from PyQt5.QtWidgets import QGraphicsEllipseItem, QGraphicsItem
 
 from py2flamingo.pipeline.models.pipeline import Port, PortDirection
-from py2flamingo.pipeline.models.port_types import PORT_COLORS, PortType, can_connect
+from py2flamingo.pipeline.models.port_types import (
+    PORT_COLORS,
+    PortType,
+    can_connect,
+    describe_port_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +53,8 @@ class PortItem(QGraphicsEllipseItem):
         direction = "Input" if port.direction == PortDirection.INPUT else "Output"
         required = " (required)" if port.required else ""
         self.setToolTip(
-            f"{direction}: {port.name}\nType: {port.port_type.name}{required}"
+            f"{direction}: {port.name}{required}\n"
+            f"{describe_port_type(port.port_type)} ({port.port_type.name})"
         )
 
     @property

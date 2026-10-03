@@ -12,7 +12,11 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from py2flamingo.pipeline.models.port_types import PortType, can_connect
+from py2flamingo.pipeline.models.port_types import (
+    PortType,
+    can_connect,
+    describe_port_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -490,17 +494,32 @@ class Pipeline:
     # ---- Graph algorithms ----
 
     def _build_adjacency(self) -> Dict[str, Set[str]]:
-        """Build node-level adjacency list from connections."""
+        """Build node-level adjacency list from connections.
+
+        Connections whose source or target node has been deleted are skipped,
+        so the graph algorithms describe only nodes that exist. Including a
+        deleted node as a neighbour raised KeyError from the traversal, which
+        is what ``validate()`` runs first -- see ``_build_in_degree``.
+        """
         adj: Dict[str, Set[str]] = {nid: set() for nid in self.nodes}
         for c in self.connections.values():
-            adj[c.source_node_id].add(c.target_node_id)
+            if c.source_node_id in adj and c.target_node_id in adj:
+                adj[c.source_node_id].add(c.target_node_id)
         return adj
 
     def _build_in_degree(self) -> Dict[str, int]:
-        """Compute in-degree for each node."""
+        """Compute in-degree for each node.
+
+        A connection whose target node no longer exists is skipped rather than
+        counted. Indexing it raised KeyError from inside ``topological_sort``,
+        which ``validate()`` calls first -- so a pipeline with one dangling
+        wire crashed validation instead of reporting the dangling wire, and the
+        "references a missing node" branch below it was unreachable.
+        """
         deg = {nid: 0 for nid in self.nodes}
         for c in self.connections.values():
-            deg[c.target_node_id] += 1
+            if c.target_node_id in deg:
+                deg[c.target_node_id] += 1
         return deg
 
     def _has_cycle(self) -> bool:
@@ -568,6 +587,39 @@ class Pipeline:
 
     # ---- Validation ----
 
+    def _find_cycle(self) -> List[str]:
+        """Node names around one cycle, first name repeated at the end.
+
+        Returns an empty list when no cycle is found, so the caller keeps its
+        generic message rather than claiming a loop it cannot show.
+        """
+        state: Dict[str, int] = {}  # 0 = visiting, 1 = done
+        path: List[str] = []
+
+        def walk(node_id: str) -> Optional[List[str]]:
+            if state.get(node_id) == 1:
+                return None
+            if state.get(node_id) == 0:
+                # Back-edge: the cycle is the tail of the current path.
+                start = path.index(node_id)
+                return path[start:] + [node_id]
+            state[node_id] = 0
+            path.append(node_id)
+            for conn in self.connections.values():
+                if conn.source_node_id == node_id:
+                    found = walk(conn.target_node_id)
+                    if found:
+                        return found
+            path.pop()
+            state[node_id] = 1
+            return None
+
+        for node_id in self.nodes:
+            found = walk(node_id)
+            if found:
+                return [self.nodes[n].name if n in self.nodes else n for n in found]
+        return []
+
     def validate(self) -> List[str]:
         """Validate the pipeline graph.
 
@@ -580,28 +632,54 @@ class Pipeline:
             errors.append("Pipeline has no nodes")
             return errors
 
-        # Cycle check
+        # Cycle check. Naming the loop matters: on a ten-node graph "contains
+        # a cycle" leaves the reader to find it by eye.
         try:
             self.topological_sort()
         except ValueError:
-            errors.append("Pipeline contains a cycle")
+            loop = self._find_cycle()
+            if loop:
+                errors.append(
+                    "Pipeline contains a cycle: these nodes form a loop, so "
+                    "there is no place to start. " + " -> ".join(loop)
+                )
+            else:
+                errors.append("Pipeline contains a cycle")
 
-        # Type compatibility of all connections
+        # Type compatibility of all connections. Every message names nodes and
+        # ports rather than a connection id: the id is a uuid4 that appears
+        # nowhere on the canvas, so "Connection 3f8a1c72-... references a
+        # missing node" told the reader nothing they could act on.
         for c in self.connections.values():
             src_node = self.nodes.get(c.source_node_id)
             tgt_node = self.nodes.get(c.target_node_id)
             if not src_node or not tgt_node:
-                errors.append(f"Connection {c.id} references missing node")
+                known = (
+                    src_node.name if src_node else tgt_node.name if tgt_node else None
+                )
+                errors.append(
+                    f"A wire attached to '{known}' leads to a node that no "
+                    "longer exists; delete and redraw it"
+                    if known
+                    else "A wire survives whose nodes have both been deleted"
+                )
                 continue
             src_port = src_node.get_port(c.source_port_id)
             tgt_port = tgt_node.get_port(c.target_port_id)
             if not src_port or not tgt_port:
-                errors.append(f"Connection {c.id} references missing port")
+                errors.append(
+                    f"A wire between '{src_node.name}' and '{tgt_node.name}' "
+                    "is attached to a port that no longer exists; delete and "
+                    "redraw it"
+                )
                 continue
             if not can_connect(src_port.port_type, tgt_port.port_type):
                 errors.append(
-                    f"Type mismatch on connection {c.id}: "
-                    f"{src_port.port_type.name} -> {tgt_port.port_type.name}"
+                    "Type mismatch: cannot connect "
+                    f"{src_node.name}.{src_port.name} "
+                    f"({describe_port_type(src_port.port_type)}) to "
+                    f"{tgt_node.name}.{tgt_port.name} "
+                    f"({describe_port_type(tgt_port.port_type)})"
                 )
 
         # Required ports must be connected

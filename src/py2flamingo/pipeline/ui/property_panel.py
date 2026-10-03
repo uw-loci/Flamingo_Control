@@ -8,7 +8,7 @@ and current config dict. Changes are applied immediately to the node model.
 import logging
 from typing import Any, Dict, Optional
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -234,6 +234,11 @@ _CONFIG_SCHEMAS: Dict[NodeType, list] = {
 
 class PropertyPanel(QWidget):
     """Dynamic property editor for the selected pipeline node."""
+
+    #: A setting or a node name was changed. The editor uses this to mark the
+    #: pipeline unsaved; without it, an hour of retuning thresholds counted as
+    #: no change at all.
+    node_edited = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1008,11 +1013,13 @@ class PropertyPanel(QWidget):
         """Update a config value on the current node."""
         if self._current_node:
             self._current_node.config[key] = value
+            self.node_edited.emit()
 
     def _on_name_changed(self, name: str):
         """Update the node's display name."""
         if self._current_node:
             self._current_node.name = name
+            self.node_edited.emit()
 
     def _clear_config(self):
         """Remove all config widgets."""
