@@ -53,10 +53,9 @@ using two nodes.
    Press **Esc** mid-drag to abandon a wire.
 
 4. **Click the Threshold node** and set its thresholds in the Properties panel
-   on the right. The fields are labeled but not explained on screen. What each
-   one means, its units and its sane range are in
-   [the JSON format reference](pipeline_json_format.md#threshold), which lists
-   every setting beside the label the panel shows.
+   on the right. **Hover any field, or its label, for what it means and what
+   unit it is in.** The full tables, with defaults and ranges, are in
+   [the JSON format reference](pipeline_json_format.md#threshold).
 
 5. **Click Validate.** A dialog titled **Valid** reads *"Pipeline is valid and
    ready to run."* If instead you get **Validation Failed**, it lists what is
@@ -154,14 +153,17 @@ first, and a Python Function node stuck in a loop cannot be interrupted at all.
 
 ## Where files go
 
-**Save puts the pipeline wherever you choose.** The dialog opens in whatever
-folder the application was started from, so navigate deliberately the first
-time.
+**Save and Open both start in `~/.flamingo/pipelines/`**, and Save suggests a
+filename from the pipeline's name. That is the same folder
+`py2flamingo-pipeline list` reads, so a pipeline saved from the editor shows up
+on the command line and the other way round. You can still save anywhere else;
+the CLI listing will not see it.
 
-Note that `py2flamingo-pipeline list` on the command line reads
-`~/.flamingo/pipelines/` instead, and does not see pipelines you saved from the
-editor somewhere else. If you want both to find the same files, save into
-`~/.flamingo/pipelines/`.
+A saved pipeline also records **what wrote it** and **the voxel grid its
+numbers would be measured on**, under `written_by` and `measurement_context`.
+That second one matters: object volumes scale with the display voxel size,
+which is resolved per microscope, so without it the same file run on two scopes
+gives different numbers with nothing to tell them apart.
 
 ## What this guide does not cover
 

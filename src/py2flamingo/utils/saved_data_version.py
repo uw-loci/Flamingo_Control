@@ -280,3 +280,10 @@ THRESHOLD_PRESET = FormatSpec("threshold preset", current=2)
 
 #: Webcam calibration, an affine per rotation angle.
 WEBCAM_CALIBRATION = FormatSpec("webcam calibration", current=1)
+
+#: Pipeline graphs written by the Pipeline Editor and the CLI. v2 added the
+#: measurement context, without which a file's physical numbers cannot be
+#: interpreted: the voxel grid they were computed on is resolved per microscope
+#: at run time and was recorded nowhere. v1 files are still read -- the block is
+#: additive, and absent means unknown rather than a default.
+PIPELINE = FormatSpec("pipeline", current=2)

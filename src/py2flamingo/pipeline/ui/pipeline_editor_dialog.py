@@ -273,7 +273,10 @@ class PipelineEditorDialog(PersistentDialog):
         if not self._confirm_discard("Open another pipeline"):
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Pipeline", "", "Pipeline files (*.json);;All files (*)"
+            self,
+            "Open Pipeline",
+            self._default_pipeline_dir(),
+            "Pipeline files (*.json);;All files (*)",
         )
         if not path:
             return
@@ -293,7 +296,10 @@ class PipelineEditorDialog(PersistentDialog):
             path = str(self._current_file)
         else:
             path, _ = QFileDialog.getSaveFileName(
-                self, "Save Pipeline", "", "Pipeline files (*.json);;All files (*)"
+                self,
+                "Save Pipeline",
+                self._suggested_save_path(),
+                "Pipeline files (*.json);;All files (*)",
             )
             if not path:
                 return
@@ -427,6 +433,39 @@ class PipelineEditorDialog(PersistentDialog):
         return self._last_error_node
 
     # ---- Edit tracking ----
+
+    @staticmethod
+    def _default_pipeline_dir() -> str:
+        """The folder both the editor and the CLI use for pipelines.
+
+        Passing "" opened whatever directory the application happened to be
+        started from, while ``py2flamingo-pipeline list`` only ever reads
+        ``~/.flamingo/pipelines`` -- so pipelines saved from the editor were
+        invisible to the CLI, and the folder the CLI created on startup sat
+        empty. Both now point at the same place.
+        """
+        try:
+            from py2flamingo.pipeline.services.pipeline_repository import (
+                PipelineRepository,
+            )
+
+            return str(PipelineRepository().directory)
+        except Exception as e:  # pragma: no cover - a file dialog must open
+            logger.warning(f"Could not resolve the pipeline directory: {e}")
+            return ""
+
+    def _suggested_save_path(self) -> str:
+        """The default directory, with a filename taken from the pipeline name.
+
+        Matching the repository's own naming (spaces to underscores, lower
+        case) means a pipeline saved from the editor is the same file the CLI
+        would have written.
+        """
+        directory = self._default_pipeline_dir()
+        if not directory:
+            return ""
+        name = (self._pipeline.name if self._pipeline else "") or "pipeline"
+        return str(Path(directory) / f"{name.replace(' ', '_').lower()}.json")
 
     def _confirm_discard(self, action: str) -> bool:
         """Ask before throwing away unsaved work. True means carry on.

@@ -6,7 +6,7 @@ The Flamingo Control pipeline system lets you build visual processing graphs —
 
 **Most people never edit this file.** Build pipelines in **Extensions > Pipeline Editor...** and click Save — see [the Pipeline Editor guide](pipeline_editor_guide.md). Read on if you are generating pipelines from a script, reviewing one in a diff, or writing a tool that emits them.
 
-Where they are saved: the editor's Save dialog puts a pipeline **wherever you choose**. The `py2flamingo-pipeline` CLI instead defaults to `~/.flamingo/pipelines/`, which is also the only directory `py2flamingo-pipeline list` reads — so pipelines saved from the editor elsewhere do not appear in that listing. See [Headless pipelines](headless_pipelines.md).
+Where they are saved: both the editor and the `py2flamingo-pipeline` CLI default to `~/.flamingo/pipelines/`, which is also the directory `py2flamingo-pipeline list` reads. You can save anywhere else from the editor; the CLI listing will not see it. See [Headless pipelines](headless_pipelines.md).
 
 ### Contents
 
@@ -27,7 +27,7 @@ They are not always the same, and where they differ the table says so. A pipelin
 
 ## Format Version
 
-Every pipeline JSON includes a `format_version` field at the top level. The current version is `"1.0"`. Older files without this field are treated as version 1.0 automatically.
+Every pipeline JSON includes a `format_version` field at the top level. The current version is `"1.1"`, which added the `written_by` and `measurement_context` blocks described under [Limitations](#limitations). Both are additive: `"1.0"` files load unchanged, and files without the field at all are treated as 1.0.
 
 ## Top-Level Structure
 
@@ -449,13 +449,21 @@ actually produces:
 | `volume_mm3` | **mm³** | `volume_voxels` × the nominal voxel volume. No partial-volume or surface correction — see [Limitations](#limitations). |
 | `source_channel` | channel id | The channel contributing the most voxels, 0-based. |
 | `mean/max/min/std_intensity` | gray levels | Read from the **unsmoothed** data, so `gauss_sigma` does not change them. |
-| `surface_area_voxels` | **a count, not an area** | Number of 6-connected boundary voxels. Dimensionless; does not scale with voxel size; about 20% low for a sphere. |
-| `sphericity` | dimensionless, ≤ 1 | `π^(1/3)·(6V)^(2/3) / surface_area_voxels`. **Computed from the mask alone and so blind to voxel anisotropy**, and the clamp saturates — see [Limitations](#limitations). |
-| `principal_axis_lengths` | **µm**, (major, mid, minor) | Each is 2·√variance of the voxel positions along that axis — about 2.24× smaller than a uniform solid's extent, so **not a diameter**. |
+| `principal_axis_lengths` | **µm**, (major, mid, minor) | Each is 2·√variance of the voxel positions along that axis, about 2.24× smaller than a uniform solid's extent, so **not a diameter**. Anisotropy-aware. |
 | `elongation` | dimensionless, ≥ 1 | major / minor of the above. `null` for an object one voxel thick, whose minor axis is zero. |
+| `flatness` | dimensionless, ≥ 1 | mid / minor of the above. With `elongation` this separates a rod (flatness near 1) from a ribbon (flatness large), which elongation alone cannot. |
+| `equivalent_diameter_um` | **µm** | Diameter of the sphere of equal volume. A size rather than a shape, derived from the volume alone, so it stays valid at any voxel count. |
 
-The last five are `null` for objects smaller than 8 voxels, and are omitted from
-the serialized form entirely.
+**There is no sphericity or surface-area field.** Both were removed: a
+boundary-voxel count is not an area, it is blind to voxel anisotropy, and the
+sphericity built on it saturated at its clamp — a flat plate and a sphere both
+reported 1.0. At the object sizes this analysis finds there is no voxelized
+surface estimate worth reporting, so the shape descriptors above come from the
+position covariance and the volume instead.
+
+`principal_axis_lengths`, `elongation` and `flatness` are `null` for objects
+smaller than 8 voxels, and are omitted from the serialized form entirely.
+`equivalent_diameter_um` is always present, since it needs only the volume.
 
 **OVERVIEW_ANALYSIS objects are different.** Its `selected_tiles` carry
 **image pixel coordinates** in `centroid_stage` and `volume_mm3 = 0.0`. Do not
@@ -483,11 +491,13 @@ is not aware of it at all: an object on a 10:1 grid reports the same value as on
 an isotropic one. `gauss_sigma` is isotropic **in voxels**, so on an anisotropic
 grid it blurs Z and XY by different physical distances.
 
-**`sphericity` is a relative filter, not a measurement.** It substitutes a
-boundary-voxel count for a surface area and then clamps the result at 1.0, so
-`1.0` means "at or above this estimator's sphere limit" — including for flat
-plates. Use it to rank objects within one dataset at one voxel size; do not
-publish it as a shape metric.
+**Shape is reported without any surface estimate.** `elongation` and
+`flatness` come from the position covariance and `equivalent_diameter_um` from
+the volume, all three of which stay meaningful at the voxel counts this
+analysis actually produces. The older `sphericity` and `surface_area_voxels`
+fields were removed rather than fixed: a boundary-voxel count cannot be made
+anisotropy-aware, and at low voxel counts no voxelized surface estimate is
+worth publishing.
 
 **Objects are 6-connected.** Diagonally touching structures count separately.
 
@@ -503,11 +513,12 @@ reduced to its **first Z plane** (logged as a warning), and the tile grid uses
 floor division, so the remainder strip at the bottom and right of the image is
 never analyzed, up to `tiles-1` pixels on each axis.
 
-**A saved pipeline does not record enough to reproduce a result.** The file
-carries `format_version`, `name`, `nodes` and `connections` — no software
-version, timestamp, input path, microscope identity, or voxel size. The same
-pipeline on two microscopes yields different `volume_mm3`, and nothing in the
-file or the output says which grid was used.
+**A saved pipeline records what wrote it and the grid its numbers mean**, as of
+format 1.1: a `written_by` block (app version, format name and version, and the
+time) and a `measurement_context` block carrying `voxel_size_um`. Both are
+additive, so 1.0 files still load, and an absent block means unknown rather
+than a default. The input data path is still not recorded, so note that
+yourself if a result needs to be reproduced.
 
 ## Port Types
 

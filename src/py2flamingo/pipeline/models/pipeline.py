@@ -20,7 +20,41 @@ from py2flamingo.pipeline.models.port_types import (
 
 logger = logging.getLogger(__name__)
 
-PIPELINE_FORMAT_VERSION = "1.0"
+#: Pipeline file format. 1.1 added the ``provenance`` block: a saved pipeline
+#: recorded nothing about the software or the microscope that produced it, so
+#: the same file run on two scopes gave different physical measurements with
+#: nothing on disk to say which grid was used. 1.0 files load unchanged -- the
+#: block is additive and absent means "unknown", never a default.
+PIPELINE_FORMAT_VERSION = "1.1"
+
+
+def _measurement_context() -> Dict[str, Any]:
+    """The voxel grid the pipeline's physical numbers would be computed on.
+
+    This is not writer provenance -- that is what the ``written_by`` block from
+    :mod:`py2flamingo.utils.saved_data_version` carries. It is the one fact
+    needed to interpret a result: every physical measurement a THRESHOLD node
+    emits scales with the display voxel size, which is resolved per microscope
+    at run time, so the same pipeline on two scopes produced different volumes
+    with nothing on disk to distinguish them.
+
+    Best-effort: a value that cannot be resolved is omitted rather than
+    guessed, because a wrong context record is worse than a missing one.
+    Saving a pipeline must never fail over this.
+    """
+    context: Dict[str, Any] = {}
+    try:
+        from py2flamingo.visualization.voxel_storage_factory import (
+            resolve_visualization_config,
+        )
+
+        display = (resolve_visualization_config() or {}).get("display", {})
+        voxel = display.get("voxel_size_um")
+        if voxel:
+            context["voxel_size_um"] = list(voxel)
+    except Exception as e:
+        logger.debug("No voxel size available for the measurement context: %s", e)
+    return context
 
 
 class NodeType(Enum):
@@ -391,6 +425,10 @@ class Pipeline:
         self.name: str = name
         self.nodes: Dict[str, PipelineNode] = {}
         self.connections: Dict[str, Connection] = {}
+        #: The voxel grid this pipeline's numbers were computed on, as loaded
+        #: from the file. Empty for a new pipeline, in which case ``to_dict``
+        #: resolves it at save time.
+        self.measurement_context: Dict[str, Any] = {}
 
     # ---- Node management ----
 
@@ -701,12 +739,29 @@ class Pipeline:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the entire pipeline to a JSON-compatible dict."""
-        return {
+        d: Dict[str, Any] = {
             "format_version": PIPELINE_FORMAT_VERSION,
             "name": self.name,
             "nodes": [n.to_dict() for n in self.nodes.values()],
             "connections": [c.to_dict() for c in self.connections.values()],
         }
+        # Carried through when the pipeline was loaded from a file, so a
+        # re-save still says which grid the numbers originally meant.
+        context = self.measurement_context or _measurement_context()
+        if context:
+            d["measurement_context"] = context
+        # The house provenance block: app version, format name and version,
+        # and when it was written. One number, owned by the FormatSpec.
+        import datetime
+
+        from py2flamingo.utils.saved_data_version import PIPELINE
+
+        return PIPELINE.stamp(
+            d,
+            written_at=datetime.datetime.now(datetime.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat(),
+        )
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Pipeline":
@@ -718,6 +773,9 @@ class Pipeline:
         version = d.get("format_version", "1.0")
         logger.debug("Loading pipeline format_version=%s", version)
         pipeline = cls(name=d.get("name", "Untitled Pipeline"))
+        # Carried through verbatim rather than refreshed, so a pipeline that
+        # was opened and re-saved still says which grid its numbers meant.
+        pipeline.measurement_context = dict(d.get("measurement_context") or {})
         for nd in d.get("nodes", []):
             pipeline.nodes[nd["id"]] = PipelineNode.from_dict(nd)
         for cd in d.get("connections", []):

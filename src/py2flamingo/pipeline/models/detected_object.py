@@ -27,8 +27,10 @@ class DetectedObject:
         max_intensity: Maximum intensity within the object mask
         min_intensity: Minimum intensity within the object mask
         std_intensity: Standard deviation of intensity within the object mask
-        surface_area_voxels: Number of boundary voxels (surface estimate)
-        sphericity: 0-1 measure of how spherical the object is
+        flatness: mid/minor principal axis ratio (>=1). With elongation this
+            separates a rod (flatness near 1) from a ribbon (flatness large)
+        equivalent_diameter_um: Diameter of the sphere of equal volume, in um.
+            A size rather than a shape, and valid at any voxel count
         elongation: Ratio of longest to shortest principal axis (>=1)
         principal_axis_lengths: (major, mid, minor) axis lengths in MICROMETRES -- coordinates are scaled by voxel_size_um before the covariance. Each is 2*sqrt(variance) of the voxel positions, about 2.24x smaller than a uniform solid's extent
     """
@@ -52,11 +54,14 @@ class DetectedObject:
     min_intensity: Optional[float] = None
     std_intensity: Optional[float] = None
 
-    # Morphology features
-    surface_area_voxels: Optional[int] = None
-    sphericity: Optional[float] = None
+    # Shape features. All derived from the position covariance or the volume,
+    # never from a voxelized surface-area estimate: boundary-voxel counting is
+    # blind to voxel anisotropy and saturates for anything flat, which made the
+    # sphericity it fed unusable at the sizes this analysis actually finds.
     elongation: Optional[float] = None
+    flatness: Optional[float] = None
     principal_axis_lengths: Optional[Tuple[float, float, float]] = None
+    equivalent_diameter_um: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to JSON-compatible dict."""
@@ -80,12 +85,12 @@ class DetectedObject:
         if self.std_intensity is not None:
             d["std_intensity"] = self.std_intensity
         # Optional morphology features
-        if self.surface_area_voxels is not None:
-            d["surface_area_voxels"] = self.surface_area_voxels
-        if self.sphericity is not None:
-            d["sphericity"] = self.sphericity
         if self.elongation is not None:
             d["elongation"] = self.elongation
+        if self.flatness is not None:
+            d["flatness"] = self.flatness
+        if self.equivalent_diameter_um is not None:
+            d["equivalent_diameter_um"] = self.equivalent_diameter_um
         if self.principal_axis_lengths is not None:
             d["principal_axis_lengths"] = list(self.principal_axis_lengths)
         return d
@@ -107,9 +112,9 @@ class DetectedObject:
             max_intensity=d.get("max_intensity"),
             min_intensity=d.get("min_intensity"),
             std_intensity=d.get("std_intensity"),
-            surface_area_voxels=d.get("surface_area_voxels"),
-            sphericity=d.get("sphericity"),
             elongation=d.get("elongation"),
+            flatness=d.get("flatness"),
+            equivalent_diameter_um=d.get("equivalent_diameter_um"),
             stage_coords_available=d.get("stage_coords_available", True),
             principal_axis_lengths=tuple(pal) if pal is not None else None,
         )

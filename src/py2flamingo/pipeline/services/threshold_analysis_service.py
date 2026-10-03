@@ -75,7 +75,7 @@ class ThresholdAnalysisService:
       4. Morphological opening (if enabled)  — GPU-accelerated
       5. Remove small objects (if min_size > 0)  — GPU-accelerated labeling
       6. Connected component extraction → DetectedObject instances
-         with intensity stats, surface area, sphericity, elongation
+         with intensity stats, elongation, flatness and equivalent diameter
     """
 
     def analyze(
@@ -183,7 +183,7 @@ class ThresholdAnalysisService:
         """Extract per-component DetectedObject instances from the mask.
 
         Uses GPU-accelerated labeling where beneficial, then extracts per-object
-        features including intensity statistics, surface area, sphericity, and
+        features including intensity statistics, elongation, flatness and
         elongation via principal axis analysis.
         """
         # GPU-accelerated connected component labeling
@@ -262,18 +262,27 @@ class ThresholdAnalysisService:
                     std_intensity = float(np.std(region_intensities))
 
             # --- Morphology features ---
-            surface_area_voxels = None
-            sphericity = None
+            # No surface-area estimate here, deliberately. Counting boundary
+            # voxels is blind to voxel anisotropy and saturates for anything
+            # flat, and at the object sizes this node actually finds there is
+            # no voxelized surface estimate worth reporting. The shape
+            # descriptors below come from the position covariance and from the
+            # volume, both of which stay meaningful at low voxel counts.
             elongation = None
+            flatness = None
             principal_axis_lengths = None
 
             if volume_voxels >= 8:  # Need minimum size for meaningful features
-                surface_area_voxels, sphericity = _compute_surface_sphericity(
-                    region_mask, volume_voxels
-                )
-                principal_axis_lengths, elongation = _compute_principal_axes(
+                principal_axis_lengths, elongation, flatness = _compute_principal_axes(
                     region_mask, voxel_size_um
                 )
+
+            # Diameter of the sphere of equal volume: a size, not a shape, and
+            # it needs nothing but the volume, so it holds at any voxel count.
+            volume_mm3 = volume_voxels * voxel_vol_mm3
+            equivalent_diameter_um = float(
+                2.0 * ((3.0 * volume_mm3 * 1e9) / (4.0 * np.pi)) ** (1.0 / 3.0)
+            )
 
             obj = DetectedObject(
                 label_id=label_id,
@@ -281,17 +290,17 @@ class ThresholdAnalysisService:
                 centroid_stage=tuple(float(c) for c in centroid_stage),
                 bounding_box=bb,
                 volume_voxels=volume_voxels,
-                volume_mm3=volume_voxels * voxel_vol_mm3,
+                volume_mm3=volume_mm3,
                 source_channel=source_channel,
                 stage_coords_available=stage_coords_available,
                 mean_intensity=mean_intensity,
                 max_intensity=max_intensity,
                 min_intensity=min_intensity,
                 std_intensity=std_intensity,
-                surface_area_voxels=surface_area_voxels,
-                sphericity=sphericity,
                 elongation=elongation,
+                flatness=flatness,
                 principal_axis_lengths=principal_axis_lengths,
+                equivalent_diameter_um=equivalent_diameter_um,
             )
             objects.append(obj)
 
@@ -299,52 +308,24 @@ class ThresholdAnalysisService:
         return objects
 
 
-def _compute_surface_sphericity(
-    region_mask: np.ndarray, volume_voxels: int
-) -> Tuple[int, float]:
-    """Compute surface area (boundary voxels) and sphericity.
-
-    Surface voxels = mask voxels that have at least one non-mask neighbor
-    (6-connectivity).  Sphericity = ratio of equivalent-sphere surface area
-    to actual surface area.
-
-    Returns:
-        (surface_area_voxels, sphericity)
-    """
-    # Erode by 1 voxel (6-connectivity), boundary = mask minus interior
-    eroded = ndimage.binary_erosion(region_mask)
-    boundary = region_mask & ~eroded
-    surface_voxels = int(np.sum(boundary))
-
-    if surface_voxels == 0:
-        return volume_voxels, 0.0
-
-    # Sphericity: SA_sphere / SA_actual where SA_sphere corresponds to same volume
-    # SA_sphere = (pi^(1/3)) * (6V)^(2/3)
-    # For voxelized: use face-count approximation = 6V - 2*adjacencies, but
-    # boundary voxel count is a reasonable proxy for our resolution.
-    v = float(volume_voxels)
-    sa_equiv_sphere = (np.pi ** (1.0 / 3.0)) * ((6.0 * v) ** (2.0 / 3.0))
-    sphericity = min(sa_equiv_sphere / float(surface_voxels), 1.0)
-
-    return surface_voxels, float(sphericity)
-
-
 def _compute_principal_axes(
     region_mask: np.ndarray,
     voxel_size_um: Tuple[float, float, float],
-) -> Tuple[Optional[Tuple[float, float, float]], Optional[float]]:
-    """Compute principal axis lengths and elongation from inertia tensor.
+) -> Tuple[Optional[Tuple[float, float, float]], Optional[float], Optional[float]]:
+    """Principal axis lengths, elongation and flatness from the inertia tensor.
 
-    Uses eigenvalues of the covariance matrix of voxel positions (scaled by
-    voxel size) to determine 3D shape orientation and elongation.
+    Eigenvalues of the covariance matrix of voxel positions, scaled by voxel
+    size, so all three outputs are anisotropy-aware. Each "length" is two
+    standard deviations of the positions along that axis, which is about 2.24x
+    smaller than the extent of a uniform solid -- it is not a diameter.
 
     Returns:
-        (principal_axis_lengths, elongation)  or  (None, None) if degenerate.
+        ``(axis_lengths_um, elongation, flatness)``, or ``(None, None, None)``
+        when the region is too small or the covariance is degenerate.
     """
     coords = np.argwhere(region_mask)  # (N, 3) in (z, y, x) voxel indices
     if coords.shape[0] < 4:
-        return None, None
+        return None, None, None
 
     # Scale to physical units (micrometers)
     vz, vy, vx = voxel_size_um
@@ -358,7 +339,7 @@ def _compute_principal_axes(
     try:
         eigenvalues = np.linalg.eigvalsh(cov)
     except np.linalg.LinAlgError:
-        return None, None
+        return None, None, None
 
     # Eigenvalues are in ascending order; convert variance → "length" (2*sqrt)
     eigenvalues = np.maximum(eigenvalues, 0.0)
@@ -373,5 +354,9 @@ def _compute_principal_axes(
     # one-voxel-thick object. None is already how every other unmeasurable
     # morphology field reports itself, and to_dict() omits it.
     elongation = float(major / minor) if minor > 1e-6 else None
+    # Flatness completes the shape triple: an elongated object can be a rod
+    # (flatness near 1) or a ribbon (flatness large), and elongation alone
+    # cannot tell them apart.
+    flatness = float(mid / minor) if minor > 1e-6 else None
 
-    return (float(major), float(mid), float(minor)), elongation
+    return (float(major), float(mid), float(minor)), elongation, flatness

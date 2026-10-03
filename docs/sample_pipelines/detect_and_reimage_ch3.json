@@ -1,5 +1,5 @@
 {
-  "format_version": "1.0",
+  "format_version": "1.1",
   "name": "Detect & Re-image Ch3 (640nm)",
   "nodes": [
     {
@@ -8,9 +8,27 @@
       "name": "Current View (Ch3 only)",
       "inputs": [],
       "outputs": [
-        {"id": "d3a10001-0001-4001-8001-100000000001", "name": "volume", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
-        {"id": "d3a10001-0001-4001-8001-100000000002", "name": "position", "port_type": "POSITION", "direction": "OUTPUT", "required": false},
-        {"id": "d3a10001-0001-4001-8001-100000000003", "name": "config", "port_type": "ANY", "direction": "OUTPUT", "required": false}
+        {
+          "id": "d3a10001-0001-4001-8001-100000000001",
+          "name": "volume",
+          "port_type": "VOLUME",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a10001-0001-4001-8001-100000000002",
+          "name": "position",
+          "port_type": "POSITION",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a10001-0001-4001-8001-100000000003",
+          "name": "config",
+          "port_type": "ANY",
+          "direction": "OUTPUT",
+          "required": false
+        }
       ],
       "config": {
         "channel_0": false,
@@ -26,16 +44,44 @@
       "node_type": "THRESHOLD",
       "name": "Threshold Ch3",
       "inputs": [
-        {"id": "d3a20001-0001-4001-8001-200000000001", "name": "volume", "port_type": "VOLUME", "direction": "INPUT", "required": false}
+        {
+          "id": "d3a20001-0001-4001-8001-200000000001",
+          "name": "volume",
+          "port_type": "VOLUME",
+          "direction": "INPUT",
+          "required": false
+        }
       ],
       "outputs": [
-        {"id": "d3a20001-0001-4001-8001-200000000002", "name": "objects", "port_type": "OBJECT_LIST", "direction": "OUTPUT", "required": false},
-        {"id": "d3a20001-0001-4001-8001-200000000003", "name": "mask", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
-        {"id": "d3a20001-0001-4001-8001-200000000004", "name": "count", "port_type": "SCALAR", "direction": "OUTPUT", "required": false}
+        {
+          "id": "d3a20001-0001-4001-8001-200000000002",
+          "name": "objects",
+          "port_type": "OBJECT_LIST",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a20001-0001-4001-8001-200000000003",
+          "name": "mask",
+          "port_type": "VOLUME",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a20001-0001-4001-8001-200000000004",
+          "name": "count",
+          "port_type": "SCALAR",
+          "direction": "OUTPUT",
+          "required": false
+        }
       ],
       "config": {
-        "channel_thresholds": {"3": 150},
-        "enabled_channels": [3],
+        "channel_thresholds": {
+          "3": 150
+        },
+        "enabled_channels": [
+          3
+        ],
         "gauss_sigma": 1.0,
         "opening_enabled": false,
         "opening_radius": 1,
@@ -50,12 +96,36 @@
       "node_type": "FOR_EACH",
       "name": "For Each Object",
       "inputs": [
-        {"id": "d3a30001-0001-4001-8001-300000000001", "name": "collection", "port_type": "OBJECT_LIST", "direction": "INPUT", "required": true}
+        {
+          "id": "d3a30001-0001-4001-8001-300000000001",
+          "name": "collection",
+          "port_type": "OBJECT_LIST",
+          "direction": "INPUT",
+          "required": true
+        }
       ],
       "outputs": [
-        {"id": "d3a30001-0001-4001-8001-300000000002", "name": "current_item", "port_type": "OBJECT", "direction": "OUTPUT", "required": false},
-        {"id": "d3a30001-0001-4001-8001-300000000003", "name": "index", "port_type": "SCALAR", "direction": "OUTPUT", "required": false},
-        {"id": "d3a30001-0001-4001-8001-300000000004", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+        {
+          "id": "d3a30001-0001-4001-8001-300000000002",
+          "name": "current_item",
+          "port_type": "OBJECT",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a30001-0001-4001-8001-300000000003",
+          "name": "index",
+          "port_type": "SCALAR",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a30001-0001-4001-8001-300000000004",
+          "name": "completed",
+          "port_type": "TRIGGER",
+          "direction": "OUTPUT",
+          "required": false
+        }
       ],
       "config": {},
       "x": 550.0,
@@ -66,14 +136,50 @@
       "node_type": "WORKFLOW",
       "name": "Re-acquire at Object",
       "inputs": [
-        {"id": "d3a40001-0001-4001-8001-400000000001", "name": "trigger", "port_type": "TRIGGER", "direction": "INPUT", "required": false},
-        {"id": "d3a40001-0001-4001-8001-400000000002", "name": "position", "port_type": "POSITION", "direction": "INPUT", "required": false},
-        {"id": "d3a40001-0001-4001-8001-400000000003", "name": "z_range", "port_type": "OBJECT", "direction": "INPUT", "required": false}
+        {
+          "id": "d3a40001-0001-4001-8001-400000000001",
+          "name": "trigger",
+          "port_type": "TRIGGER",
+          "direction": "INPUT",
+          "required": false
+        },
+        {
+          "id": "d3a40001-0001-4001-8001-400000000002",
+          "name": "position",
+          "port_type": "POSITION",
+          "direction": "INPUT",
+          "required": false
+        },
+        {
+          "id": "d3a40001-0001-4001-8001-400000000003",
+          "name": "z_range",
+          "port_type": "OBJECT",
+          "direction": "INPUT",
+          "required": false
+        }
       ],
       "outputs": [
-        {"id": "d3a40001-0001-4001-8001-400000000004", "name": "volume", "port_type": "VOLUME", "direction": "OUTPUT", "required": false},
-        {"id": "d3a40001-0001-4001-8001-400000000005", "name": "file_path", "port_type": "FILE_PATH", "direction": "OUTPUT", "required": false},
-        {"id": "d3a40001-0001-4001-8001-400000000006", "name": "completed", "port_type": "TRIGGER", "direction": "OUTPUT", "required": false}
+        {
+          "id": "d3a40001-0001-4001-8001-400000000004",
+          "name": "volume",
+          "port_type": "VOLUME",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a40001-0001-4001-8001-400000000005",
+          "name": "file_path",
+          "port_type": "FILE_PATH",
+          "direction": "OUTPUT",
+          "required": false
+        },
+        {
+          "id": "d3a40001-0001-4001-8001-400000000006",
+          "name": "completed",
+          "port_type": "TRIGGER",
+          "direction": "OUTPUT",
+          "required": false
+        }
       ],
       "config": {
         "template_file": "workflows/PipelineZStack.txt",
@@ -108,5 +214,11 @@
       "target_node_id": "d3a40001-0001-4001-8001-000000000004",
       "target_port_id": "d3a40001-0001-4001-8001-400000000002"
     }
-  ]
+  ],
+  "written_by": {
+    "app_version": "0.6.2",
+    "format": "pipeline",
+    "format_version": 2,
+    "written_at": "2026-10-03T19:33:44+00:00"
+  }
 }

@@ -6,7 +6,7 @@ and current config dict. Changes are applied immediately to the node model.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
@@ -65,6 +65,251 @@ LEGACY_KEYS: Dict[NodeType, set] = {
         "params",
     },
 }
+
+
+# One line of help per setting, keyed by (node type, config key). Kept beside
+# the schema rather than inside its tuples so the whole set can be read, and
+# diffed against docs/pipeline_json_format.md, in one place. The coverage test
+# in tests/test_config_field_help.py fails if a schema field has no entry.
+#
+# What each line is for: the label gives the name, this gives the UNIT, the
+# direction of effect, and any coupling the label cannot show. Every float
+# field accepts 0.00-99999.00 and every int 0-999999, so the widget itself
+# offers no guidance at all.
+_CONFIG_HELP: Dict[Tuple[NodeType, str], str] = {
+    # --- WORKFLOW ---
+    (NodeType.WORKFLOW, "template_file"): (
+        "The .txt workflow template this node acquires with."
+    ),
+    (NodeType.WORKFLOW, "use_input_position"): (
+        "Take the stage position from the 'position' input port instead of the "
+        "template's. Has no effect while that port is unconnected, which is "
+        "the state of a freshly dropped node."
+    ),
+    (NodeType.WORKFLOW, "auto_z_range"): (
+        "Replace the template's Z range with the input object's Z extent plus "
+        "the buffer below. Needs the 'z_range' port wired. The result is "
+        "quantized to the display voxel size, 50 um by default."
+    ),
+    (NodeType.WORKFLOW, "auto_tiling"): (
+        "Compute a tile grid from the object's XY extent. If it fits one field "
+        "of view, tiling is removed; otherwise both start and end positions "
+        "are rewritten around the object's centroid. Needs the 'z_range' port "
+        "wired."
+    ),
+    (NodeType.WORKFLOW, "buffer_percent"): (
+        "Percent of the object's extent added at EACH end of every axis, so 25 "
+        "makes the extent 50% larger. Read only when Auto Z-Range or Auto "
+        "Tiling is ticked. Silently clamped to the chamber limits."
+    ),
+    # --- THRESHOLD ---
+    (NodeType.THRESHOLD, "gauss_sigma"): (
+        "Blur applied before thresholding, in VOXELS (not micrometres). Raise "
+        "for fewer, larger, smoother objects. It also lowers peaks, so it "
+        "shifts the effective threshold down. Affects the mask only - "
+        "intensity statistics are read from the unsmoothed data."
+    ),
+    (NodeType.THRESHOLD, "opening_enabled"): (
+        "Turn on the morphological opening below."
+    ),
+    (NodeType.THRESHOLD, "opening_radius"): (
+        "Radius in VOXELS. The element is a 6-connected cross dilated N times, "
+        "not a sphere. Raise to remove thicker necks and shrink objects. Used "
+        "only when Opening Enabled is ticked."
+    ),
+    (NodeType.THRESHOLD, "min_object_size"): (
+        "Discard objects below this many VOXELS. The bound is inclusive, so an "
+        "object of exactly this size is kept. 0 disables it. Counts across the "
+        "merged mask, not per channel."
+    ),
+    (NodeType.THRESHOLD, "default_threshold"): (
+        "Absolute grey level, NOT scaled for bit depth: 100 is about 0.4% of "
+        "full scale on 8-bit and 0.15% on 16-bit. Used only when no "
+        "per-channel threshold is set below."
+    ),
+    # --- PYTHON_FUNCTION ---
+    (NodeType.PYTHON_FUNCTION, "code"): (
+        "The function body. Available by name: np, ndi, filters, measure, "
+        "morphology, exposure, math, and log(). print() does not exist and "
+        "import is rejected. Return a value, or a dict with any of value, "
+        "boolean, mask, objects, result. Returning a boolean picks a branch."
+    ),
+    # --- CONDITIONAL ---
+    (NodeType.CONDITIONAL, "comparison_op"): (
+        "How the 'value' input is compared with the threshold below."
+    ),
+    (NodeType.CONDITIONAL, "threshold_value"): (
+        "Compared against the 'value' input. Overridden by the 'threshold' "
+        "port when that is connected."
+    ),
+    # --- EXTERNAL_COMMAND ---
+    (NodeType.EXTERNAL_COMMAND, "command_template"): (
+        "Shell command to run. Placeholders are substituted before it is " "executed."
+    ),
+    (NodeType.EXTERNAL_COMMAND, "input_format"): (
+        "How the input data is handed to the command."
+    ),
+    (NodeType.EXTERNAL_COMMAND, "output_format"): (
+        "How the command's output is parsed back into a port value."
+    ),
+    (NodeType.EXTERNAL_COMMAND, "timeout_seconds"): (
+        "Seconds to wait before giving up on the command."
+    ),
+    # --- TIMED_LOOP ---
+    (NodeType.TIMED_LOOP, "iterations"): (
+        "How many times to run the body. 0 or less runs until you press Stop. "
+        "Note that a pipeline written by hand without this key runs ONCE: the "
+        "runner's own default is 1, and 10 is only what a new node is seeded "
+        "with here."
+    ),
+    (NodeType.TIMED_LOOP, "interval_seconds"): (
+        "Seconds. Under Timing Mode 'sequential' this is the pause AFTER each "
+        "pass finishes. Under 'clock_aligned' it is the spacing of pass "
+        "STARTS, so a slow pass eats into the wait."
+    ),
+    (NodeType.TIMED_LOOP, "timing_mode"): (
+        "'sequential' waits the interval after each pass. 'clock_aligned' "
+        "keeps passes on a fixed wall-clock cadence even if one overruns."
+    ),
+    # --- POST_PROCESSING ---
+    (NodeType.POST_PROCESSING, "acquisition_dir"): (
+        "The raw acquisition folder to stitch. Overridden by the input port "
+        "when that is connected. Required."
+    ),
+    (NodeType.POST_PROCESSING, "output_dir"): (
+        "Where the stitched output is written. Defaults to a 'stitched' "
+        "folder inside the acquisition directory. Note this down before you "
+        "run: nothing reports it afterwards."
+    ),
+    (NodeType.POST_PROCESSING, "pixel_size_um"): (
+        "XY voxel size in micrometres. Leave as prefilled to use this "
+        "microscope's resolved pixel size; 0.406 is an old 16x value kept only "
+        "as a fallback. Set it explicitly for a reproducible run."
+    ),
+    (NodeType.POST_PROCESSING, "z_step_um"): (
+        "Z step in micrometres. Leave at 0 to read it from the acquisition's "
+        "own metadata."
+    ),
+    (NodeType.POST_PROCESSING, "destripe"): (
+        "Run PyStripe artifact correction before stitching. Adds time roughly "
+        "proportional to the data size."
+    ),
+    (NodeType.POST_PROCESSING, "illumination_fusion"): (
+        "How left and right illumination are combined. 'max' is the default; "
+        "'leonardo' runs in a separate environment and needs it installed."
+    ),
+    (NodeType.POST_PROCESSING, "deconvolution_enabled"): (
+        "Run deconvolution after fusion. Needs a GPU engine installed."
+    ),
+    (NodeType.POST_PROCESSING, "deconvolution_engine"): (
+        "Which deconvolution backend to use. Read only when Deconvolution is " "ticked."
+    ),
+    (NodeType.POST_PROCESSING, "output_format"): (
+        "Container for the stitched result. The sharded OME-Zarr default is "
+        "the one the 3-D viewer and Fiji both read."
+    ),
+    (NodeType.POST_PROCESSING, "package_ozx"): (
+        "Also write a single-file .ozx package alongside the output."
+    ),
+    (NodeType.POST_PROCESSING, "channels"): (
+        "Comma-separated channel ids to process. Leave empty for all of them."
+    ),
+}
+
+#: Channel checkboxes share one line of help: there are eight of them and the
+#: label already names the wavelength and the illumination side.
+for _ch in range(8):
+    _CONFIG_HELP[(NodeType.SAMPLE_VIEW_DATA, f"channel_{_ch}")] = (
+        "Include this channel's volume. Note that the runner treats an ABSENT "
+        "key as enabled, so a pipeline written by hand that omits this "
+        "channel still selects it; the editor writes the value explicitly."
+    )
+
+_OVERVIEW_HELP = {
+    "method": (
+        "Which measure decides whether a tile holds sample. This choice "
+        "governs most of the settings below - the ones it does not read are "
+        "ignored, whatever they say."
+    ),
+    "tiles_x": "Number of tile columns the overview is divided into.",
+    "tiles_y": "Number of tile rows the overview is divided into.",
+    "image_path": (
+        "Load the overview from disk. Used only when the 'image' and "
+        "'image_path' ports are both unconnected."
+    ),
+    "entropy_threshold": (
+        "ENTROPY method. Shannon entropy in BITS, range 0 to 6. Raise to "
+        "select fewer tiles. Each tile is normalized before measuring, so an "
+        "empty tile holding only read noise still scores high - that is this "
+        "method's main failure mode."
+    ),
+    "smoothing": (
+        "ENTROPY method. Smooth the scores across the tile GRID (not the "
+        "image) before thresholding, at a fixed 1.5 tiles."
+    ),
+    "gradient_threshold": (
+        "GRADIENT method. Dimensionless 0 to 1, where 0 is isotropic sample "
+        "texture and 1 a strong directional edge. This is the one setting "
+        "where a LOWER value selects; above 1 selects every tile."
+    ),
+    "dog_threshold": (
+        "DOG method. Variance of the difference-of-Gaussians image, in grey "
+        "levels squared. The default of 0.0 selects EVERY tile."
+    ),
+    "dog_sigma1": (
+        "DOG method. Inner blur radius in IMAGE PIXELS. Must be smaller than "
+        "Sigma 2; nothing enforces that."
+    ),
+    "dog_sigma2": (
+        "DOG method. Outer blur radius in IMAGE PIXELS. Must be larger than " "Sigma 1."
+    ),
+    "variance_threshold": (
+        "VARIANCE and COMBINED methods. Grey levels SQUARED, so this must be "
+        "re-tuned for a different bit depth: a value tuned on 8-bit data is "
+        "out by about 65536x on 16-bit. Raise to select fewer tiles."
+    ),
+    "edge_threshold": (
+        "EDGE and COMBINED methods. Variance of a Laplacian, in grey levels "
+        "squared, so this is as much a FOCUS measure as a sample detector - it "
+        "responds to defocus. Re-tune for a different bit depth."
+    ),
+    "intensity_min": (
+        "INTENSITY method. Lowest mean grey level that counts as sample."
+    ),
+    "intensity_max": (
+        "INTENSITY method. Highest mean grey level that counts as sample. The "
+        "default of 255 ASSUMES 8-BIT data and will reject nearly every tile "
+        "of a 16-bit overview."
+    ),
+    "bp_var_min": "BAND-PASS method. Lowest variance that passes, in grey levels squared.",
+    "bp_var_max": "BAND-PASS method. Highest variance that passes, in grey levels squared.",
+    "bp_entropy_min": "BAND-PASS method. Lowest entropy that passes, in bits (0 to 6).",
+    "tube_interior_method": (
+        "TUBE DETECT method. Which measure tests the tube interior once the "
+        "walls have been found."
+    ),
+    "tube_interior_threshold": (
+        "TUBE DETECT method. Threshold for the interior test above, so its "
+        "units follow that choice: bits for entropy, grey levels squared for "
+        "variance."
+    ),
+    "tube_edge_sensitivity": (
+        "TUBE DETECT method. Dimensionless 0 to 1; raise to find edges more "
+        "readily. Above about 1.25 the internal term goes negative. If fewer "
+        "than two edges are found, EVERY tile is selected."
+    ),
+    "morphological_cleanup": (
+        "Close then open the selected-tile mask, to fill single-tile holes and "
+        "drop isolated tiles."
+    ),
+    "morphological_radius": (
+        "Cleanup radius in TILES, not pixels. Read only when Morphological "
+        "Cleanup is ticked."
+    ),
+    "invert": ("Select every tile that was NOT chosen. Applied after cleanup."),
+}
+for _key, _text in _OVERVIEW_HELP.items():
+    _CONFIG_HELP[(NodeType.OVERVIEW_ANALYSIS, _key)] = _text
 
 
 # Per-node-type config schema: list of (key, label, widget_type, default, options)
@@ -346,7 +591,16 @@ class PropertyPanel(QWidget):
             if widget_type == "header":
                 self._config_layout.addRow(widget)
             else:
-                self._config_layout.addRow(label, widget)
+                # The help goes on the label as well as the field. Hovering the
+                # name is what people try first, and a spinbox is a small
+                # target.
+                help_text = _CONFIG_HELP.get((node.node_type, key))
+                label_widget = QLabel(label)
+                if help_text:
+                    tip = f"{label}\n\n{help_text}"
+                    widget.setToolTip(tip)
+                    label_widget.setToolTip(tip)
+                self._config_layout.addRow(label_widget, widget)
             self._widgets[key] = widget
 
         # Channel thresholds for Threshold node
