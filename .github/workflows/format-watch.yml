@@ -27,4 +27,9 @@ jobs:
       # No pip install: the script uses only the standard library so that this
       # job cannot start failing because of a dependency resolution problem.
       - name: Check format versions
+        # The token only raises the GitHub API rate limit for the ome/ngff tag
+        # lookup; without it that call is the first thing a shared runner IP
+        # gets throttled on, and a throttled call reads as "no news".
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python tools/check_format_versions.py

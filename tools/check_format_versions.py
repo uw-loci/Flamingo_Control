@@ -22,6 +22,7 @@ network or parse failure exits 0 -- an unreachable PyPI is not news.
 """
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -32,7 +33,14 @@ USER_AGENT = "Flamingo_Control format-version watch"
 
 def _get_json(url: str):
     """Fetch and decode JSON, or return None if anything goes wrong."""
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT}
+    # Unauthenticated GitHub API calls are rate limited per IP, and CI runners
+    # share IPs. Without a token the NGFF check would be the first thing to get
+    # throttled -- silently, since a failed fetch is treated as "no news".
+    token = os.environ.get("GITHUB_TOKEN")
+    if token and "api.github.com" in url:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
             return json.loads(resp.read().decode("utf-8"))
