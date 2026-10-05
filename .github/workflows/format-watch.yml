@@ -1,0 +1,30 @@
+# Watches for the upstream releases three of our storage decisions are waiting
+# on. The job fails when something has landed, because a failed scheduled run
+# is what actually sends mail -- a passing run is meant to be silent.
+#
+# Monthly is deliberate: the thing being watched (OME-NGFF 1.0) is roadmapped
+# roughly a year out, so a daily check would only add noise.
+name: format watch
+
+on:
+  schedule:
+    # 13:43 UTC on the 2nd of each month. Off the hour on purpose: GitHub
+    # delays scheduled runs that land on busy minutes.
+    - cron: "43 13 2 * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # No pip install: the script uses only the standard library so that this
+      # job cannot start failing because of a dependency resolution problem.
+      - name: Check format versions
+        run: python tools/check_format_versions.py
