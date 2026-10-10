@@ -165,6 +165,8 @@ sample_txt/
 # Temporary screenshots in root only
 /Capture.PNG
 claude-reports/
+# Per-machine Claude Code permissions; .claude/rules/ IS tracked
+.claude/settings.local.json
 claude-report/
 claude-report.md
 logs/

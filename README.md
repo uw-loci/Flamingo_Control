@@ -86,9 +86,9 @@ Quick scanning feature for sample orientation and tile selection:
 
 - **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide for all platforms
 - **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
-- **[CLAUDE.md](docs/CLAUDE.md)** - AI assistant guidance for code work
+- **[CLAUDE.md](CLAUDE.md)** - AI assistant guidance for code work
 - **[LED 2D Overview Guide](docs/led_2d_overview.md)** - Sample orientation scanning
-- **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference (9 NodeTypes, port compatibility, examples)
+- **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference (10 NodeTypes, port compatibility, examples)
 - **[Pipeline AI Prompt](docs/pipeline_ai_prompt.md)** - AI-assisted pipeline generation
 - **`py2flamingo-pipeline run <file.json>`** - Run a pipeline from the command line, no GUI required (installed automatically by `pip install -e .`). See `docs/CLAUDE.md` § Pipeline System for the headless Python API.
 
@@ -109,7 +109,7 @@ Quick scanning feature for sample orientation and tile selection:
 ## Requirements
 
 ### Software
-- Python 3.8-3.11
+- Python 3.11 or newer
 - PyQt5, NumPy (installed via requirements)
 - Optional: Napari (for viewer integration)
 
@@ -401,7 +401,7 @@ Flamingo_Control/
 - Network access (Morgridge network or VPN)
 
 ### Control Computer
-- Python 3.8-3.11
+- Python 3.11 or newer
 - Network connection to microscope subnet
 - PyQt5 for GUI
 - NumPy for image processing

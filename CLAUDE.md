@@ -8,26 +8,35 @@ Py2Flamingo is control software for Flamingo light sheet microscope systems (Hui
 
 **Key Constraints:**
 - Requires Flamingo firmware v2.16.2 on the instrument side
-- Python 3.8-3.11 only
+- Python 3.11 or newer; CI tests 3.11. `requirements.txt` pins `zarr>=3.1.4`, which drops Python 3.10 (see the comment in `.github/workflows/tests.yml`)
 - Network access to microscope (Morgridge network or VPN for production systems)
-- Must have `microscope_settings/FlamingoMetaData.txt` and `workflows/Zstack.txt` on disk
+- Must have `microscope_settings/FlamingoMetaData.txt` and `workflows/ZStack.txt` on disk
 
 ## Running the Application
 
-From the repository root:
+From the repository root (`Flamingo_Control/`):
 
 ```bash
 # Activate virtual environment first (recommended)
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
-# Standalone mode (PyQt GUI only)
-cd Flamingo_Control/src
-python -m py2flamingo --mode standalone
-
-# Napari mode (embeds GUI as dock widget)
-cd Flamingo_Control/src
-python -m py2flamingo --mode napari
+cd src
+python -m py2flamingo   # options (--ip, --port, --workflow, --headless, --log-level) are defined in py2flamingo/cli.py
 ```
+
+Dependencies are in `requirements.txt`; activate `.venv/` before any Python command.
+
+## Development Workflow
+
+This project is tested on a remote PC that is physically connected to the microscope, not on this machine.
+
+- Work directly on `main`; never create a branch. Nobody else can run the code, and the rig pulls `main`, so a branch only adds a merge step.
+- Commit each focused change and push it (`git push origin main`).
+- Then stop and wait for the user's test results from the rig before making further changes. Do not stack several sets of changes without feedback.
+
+## Codemap
+
+`codemap/codemap.json` (generated, git-ignored, about 1.7 MB) maps the `py2flamingo` module hierarchy and its imports. For each module, `imports_to` lists what it imports and `imports_from` lists the modules that import it. Query it with a short script instead of reading it whole, to find where functionality lives or what depends on an interface you are about to change.
 
 ## Testing
 
@@ -62,9 +71,11 @@ Install test dependencies: `pip install -r requirements-dev.txt`
 
 Reports are stored **outside** this git repository at `/home/msnelson/LSControl/claude-reports/` (one level above `Flamingo_Control/`). This directory is private and must NEVER be deleted, moved, or placed inside any git repository.
 
-- Location: `/home/msnelson/LSControl/claude-reports/<descriptive_name>.md`
-- Naming: use lowercase with underscores (e.g., `main_thread_starvation_fix.md`)
+- Location: `/home/msnelson/LSControl/claude-reports/YYYY-MM-DD-descriptive-name.md`
+- Naming: start with the date, then lowercase words joined by hyphens (e.g., `2026-09-22-zvelocity-from-reported-fps.md`). Reference documents under `claude-reports/design/` that are updated in place (e.g., `coordinate_system_reference.md`) keep undated names
 - One report per file, one topic per report
+- Technical reports, implementation notes, root-cause analyses and session summaries go there and are never committed. User-facing docs (`README.md`, `docs/`) are updated in place in this repository
+- When a commit has a report, name the report file in the commit message
 - **Do NOT** create `claude-report.md`, `claude-report/`, or `claude-reports/` inside this repository
 - **Do NOT** delete or modify existing files in the claude-reports directory without explicit user request
 - Existing reports in that directory serve as examples of the expected format
@@ -75,23 +86,30 @@ Reports are stored **outside** this git repository at `/home/msnelson/LSControl/
 
 | When you're changing... | Read this first |
 |-------------------------|-----------------|
-| `views/sample_view.py` (`_load_stitched_from_path`, coordinate mapping) | `claude-reports/coordinate_system_reference.md` — definitive stage→world→display→napari mapping |
-| `visualization/dual_resolution_storage.py` (transforms, `world_to_display_voxel`) | `claude-reports/coordinate_system_reference.md` sections 2, 4 |
-| `visualization/tile_processing_worker.py` (world coords, camera offsets) | `claude-reports/coordinate_system_reference.md` sections 1, 3 |
-| `views/chamber_visualization_manager.py` (wireframe, holder, Y inversion) | `claude-reports/coordinate_system_reference.md` section 6 |
-| `stitching/pipeline.py` (tile positions, origin_um, metadata) | `claude-reports/coordinate_system_reference.md` section 5; `claude-reports/lightsheet_stitching_options.md` |
-| `configs/visualization_3d_config.yaml` (ranges, centers, voxel sizes) | `claude-reports/coordinate_system_reference.md` section 8 (key constants) |
+| `views/sample_view.py` (`_load_stitched_from_path`, coordinate mapping) | `claude-reports/design/coordinate_system_reference.md` — definitive stage→world→display→napari mapping |
+| `visualization/dual_resolution_storage.py` (transforms, `world_to_display_voxel`) | `claude-reports/design/coordinate_system_reference.md` sections 2, 4 |
+| `visualization/tile_processing_worker.py` (world coords, camera offsets) | `claude-reports/design/coordinate_system_reference.md` sections 1, 3 |
+| `views/chamber_visualization_manager.py` (wireframe, holder, Y inversion) | `claude-reports/design/coordinate_system_reference.md` section 6 |
+| Stitching (tile positions, origin_um, metadata) — the code is in the standalone `flamingo_stitcher` package (`/home/msnelson/LSControl/flamingo-stitcher/src/flamingo_stitcher/pipeline.py`); `stitching/` here is a re-export shim | `claude-reports/design/coordinate_system_reference.md` section 5; `claude-reports/design/lightsheet_stitching_options.md` |
+| `src/py2flamingo/configs/visualization_3d_config.yaml` (ranges, centers, voxel sizes) | `claude-reports/design/coordinate_system_reference.md` section 8 (key constants) |
 | Pipeline nodes or `pipeline/` package | `claude-reports/design/pipeline-system.md` |
-| Workflow.txt format or generation | `claude-reports/workflow_file_format.md` |
-| Left/right illumination, dual-side channels | `claude-reports/dual_side_illumination.md` |
+| Workflow.txt format or generation | `claude-reports/design/workflow_file_format.md` |
+| Left/right illumination, dual-side channels | `claude-reports/design/dual_side_illumination.md` |
+
+Four more references live in `.claude/rules/` and load on their own when you work on matching files; read the relevant one first if it has not loaded:
+
+| File | Covers | Loads for |
+|------|--------|-----------|
+| `.claude/rules/tcp-protocol.md` | Binary command format, field usage, flags, connection sequence, async socket reader | `core/`, `services/`, `controllers/`, top-level modules |
+| `.claude/rules/code-quality.md` | Error classes and codes, state tracking instead of hardcoded delays | all Python source |
+| `.claude/rules/ui.md` | Window geometry persistence, acquisition lock | `views/`, `controllers/` |
+| `.claude/rules/workflows.md` | Workflow command codes, flags, save paths | workflow code and `workflows/` files |
 
 **Memory system**: The `memory/MEMORY.md` file (in `.claude/projects/`) is auto-loaded and contains architectural decisions, conventions, and known issues. The `memory/reference_index.md` provides a keyword→document lookup — **check it first** when a query involves coordinates, illumination, workflows, tiles, pipelines, stitching, or session persistence.
 
 ## Architecture
 
-### Modular Design (Post-Refactor)
-
-The codebase underwent a major refactor (2025-08) to separate concerns while maintaining backward compatibility:
+### Modular Design
 
 **Core Directories:**
 - `src/py2flamingo/controllers/` - User-facing actions (snapshot, locate sample, multi-angle acquisition)
@@ -101,7 +119,7 @@ The codebase underwent a major refactor (2025-08) to separate concerns while mai
 - `src/py2flamingo/views/` - Display abstraction (viewer interface, Napari adapter, widgets)
 
 **Entry Points:**
-- `src/py2flamingo/__main__.py` - CLI entry point, handles `--mode` flag
+- `src/py2flamingo/__main__.py` - Module entry point; calls `main()` in `src/py2flamingo/cli.py`, which parses arguments and starts `FlamingoApplication` (`application.py`)
 - `src/py2flamingo/GUI.py` - Main control panel (`Py2FlamingoGUI` class)
 - `src/py2flamingo/napari.py` - Napari integration (`NapariFlamingoGui` dockable widget)
 
@@ -109,7 +127,7 @@ The codebase underwent a major refactor (2025-08) to separate concerns while mai
 
 All inter-thread communication uses centralized queues/events managed via:
 - `core/queue_manager.py` - Creates/manages 8 standard queues (image, command, visualize, etc.)
-- `core/events.py` - Creates/manages 6 events (system_idle, terminate, etc.)
+- `core/events.py` - Creates/manages the standard events (system_idle, terminate, workflow_cancelled, etc.)
 - `core/legacy_adapter.py` - Provides backward-compatible global object exports
 
 **Critical:** Legacy code and external integrations import from `py2flamingo.global_objects`, which now proxies to `legacy_adapter.py`. Never create duplicate Queue/Event instances—always import from the adapter.
@@ -178,13 +196,14 @@ To add a new viewer, implement `ViewerInterface` and update `__main__.py`.
 
 ### Side-Aware Channels and Fusion Mode
 
-The 3D Volume View uses 8 channel slots (configured in `visualization_3d_config.yaml`):
+The 3D Volume View uses 9 channel slots (configured in `visualization_3d_config.yaml`):
 - Channels 0-3: Left illumination path (405nm, 488nm, 561nm, 640nm)
 - Channels 4-7: Right illumination path (same wavelengths, suffixed " R")
+- Channel 8: LED / Brightfield
 
 Right-side channel = left-side channel + 4. Illumination side is parsed from `<Illumination Path>` in workflow files via `utils/tile_workflow_parser.read_illumination_path_from_workflow()`. Right-only acquisitions auto-offset channels by +4; dual-side acquisitions stay in 0-3 (merged).
 
-The **Fusion Mode** dropdown controls `update_mode` on `DualResolutionStorage.update_storage()`:
+The **Fusion Mode** dropdown controls `update_mode` on `DualResolutionVoxelStorage.update_storage()`:
 - Maximum (default), Average, Latest, Additive
 - Disabled during active data loading; changes live-update the running `TileProcessingWorker._update_mode`
 - `self._num_channels` is derived from config length (fallback to 4); all `range(4)` loops use `range(self._num_channels)`
@@ -251,7 +270,7 @@ py2flamingo-pipeline run my_pipeline.json \
 
 **Editor "Import from…" buttons.** The property panel for THRESHOLD, SAMPLE_VIEW_DATA, POST_PROCESSING, and OVERVIEW_ANALYSIS exposes an Import button that opens `pipeline/ui/autofill_preview_dialog.py:AutofillPreviewDialog`. The dialog shows parsed values in editable widgets with per-field checkboxes — users review and tweak before applying. Parsers are reused from `utils/workflow_parser.py`, `utils/tile_workflow_parser.py`, and `configs/config_loader.py`. The WORKFLOW node has a similar Import button inside `PipelineWorkflowConfigDialog` with collapsible Illumination / Camera / Z-Stack / Save sections.
 
-**Tests.** `tests/test_pipeline_*.py` (~100 tests) covers models, all 9 runners, scope resolver, persistence, smoke, and autofill. `tests/fixtures/pipelines/01_*.json` … `14_*.json` are minimal worked examples — including negative-path fixtures (`12_invalid_type.json`, `13_cycle.json`, `14_missing_required.json`) used by validation-rejection tests. `tests/test_pipeline_smoke.py` loads and runs every fixture + every sample headlessly. CI runs the suite on Python 3.10 + 3.11 via `.github/workflows/tests.yml`.
+**Tests.** `tests/test_pipeline_*.py` (~100 tests) covers models, all 10 runners, scope resolver, persistence, smoke, and autofill. `tests/fixtures/pipelines/01_*.json` … `14_*.json` are minimal worked examples — including negative-path fixtures (`12_invalid_type.json`, `13_cycle.json`, `14_missing_required.json`) used by validation-rejection tests. `tests/test_pipeline_smoke.py` loads and runs every fixture + every sample headlessly. CI runs the suite on Python 3.11 via `.github/workflows/tests.yml`.
 
 **Schema-coverage guard.** `tests/test_pipeline_property_panel_coverage.py` regex-scans each runner module's `config.get("…")` calls and asserts every key is either in `_CONFIG_SCHEMAS[node_type]` (so users can edit via the property panel) or in `LEGACY_KEYS[node_type]` (allowlist for keys managed by custom widgets, auto-derived from other sources, or kept for backward compat). Add a new `config.get("…")` to a runner without updating one of the two and the test fails.
 
@@ -261,7 +280,7 @@ py2flamingo-pipeline run my_pipeline.json \
 
 **Required for operation:**
 - `microscope_settings/FlamingoMetaData.txt` - IP/port config (generated by instrument during workflow)
-- `workflows/Zstack.txt` - Default workflow template (seeds GUI settings)
+- `workflows/ZStack.txt` - Default workflow template (seeds GUI settings)
 - `microscope_settings/[microscope]_start_position.txt` - Sample holder tip position (created after first "Find Sample")
 
 **Reference files:**
@@ -286,7 +305,7 @@ class MyNewDialog(PersistentDialog):
 
 - `PersistentDialog` replaces `QDialog`; `PersistentWidget` replaces `QWidget` for top-level windows
 - Position/size is saved on hide/close and restored on first show — no manual code needed
-- The default geometry manager is set once at startup (`application.py`), so no constructor changes are required
+- The default geometry manager is set once at startup (`services/component_factory.py`), so no constructor changes are required
 - The window ID defaults to the class name; override with `window_id="CustomName"` if needed
 - If a subclass overrides `showEvent`/`hideEvent`/`closeEvent`, it **must** call `super()` to preserve persistence
 
@@ -368,6 +387,18 @@ class TestMyFeature(unittest.TestCase):
 - **GUI in Napari mode**: Hides the standalone GUI's image label since Napari canvas is used for display
 - **Models are immutable-ish**: Use dataclasses; create new instances rather than mutating
 - **Logging**: Use `logging.getLogger(__name__)` in all modules
+
+## Logs
+
+The application writes `logs/flamingo_YYYYMMDD_HHMMSS.log` in the repository root (git-ignored). Analyze a log with `/home/msnelson/LSControl/toolsAndTesting/parse_log.py` instead of reading it whole:
+
+```bash
+python parse_log.py flamingo.log --summary
+python parse_log.py flamingo.log --min-level WARNING --short-time
+python parse_log.py flamingo.log --logger sample_view --grep "tile|voxel" --short-time
+python parse_log.py flamingo.log --level ERROR --context 10
+python parse_log.py flamingo.log --time-range 15:30:00 15:32:00 --short-time
+```
 
 ## External Dependencies
 
