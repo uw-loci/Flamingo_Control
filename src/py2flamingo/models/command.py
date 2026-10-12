@@ -72,14 +72,14 @@ class WorkflowCommand(Command):
         workflow_data: Optional pre-loaded workflow bytes
 
     Example:
-        >>> workflow_path = Path("workflows/Zstack.txt")
+        >>> workflow_path = Path("workflows/ZStack.txt")
         >>> cmd = WorkflowCommand(
         ...     code=12292,
         ...     workflow_path=workflow_path,
         ...     workflow_data=workflow_path.read_bytes()
         ... )
         >>> print(cmd.workflow_path.name)
-        Zstack.txt
+        ZStack.txt
     """
 
     workflow_path: Path = None

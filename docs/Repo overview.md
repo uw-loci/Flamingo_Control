@@ -18,7 +18,7 @@ Run __init__.py
 The first step is a series of checks that need to be passed in order to connect and load up the GUI with default values. Requirements include:
 1. A connection to the microscope - Elsa requires being on the Morgridge LAN, Wireless (not eduroam), or connected through a VPN. This step will vary from site to site.
 2. Access to a FlamingoMetaData.txt file - these are generated when you run any workflow. It will go in the `microscope_settings` folder.
-3. Access to a workflow text file, which will be copied to Zstack.txt within the `workflows` folder.
+3. Access to a workflow text file, which will be copied to ZStack.txt within the `workflows` folder.
 
 If any of these steps fail, the user will get a pop-up window informing them of which step has failed, and roughly what is needed. The software then connects on two ports, a `live imaging` port which collects the image data that would normally be displayed on the screen of the Linux box, and a `command` port which sends and recieves information about the microscope and what we want it to do. Four threads total are created at this point:
 1. Command listening thread: get information from the microscope such as whether it is in the Idle State.
