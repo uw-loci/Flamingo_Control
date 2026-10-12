@@ -350,7 +350,7 @@ class TestWorkflowCommand(unittest.TestCase):
 
     def test_create_workflow_command(self):
         """Test creating a workflow command."""
-        path = Path("workflows/Zstack.txt")
+        path = Path("workflows/ZStack.txt")
         cmd = WorkflowCommand(code=12292, workflow_path=path)
         self.assertEqual(cmd.code, 12292)
         self.assertEqual(cmd.workflow_path, path)
@@ -358,14 +358,14 @@ class TestWorkflowCommand(unittest.TestCase):
 
     def test_create_with_workflow_data(self):
         """Test creating workflow command with data."""
-        path = Path("workflows/Zstack.txt")
+        path = Path("workflows/ZStack.txt")
         data = b"workflow content"
         cmd = WorkflowCommand(code=12292, workflow_path=path, workflow_data=data)
         self.assertEqual(cmd.workflow_data, data)
 
     def test_workflow_command_to_dict(self):
         """Test workflow command serialization."""
-        path = Path("workflows/Zstack.txt")
+        path = Path("workflows/ZStack.txt")
         data = b"workflow content"
         cmd = WorkflowCommand(code=12292, workflow_path=path, workflow_data=data)
         result = cmd.to_dict()

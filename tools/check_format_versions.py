@@ -75,9 +75,34 @@ def newest_github_release_tag(repo: str):
     data = _get_json(f"https://api.github.com/repos/{repo}/tags?per_page=100")
     if not isinstance(data, list):
         return None, None
+    return _highest(tag.get("name", "") for tag in data)
+
+
+def newest_github_release(repo: str):
+    """Highest published, non-prerelease *release*, as (text, parts).
+
+    Checked alongside tags because they are different events and either can
+    come first. A tag can be pushed while the text is still being edited, and
+    a release is the announcement: it is what a watcher on the repository gets
+    mailed about. Taking the higher of the two means neither ordering hides a
+    1.0 from us. GitHub's own prerelease flag is honoured as well as the
+    version string, so an 0.6rc0 published as a prerelease cannot trip it.
+    """
+    data = _get_json(f"https://api.github.com/repos/{repo}/releases?per_page=100")
+    if not isinstance(data, list):
+        return None, None
+    names = []
+    for release in data:
+        if release.get("prerelease") or release.get("draft"):
+            continue
+        names.append(release.get("tag_name") or release.get("name") or "")
+    return _highest(names)
+
+
+def _highest(names):
+    """The highest release-shaped version in ``names``, as (text, parts)."""
     best_text, best_parts = None, None
-    for tag in data:
-        name = tag.get("name", "")
+    for name in names:
         parts = _release_parts(name)
         if parts is None:
             continue
@@ -89,12 +114,18 @@ def newest_github_release_tag(repo: str):
 def main() -> int:
     alerts = []
 
-    print("OME-NGFF spec (ome/ngff tags) -- we write OME-Zarr v0.5")
+    print("OME-NGFF spec (ome/ngff tags and releases) -- we write OME-Zarr v0.5")
     tag, parts = newest_github_release_tag("ome/ngff")
+    release, release_parts = newest_github_release("ome/ngff")
+    print(f"  newest tag:     {tag or 'unreadable'}")
+    print(f"  newest release: {release or 'none published'}")
+    # Whichever is further ahead. A tag without a release, or a release
+    # without a matching tag, both count.
+    if release_parts is not None and (parts is None or release_parts > parts):
+        tag, parts = release, release_parts
     if parts is None:
-        print("  no readable tag; skipping")
+        print("  nothing readable; skipping")
     else:
-        print(f"  newest released tag: {tag}")
         if parts[0] >= 1:
             alerts.append(
                 f"OME-NGFF {tag} is out. This is the release the xarray and "
