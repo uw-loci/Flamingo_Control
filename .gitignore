@@ -165,8 +165,11 @@ sample_txt/
 # Temporary screenshots in root only
 /Capture.PNG
 claude-reports/
-# Per-machine Claude Code permissions; .claude/rules/ IS tracked
-.claude/settings.local.json
+# Agent guidance and per-machine Claude Code config. These describe how to work
+# on the code, not how to use the software, so they are for whoever is working
+# in this checkout and are deliberately not shared.
+.claude/
+CLAUDE.md
 claude-report/
 claude-report.md
 logs/

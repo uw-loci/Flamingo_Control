@@ -86,11 +86,11 @@ Quick scanning feature for sample orientation and tile selection:
 
 - **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide for all platforms
 - **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
-- **[CLAUDE.md](CLAUDE.md)** - AI assistant guidance for code work
+- **[Headless Pipelines](docs/headless_pipelines.md)** - Running pipelines from the command line
 - **[LED 2D Overview Guide](docs/led_2d_overview.md)** - Sample orientation scanning
 - **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference (10 NodeTypes, port compatibility, examples)
 - **[Pipeline AI Prompt](docs/pipeline_ai_prompt.md)** - AI-assisted pipeline generation
-- **`py2flamingo-pipeline run <file.json>`** - Run a pipeline from the command line, no GUI required (installed automatically by `pip install -e .`). See `docs/CLAUDE.md` § Pipeline System for the headless Python API.
+- **`py2flamingo-pipeline run <file.json>`** - Run a pipeline from the command line, no GUI required (installed automatically by `pip install -e .`). See **[docs/headless_pipelines.md](docs/headless_pipelines.md)** for the headless Python API.
 
 ---
 
@@ -268,7 +268,7 @@ Application (py2flamingo/__main__.py)
 - **Controllers:** `ConnectionController`, `WorkflowController`, `PositionController`
 - **Services:** `ConfigurationManager`, `MVCConnectionService`, `MVCWorkflowService`
 
-See **[DEVELOPER.md](DEVELOPER.md#architecture-overview)** for detailed architecture documentation.
+See **[DEVELOPER.md](docs/DEVELOPER.md#architecture-overview)** for detailed architecture documentation.
 
 ---
 
@@ -295,7 +295,7 @@ PYTHONPATH=src pytest tests/ --cov=src/py2flamingo --cov-report=html
 4. Ensure tests pass
 5. Submit pull request
 
-See **[DEVELOPER.md](DEVELOPER.md#contributing)** for detailed contribution guidelines.
+See **[DEVELOPER.md](docs/DEVELOPER.md#contributing)** for detailed contribution guidelines.
 
 ---
 
@@ -364,8 +364,7 @@ Flamingo_Control/
 │
 ├── README.md                    # This file
 ├── INSTALLATION.md              # Installation guide
-├── DEVELOPER.md                 # Developer guide
-└── CLAUDE.md                    # AI assistant guidance
+└── docs/DEVELOPER.md         # Developer guide
 ```
 
 ---
