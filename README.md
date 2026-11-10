@@ -6,6 +6,12 @@ Control software for Flamingo light sheet microscope systems. Communicates with 
 
 The Flamingo light sheet microscope was originally designed and developed by the [Huisken Lab](https://huiskenlab.com/flamingo/). This repository provides a Python-based control system for Flamingo microscopes, building upon the hardware and software architecture developed by the Huisken Lab. For more information about the microscope design, sample data, and scientific applications, visit the [Huisken Lab Flamingo page](https://huiskenlab.com/flamingo/).
 
+## Stitching tiled acquisitions: Flamingo Stitcher
+
+To turn a folder of raw tiles into one stitched 3D volume, use **[Flamingo Stitcher](https://github.com/uw-loci/flamingo-stitcher)**. It runs on any Windows computer without the microscope or this control software: download the installer from its [Releases page](https://github.com/uw-loci/flamingo-stitcher/releases), and it updates itself. Its [README](https://github.com/uw-loci/flamingo-stitcher#readme) explains the settings and how to read a stitching log.
+
+This application uses the same stitching code, under **Extensions > Tile Stitching...** and **Extensions > Tile Stitching (Single Workflow)...**.
+
 ---
 
 ## Quick Start
