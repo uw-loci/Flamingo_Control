@@ -52,7 +52,24 @@ The application will:
 
 ---
 
+## Documentation
+
+- **[INSTALLATION.md](docs/INSTALLATION.md)** - Complete installation guide for all platforms
+- **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
+- **[Headless Pipelines](docs/headless_pipelines.md)** - Running pipelines from the command line
+- **[LED 2D Overview Guide](docs/led_2d_overview.md)** - Sample orientation scanning
+- **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference (10 NodeTypes, port compatibility, examples)
+- **[Pipeline AI Prompt](docs/pipeline_ai_prompt.md)** - AI-assisted pipeline generation
+- **`py2flamingo-pipeline run <file.json>`** - Run a pipeline from the command line, no GUI required (installed automatically by `pip install -e .`). See **[docs/headless_pipelines.md](docs/headless_pipelines.md)** for the headless Python API.
+
+The sections below are folded. Click a section's line to open it.
+
+---
+
 ## Features
+
+<details>
+<summary>Configuration management, MVC architecture, dual network support, viewers, LED 2D Overview</summary>
 
 ### Configuration Management
 - **Auto-discovery** of microscope configurations
@@ -62,15 +79,14 @@ The application will:
 
 ### MVC Architecture
 - **Clean separation** of concerns (Model-View-Controller)
-- **Type-safe** code with full type hints
-- **Comprehensive testing** (400+ tests, 95%+ coverage)
+- **Automated tests** (over 2,200) that run without hardware
 - **Observable pattern** for reactive UI updates
 - **Dependency injection** for easy testing
 
 ### Dual Network Support
 - **Internet + microscope subnet** configuration
 - **Automatic routing** through correct network interface
-- **Built-in diagnostics** (`check_network.sh` / `check_network.ps1`)
+- **Built-in diagnostics** (`scripts/check_network.sh` / `scripts/check_network.ps1`)
 - **Connection testing** to verify routing
 
 ### Viewer Integration
@@ -86,65 +102,46 @@ Quick scanning feature for sample orientation and tile selection:
 - **Direct workflow generation** for selected tiles
 - See [LED 2D Overview Guide](docs/led_2d_overview.md) for details
 
----
+</details>
 
-## Documentation
+## Requirements and Platform Support
 
-- **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide for all platforms
-- **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
-- **[Headless Pipelines](docs/headless_pipelines.md)** - Running pipelines from the command line
-- **[LED 2D Overview Guide](docs/led_2d_overview.md)** - Sample orientation scanning
-- **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference (10 NodeTypes, port compatibility, examples)
-- **[Pipeline AI Prompt](docs/pipeline_ai_prompt.md)** - AI-assisted pipeline generation
-- **`py2flamingo-pipeline run <file.json>`** - Run a pipeline from the command line, no GUI required (installed automatically by `pip install -e .`). See **[docs/headless_pipelines.md](docs/headless_pipelines.md)** for the headless Python API.
+<details>
+<summary>Python 3.11 or newer on Windows 10/11, Linux or macOS; firmware v2.16.2 on the microscope</summary>
 
----
+| Platform | Installation Guide |
+|----------|-------------------|
+| **Windows 10/11** | [INSTALLATION.md](docs/INSTALLATION.md#network-configuration-windows) |
+| **Linux** (Ubuntu 20.04+, Fedora 35+) | [INSTALLATION.md](docs/INSTALLATION.md#network-configuration-linux) |
+| **macOS** (10.15+) | [INSTALLATION.md](docs/INSTALLATION.md#network-configuration-macos) |
 
-## Platform Support
+### Microscope Side
+- Flamingo firmware v2.16.2
+- Network access (Morgridge network or VPN)
 
-| Platform | Status | Installation Guide |
-|----------|--------|-------------------|
-| **Windows 10/11** | ✅ Fully Supported | [INSTALLATION.md](INSTALLATION.md#network-configuration-windows) |
-| **Linux** (Ubuntu 20.04+, Fedora 35+) | ✅ Fully Supported | [INSTALLATION.md](INSTALLATION.md#network-configuration-linux) |
-| **macOS** (10.15+) | ✅ Fully Supported | [INSTALLATION.md](INSTALLATION.md#network-configuration-macos) |
-
-**Python Versions:** 3.8, 3.9, 3.10, 3.11
-
----
-
-## Requirements
-
-### Software
+### Control Computer
 - Python 3.11 or newer
-- PyQt5, NumPy (installed via requirements)
-- Optional: Napari (for viewer integration)
-
-### Hardware
-- Network connection to microscope (or mock server for testing)
-- For dual-network setups: Two network adapters
+- Network connection to microscope subnet (for dual-network setups, two network adapters)
+- PyQt5 and NumPy (installed from `requirements.txt`)
+- Optional: Napari for advanced visualization
+- Optional: Zarr for compressed 2D session save/load
 
 ### Configuration Files
 - `microscope_settings/FlamingoMetaData.txt` (or other config files)
 - `workflows/*.txt` (workflow template files)
 
----
+</details>
 
 ## Usage
 
-### Basic Usage
+1. **Launch the application:** `PYTHONPATH=src python -m py2flamingo`
+2. **Select a microscope** from the configuration dropdown.
+3. **Test the connection** (optional but recommended).
+4. **Connect** to the microscope.
+5. **Load or send workflows** in the GUI.
 
-1. **Launch application:**
-   ```bash
-   PYTHONPATH=src python -m py2flamingo
-   ```
-
-2. **Select microscope** from configuration dropdown
-
-3. **Test connection** (optional but recommended)
-
-4. **Connect** to microscope
-
-5. **Load/send workflows** via GUI
+<details>
+<summary>Command-line options and microscope configuration files</summary>
 
 ### Command-Line Options
 
@@ -152,14 +149,11 @@ Quick scanning feature for sample orientation and tile selection:
 # Specify IP and port directly
 python -m py2flamingo --ip 10.129.37.22 --port 53717
 
+# Load a workflow file on startup
+python -m py2flamingo --workflow workflows/ZStack.txt
+
 # Enable debug logging
 python -m py2flamingo --log-level DEBUG
-
-# Legacy standalone mode (no Napari)
-python -m py2flamingo --mode standalone
-
-# Napari integration mode
-python -m py2flamingo --mode napari
 ```
 
 ### Configuration Files
@@ -178,9 +172,12 @@ The application auto-discovers microscope configurations from `microscope_settin
 
 Multiple configurations are supported - create one file per microscope.
 
----
+</details>
 
 ## Network Configuration
+
+<details>
+<summary>Dual-network setup and the network check scripts</summary>
 
 ### Dual-Network Setup
 
@@ -194,31 +191,32 @@ The operating system automatically routes traffic based on destination IP.
 
 **Windows:**
 ```powershell
-.\check_network.ps1
+.\scripts\check_network.ps1
 ```
 
 **Linux/macOS:**
 ```bash
-./check_network.sh
+./scripts/check_network.sh
 ```
 
 **Expected result:** ✓✓✓ EXCELLENT
 
 ### Configuration Steps
 
-See **[INSTALLATION.md](INSTALLATION.md#network-configuration)** for detailed platform-specific network configuration instructions.
+See **[INSTALLATION.md](docs/INSTALLATION.md#network-configuration)** for detailed platform-specific network configuration instructions.
 
----
+</details>
 
 ## Testing Without Hardware
 
-Use the mock server to test without a microscope:
+<details>
+<summary>Run the application against the mock microscope server</summary>
 
 ### Start Mock Server
 
 ```bash
 # Terminal 1
-python mock_server.py
+python tests/mock_server.py
 ```
 
 ### Create Test Configuration
@@ -243,9 +241,56 @@ PYTHONPATH=src python -m py2flamingo
 
 Select "Mock Server" from dropdown and test connection.
 
----
+</details>
+
+## Troubleshooting
+
+<details>
+<summary>Connection timeouts, network configuration, import errors, the application not starting</summary>
+
+### Connection Issues
+
+**"Connection timeout"**
+```bash
+# Windows
+Test-NetConnection -ComputerName 10.129.37.22 -Port 53717
+
+# Linux/macOS
+nc -zv 10.129.37.22 53717
+```
+
+**"Network configuration"**
+```bash
+# Run diagnostic
+.\scripts\check_network.ps1  # Windows
+./scripts/check_network.sh   # Linux/macOS
+```
+
+### Import Errors
+
+```bash
+# Verify PYTHONPATH is set
+echo $PYTHONPATH  # Linux/macOS
+echo $env:PYTHONPATH  # Windows PowerShell
+
+# Should show: src
+```
+
+### Application Won't Start
+
+```bash
+# Enable debug logging
+python -m py2flamingo --log-level DEBUG
+```
+
+See **[INSTALLATION.md](docs/INSTALLATION.md#troubleshooting)** for comprehensive troubleshooting guide.
+
+</details>
 
 ## Architecture
+
+<details>
+<summary>MVC layout and key components</summary>
 
 ### MVC Pattern
 
@@ -276,9 +321,12 @@ Application (py2flamingo/__main__.py)
 
 See **[DEVELOPER.md](docs/DEVELOPER.md#architecture-overview)** for detailed architecture documentation.
 
----
+</details>
 
 ## Development
+
+<details>
+<summary>Running the tests and contributing</summary>
 
 ### Running Tests
 
@@ -303,50 +351,12 @@ PYTHONPATH=src pytest tests/ --cov=src/py2flamingo --cov-report=html
 
 See **[DEVELOPER.md](docs/DEVELOPER.md#contributing)** for detailed contribution guidelines.
 
----
-
-## Troubleshooting
-
-### Connection Issues
-
-**"Connection timeout"**
-```bash
-# Windows
-Test-NetConnection -ComputerName 10.129.37.22 -Port 53717
-
-# Linux/macOS
-nc -zv 10.129.37.22 53717
-```
-
-**"Network configuration"**
-```bash
-# Run diagnostic
-.\check_network.ps1  # Windows
-./check_network.sh   # Linux/macOS
-```
-
-### Import Errors
-
-```bash
-# Verify PYTHONPATH is set
-echo $PYTHONPATH  # Linux/macOS
-echo $env:PYTHONPATH  # Windows PowerShell
-
-# Should show: src
-```
-
-### Application Won't Start
-
-```bash
-# Enable debug logging
-python -m py2flamingo --log-level DEBUG
-```
-
-See **[INSTALLATION.md](INSTALLATION.md#troubleshooting)** for comprehensive troubleshooting guide.
-
----
+</details>
 
 ## Project Structure
+
+<details>
+<summary>Where things are in the repository</summary>
 
 ```
 Flamingo_Control/
@@ -361,21 +371,24 @@ Flamingo_Control/
 │       └── utils/               # Utilities (parsers, etc.)
 │
 ├── tests/                       # Unit and integration tests
+│   └── mock_server.py           # Mock microscope for testing
 ├── microscope_settings/         # Microscope configurations
 ├── workflows/                   # Workflow template files
-│
-├── check_network.sh             # Network diagnostic (Linux/macOS)
-├── check_network.ps1            # Network diagnostic (Windows)
-├── mock_server.py               # Mock microscope for testing
-│
-├── README.md                    # This file
-├── INSTALLATION.md              # Installation guide
-└── docs/DEVELOPER.md         # Developer guide
+├── scripts/
+│   ├── check_network.sh         # Network diagnostic (Linux/macOS)
+│   └── check_network.ps1        # Network diagnostic (Windows)
+├── docs/
+│   ├── INSTALLATION.md          # Installation guide
+│   └── DEVELOPER.md             # Developer guide
+└── README.md                    # This file
 ```
 
----
+</details>
 
 ## Version History
+
+<details>
+<summary>2026-02 and earlier</summary>
 
 ### 2026-02
 - Zarr-based 2D session save/load for MIP and LED 2D Overview (compressed, backward-compatible TIFF loading)
@@ -389,7 +402,6 @@ Flamingo_Control/
 - ✅ Comprehensive network diagnostics
 - ✅ Full Windows 11 support
 - ✅ MVC architecture refactoring complete
-- ✅ 400+ tests with 95%+ coverage
 
 ### Earlier
 - MVC interface implementation
@@ -397,30 +409,16 @@ Flamingo_Control/
 - Mock server for testing
 - Legacy interface (still available)
 
----
-
-## Requirements
-
-### Microscope Side
-- Flamingo firmware v2.16.2
-- Network access (Morgridge network or VPN)
-
-### Control Computer
-- Python 3.11 or newer
-- Network connection to microscope subnet
-- PyQt5 for GUI
-- NumPy for image processing
-- Optional: Napari for advanced visualization
-- Optional: Zarr for compressed 2D session save/load
+</details>
 
 ---
 
 ## Getting Help
 
-- **Installation Issues:** See [INSTALLATION.md](INSTALLATION.md)
+- **Installation Issues:** See [INSTALLATION.md](docs/INSTALLATION.md)
 - **Development Questions:** See [DEVELOPER.md](docs/DEVELOPER.md)
 - **Bug Reports:** [GitHub Issues](https://github.com/uw-loci/Flamingo_Control/issues)
-- **Network Problems:** Run diagnostic script (`check_network.sh` / `check_network.ps1`)
+- **Network Problems:** Run the diagnostic script (`scripts/check_network.sh` / `scripts/check_network.ps1`)
 
 ---
 
@@ -441,5 +439,5 @@ Developed at the University of Wisconsin Laboratory for Optical and Computationa
 ---
 
 **Repository:** https://github.com/uw-loci/Flamingo_Control
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-11-10
 **Status:** Production Ready
