@@ -243,6 +243,7 @@ class ErrorCodes:
     PROTOCOL_ERROR = 2003
     ENCODING_ERROR = 2004
     RESPONSE_PARSE_ERROR = 2005
+    SERVER_LAYOUT_MISMATCH = 2006  # code numbered differently on this server build
 
     # Hardware errors (3000-3999)
     STAGE_LIMIT = 3001

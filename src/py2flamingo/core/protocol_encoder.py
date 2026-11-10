@@ -199,6 +199,12 @@ class ProtocolEncoder:
             ...     params=[1, 0, 0, 0, 0, 0, encoder.CALLBACK_FLAG]
             ... )
         """
+        # Same guard as core/tcp_protocol.py: never send a code the connected
+        # server build numbers differently (core/server_layout.py).
+        from py2flamingo.core import server_layout
+
+        server_layout.check_sendable(code)
+
         # Validate and prepare parameters
         if params is None:
             params = [0] * 7

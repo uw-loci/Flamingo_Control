@@ -34,6 +34,13 @@ faults:
 * **HALT and HOME are different commands.** ``HALT`` (0x6003) stops motion
   where it is; ``HOME`` (0x6002) drives to the reference. They are recorded
   separately so a test can prove which one an emergency stop actually sent.
+* **Server builds number commands differently.** ``layout`` picks the 3.0.0
+  numbering (scope settings as ``SCOPE_SETTINGS_LOAD`` text) or the
+  2026-10-06 one (settings in a metadata document, fourteen COMMON codes
+  moved down by six). The scope answers ``UI_CONTROLLER_ID_GET`` with the
+  matching version string, and on the newer layout the old codes reach the
+  commands now at those numbers: 0x1013 sets ``sleep_minutes``, as it would
+  on the rig.
 * **Every command is recorded.** :meth:`received` is the oracle. An ack is not
   an effect, so a test asserts on what the scope was asked to do, not on what
   the client believes it did.
@@ -56,12 +63,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from py2flamingo.core import server_layout as layouts
 from py2flamingo.core.command_codes import (
     CameraCommands,
     LEDCommands,
     StageCommands,
     SystemCommands,
 )
+from py2flamingo.core.metadata_document import legacy_scope_settings_text, parse
 from py2flamingo.core.tcp_protocol import ProtocolDecoder, ProtocolEncoder
 
 logger = logging.getLogger(__name__)
@@ -85,6 +94,97 @@ ACCEPT_POLL_S = 0.1
 #: only have to make "the ack arrived but the axis has not got there" happen.
 SPEED_MM_PER_S = 2.0
 SPEED_DEG_PER_S = 45.0
+
+
+#: Travel limits reported in the settings (mm, and degrees for r). The
+#: flamingo-mcp safety envelope uses the same x maximum.
+STAGE_LIMITS = {
+    "x": (1.0, 12.31),
+    "y": (5.0, 25.0),
+    "z": (12.5, 26.0),
+    "r": (-720.0, 720.0),
+}
+STAGE_HOME = {"x": 6.0, "y": 12.0, "z": 19.0, "r": 0.0}
+
+
+def metadata_document(scope_name: str, command_port: int) -> str:
+    """A system metadata document like a 2026-10-06 server's, for this scope.
+
+    Only the parts this client reads, in the server template's layout
+    (MetaDataTemplate.cpp). The address is loopback, never an instrument's."""
+    stages = "".join(
+        f"        <Stage {axis}>\n"
+        f"          Hard limit min = {lo:.3f}\n"
+        f"          Hard limit max = {hi:.3f}\n"
+        f"          Soft limit min = {lo:.3f}\n"
+        f"          Soft limit max = {hi:.3f}\n"
+        f"          Home = {STAGE_HOME[axis]:.3f}\n"
+        f"          Unload = {lo:.3f}\n"
+        f"          Default velocity = {50.0 if axis == 'r' else 1.0:.3f}\n"
+        f"        </Stage {axis}>\n"
+        for axis, (lo, hi) in STAGE_LIMITS.items()
+    )
+    lasers = "".join(
+        f"          <Laser {i}>\n          Filter wheel position = {i - 1}\n"
+        f"          </Laser {i}>\n"
+        for i in range(1, 5)
+    )
+    wheel = "".join(
+        f"          Filter wheel position {i} = {i * 500} {8 - i}\n"
+        for i in range(1, 9)
+    ) + "".join(
+        f"          Filter wheel description {i} = filter {i}\n" for i in range(1, 9)
+    )
+    return (
+        "<MetaData>\n  Version = 1.1\n  <Instrument>\n"
+        "    <Microscope characteristics>\n"
+        f"      Name = {scope_name}\n      Type = synthetic\n"
+        f"      <Address>\n        IP = {HOST}\n        Port = {command_port}\n"
+        "      </Address>\n"
+        "      <Builders>\n        <Index 1>\n          Name = Flamingo_Control tests\n"
+        "        </Index 1>\n      </Builders>\n"
+        "    </Microscope characteristics>\n"
+        "    <Electronic box hardware>\n      <Stage motors and controllers>\n"
+        f"{stages}"
+        "      </Stage motors and controllers>\n    </Electronic box hardware>\n"
+        "    <Microscope Hardware>\n      <Illumination setting>\n"
+        "        <Illumination source>\n"
+        f"{lasers}"
+        "          <LED setting>\n          Filter wheel position = 4\n"
+        "          </LED setting>\n        </Illumination source>\n"
+        "      </Illumination setting>\n      <Detection>\n        <Detection 1>\n"
+        "          Tube lens focal length (mm) = 200\n"
+        "          Tube lens length (mm) = 200\n"
+        "          <Detection lens>\n            Magnification = 6.205\n"
+        "          </Detection lens>\n          <Filter wheel 1>\n"
+        f"{wheel}"
+        "          </Filter wheel 1>\n        </Detection 1>\n      </Detection>\n"
+        "    </Microscope Hardware>\n  </Instrument>\n</MetaData>\n"
+    )
+
+
+#: The sections a 3.0.0 server's ScopeSettings.txt has beyond the ones this
+#: client reads; they bring the text to its real size (the client expects at
+#: least 2000 bytes from SCOPE_SETTINGS_LOAD).
+_LEGACY_EXTRA_SECTIONS = (
+    "<Illumination settings>\n"
+    + "".join(
+        f"  {kind} {side} {ax}-axis = 0\n"
+        for kind in ("Offset", "Amplitude")
+        for side in ("left", "right")
+        for ax in ("x", "y")
+    )
+    + "  Alignment center x-axis = 2000\n  Alignment center y-axis = -1\n"
+    "  Sample scan frequency (Hz) = 5000\n</Illumination settings>\n"
+    "<Camera overlap settings>\n"
+    "  Camera 1 overlap percent = 100\n"
+    "  Camera 1 capture mode (0: full, 1: from front, 2: from back) = 0\n"
+    "  Camera 2 overlap percent = 100\n"
+    "  Camera 2 capture mode (0: full, 1: from front, 2: from back) = 0\n"
+    "</Camera overlap settings>\n"
+    "<LED settings>\n  LED selection (0 red, 1 green, 2 blue, 3 white) = 0\n"
+    "  Preview on = 0\n</LED settings>\n"
+)
 
 
 @dataclass
@@ -168,7 +268,11 @@ class SyntheticMicroscope:
             concurrent tests should use; read it back from
             :attr:`command_port` once started.
         live_port: Live-image port to bind. 0 picks a free port.
-        scope_name: Reported in ``SCOPE_SETTINGS_LOAD`` text.
+        scope_name: Reported in the settings, whichever form they take.
+        layout: A :class:`~py2flamingo.core.server_layout.ServerLayout` to
+            number commands by: ``REFERENCE`` (3.0.0, the default) or
+            ``LAYOUT_2026_10_06``. Any other counts can be passed as a layout
+            too, to play a build this client does not know.
     """
 
     def __init__(
@@ -176,10 +280,15 @@ class SyntheticMicroscope:
         command_port: int = DEFAULT_COMMAND_PORT,
         live_port: int = DEFAULT_LIVE_PORT,
         scope_name: str = "synthetic",
+        layout: Optional["layouts.ServerLayout"] = None,
     ) -> None:
         self._requested_command_port = command_port
         self._requested_live_port = live_port
         self.scope_name = scope_name
+        self.layout = layout or layouts.REFERENCE
+        #: Set when a client hits SYSTEM_SLEEP, which on the 2026-10-06 layout
+        #: is the code the 3.0.0 "list storage drives" used to be.
+        self.sleep_minutes: Optional[int] = None
 
         self.stage = StageState()
         self.system_state = SystemCommands.STATE_VALUE_IDLE
@@ -376,8 +485,31 @@ class SyntheticMicroscope:
             return
         handler(client, code, params, value, additional)
 
+    def version_string(self) -> str:
+        """What this scope answers UI_CONTROLLER_ID_GET with."""
+        return (
+            f"ControlSystem - Oct  6 2026 - 14:03:00 - 3.0.0 - "
+            f"{self.layout.counts_text}"
+        )
+
+    def _layout_handlers(self) -> Dict:
+        """Handlers for the commands whose numbers depend on the layout."""
+        named = {
+            "COMMON_UI_CONTROLLER_ID_GET": self._on_controller_id,
+            "COMMON_SUBSYSTEM_CONFIGURATION_GET": self._on_configuration_get,
+            "COMMON_SCOPE_SETTINGS_LOAD": self._on_scope_settings_load,
+            "COMMON_STORAGE_PATH_SET": self._on_storage_path,
+            "COMMON_SYSTEM_SYSTEM_SLEEP": self._on_sleep,
+        }
+        return {
+            self.layout.codes[name]: handler
+            for name, handler in named.items()
+            if name in self.layout.codes
+        }
+
     def _handlers(self) -> Dict:
         return {
+            **self._layout_handlers(),
             SystemCommands.STATE_GET: self._on_state_get,
             SystemCommands.STATE_IDLE: self._on_state_idle,
             # Both move codes. command_codes.py documents POSITION_SET_MOVE
@@ -409,11 +541,13 @@ class SyntheticMicroscope:
         params: Optional[List[int]] = None,
         value: float = 0.0,
         data: bytes = b"",
+        additional: bytes = b"",
     ) -> None:
-        """Send one well-formed 128-byte reply.
+        """Send one well-formed 128-byte reply, plus ``additional`` after it.
 
-        Always 128 bytes. The client reads fixed-size messages, so a reply of
-        any other length costs it frame sync.
+        Always 128 bytes, with addDataBytes giving the length of what follows.
+        The client reads fixed-size messages, so a reply of any other length
+        costs it frame sync. The layout guard is off: this is the server.
         """
         packet = self._encoder.encode_command(
             code=code,
@@ -421,12 +555,57 @@ class SyntheticMicroscope:
             params=params or [0, 0, 0, 0, 0, 0, 0],
             value=value,
             data=data,
+            additional_data_size=len(additional),
+            check_server_layout=False,
         )
         assert len(packet) == 128, f"reply was {len(packet)} bytes, not 128"
         try:
-            client.sendall(packet)
+            client.sendall(packet + additional)
         except OSError:
             pass
+
+    def _on_controller_id(self, client, code, params, value, additional) -> None:
+        # int32Data0 (params[3]) carries the server's verdict on the client's
+        # version; 1 = failed. Ours never matches, as on the rig.
+        self._reply(
+            client,
+            code,
+            params=[0, 0, 0, 1, 0, 0, 0],
+            additional=self.version_string().encode("utf-8"),
+        )
+
+    def _on_configuration_get(self, client, code, params, value, additional) -> None:
+        """2026-10-06 on: the document, then other settings frames after it,
+        as ControlServer::getMicroscopeConfiguration sends them."""
+        if self.layout.has_metadata_document:
+            doc = metadata_document(self.scope_name, self.command_port)
+            self._reply(
+                client,
+                self.layout.codes["META_DATA_DOCUMENT"],
+                additional=doc.encode("utf-8"),
+            )
+        # Stands in for the camera/stage/laser settings that follow.
+        self._reply(client, SystemCommands.STATE_GET)
+
+    def _on_scope_settings_load(self, client, code, params, value, additional) -> None:
+        text, _ = legacy_scope_settings_text(
+            parse(metadata_document(self.scope_name, self.command_port))
+        )
+        # A 3.0.0 server sends its own file: no "rendered from" comment.
+        text = "".join(
+            line + "\n" for line in text.splitlines() if not line.startswith("#")
+        )
+        self._reply(
+            client, code, additional=(text + _LEGACY_EXTRA_SECTIONS).encode("utf-8")
+        )
+
+    def _on_storage_path(self, client, code, params, value, additional) -> None:
+        self._reply(client, code, additional=b"/media/synthetic/drive1\n")
+
+    def _on_sleep(self, client, code, params, value, additional) -> None:
+        # ControlServer clamps to SLEEP_TIME_MIN, which is one minute.
+        self.sleep_minutes = max(1, int(params[3]) if len(params) > 3 else 1)
+        self._reply(client, code)
 
     def _on_state_get(self, client, code, params, value, additional) -> None:
         state = (

@@ -175,6 +175,8 @@ class ProtocolEncoder:
         value: float = 0.0,
         data: bytes = b"",
         additional_data_size: int = 0,
+        *,
+        check_server_layout: bool = True,
     ) -> bytes:
         """
         Encode a command into the binary protocol format.
@@ -187,12 +189,17 @@ class ProtocolEncoder:
             data: Data payload, max 72 bytes (default: empty)
             additional_data_size: Size of additional data to be sent after command
                                  (used for file transfers, sets addDataBytes field)
+            check_server_layout: Refuse codes the connected server numbers
+                differently (default). Only the synthetic microscope, which
+                plays the server, turns this off.
 
         Returns:
             128-byte command structure as bytes
 
         Raises:
             ValueError: If parameters are invalid
+            CommandUnavailable: If the connected server build numbers this
+                code's block differently (see core/server_layout.py)
 
         Example:
             >>> encoder = ProtocolEncoder()
@@ -200,6 +207,14 @@ class ProtocolEncoder:
             >>> len(cmd)
             128
         """
+        # Refuse a code the connected server build numbers differently: a
+        # stale constant would reach it as some other command
+        # (core/server_layout.py). No-op until a server has been identified.
+        from py2flamingo.core import server_layout
+
+        if check_server_layout:
+            server_layout.check_sendable(code)
+
         # Validate and prepare parameters
         if params is None:
             params = [0] * 7

@@ -14,6 +14,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from py2flamingo.core import server_layout
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.utils import file_handlers as fh
@@ -553,6 +554,9 @@ class MVCConnectionService:
         if self.is_connected():
             raise ConnectionError("Already connected. Disconnect first.")
 
+        # A layout from a previous connection must not guard this one.
+        server_layout.clear_active()
+
         # Update model to CONNECTING
         self.model.status = ConnectionStatus(
             state=ConnectionState.CONNECTING,
@@ -584,6 +588,11 @@ class MVCConnectionService:
             self._last_config = config
 
             self.logger.info(f"Connected to {config.ip_address}:{config.port}")
+
+            # Before anything else is sent: which command numbering does this
+            # server build use? The version number cannot tell (see
+            # core/server_layout.py).
+            self._identify_server()
 
         except socket.timeout as e:
             error_msg = f"Connection timeout: {e}"
@@ -624,6 +633,7 @@ class MVCConnectionService:
         try:
             # Close sockets via TCPConnection
             self.tcp_connection.disconnect()
+            server_layout.clear_active()
 
             self._command_socket = None
             self._live_socket = None
@@ -650,6 +660,144 @@ class MVCConnectionService:
                 last_error=error_msg,
             )
             raise
+
+    # ------------------------------------------------------------------
+    # Server build: command layout and settings document
+    # ------------------------------------------------------------------
+
+    def _exchange_frames(
+        self,
+        code: int,
+        want: int,
+        additional: bytes = b"",
+        timeout: float = 3.0,
+    ) -> Tuple[bytes, bytes]:
+        """Send one command and read whole frames until one with code ``want``.
+
+        Returns that frame's 128 bytes and its additional data. Frames before it
+        are logged and skipped; frames after it stay on the socket for the
+        background reader, which is paused for the exchange and resumed after.
+        """
+        import struct
+
+        if self._command_socket is None:
+            raise RuntimeError("Not connected to microscope")
+        paused = False
+        if hasattr(self.tcp_connection, "pause_async_reader"):
+            paused = self.tcp_connection.pause_async_reader()
+        try:
+            packet = self.encoder.encode_command(
+                code=code, additional_data_size=len(additional)
+            )
+            self._command_socket.sendall(packet + additional)
+            deadline = time.time() + timeout
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"No 0x{want:04X} reply to 0x{code:04X} within {timeout:.1f} s"
+                    )
+                header = _receive_full_bytes(self._command_socket, 128, remaining)
+                got = struct.unpack_from("<I", header, 4)[0]
+                size = struct.unpack_from("<I", header, 48)[0]
+                extra = (
+                    _receive_full_bytes(
+                        self._command_socket, size, max(deadline - time.time(), 1.0)
+                    )
+                    if size
+                    else b""
+                )
+                if got == want:
+                    return header, extra
+                self.logger.debug(
+                    f"Skipped 0x{got:04X} ({size} extra bytes) while waiting for 0x{want:04X}"
+                )
+        finally:
+            if paused:
+                self.tcp_connection.resume_async_reader()
+
+    def _identify_server(self) -> None:
+        """Ask the server for its version and take its command layout from it.
+
+        UI_CONTROLLER_ID_GET (0x1002) is the second code of the COMMON block,
+        so no build has moved it. The server answers with its version string,
+        whose last field counts the codes in each block. We send our own string
+        too: a request without one is disconnected when it fails the server's
+        version check (ControlServer::getUIControllerID). Ours never matches the
+        server's, which the server logs and otherwise ignores.
+
+        On any failure the client carries on as before this check existed (the
+        3.0.0 numbering, unguarded), and says so.
+        """
+        from py2flamingo import __version__
+
+        mine = server_layout.client_version_string(__version__)
+        try:
+            _, extra = self._exchange_frames(
+                server_layout.UI_CONTROLLER_ID_GET,
+                want=server_layout.UI_CONTROLLER_ID_GET,
+                additional=mine.encode("utf-8"),
+            )
+        except Exception as e:
+            self.logger.warning(
+                f"Could not read the server's version ({e}); assuming the 3.0.0 "
+                f"command layout, with no check of what is sent"
+            )
+            return
+        text = extra.decode("utf-8", errors="replace")
+        version = server_layout.parse_server_version(text)
+        if version is None:
+            self.logger.warning(
+                f"Server version not understood ({text.strip()!r}); assuming the "
+                f"3.0.0 command layout, with no check of what is sent"
+            )
+            return
+        layout = server_layout.layout_for(version)
+        server_layout.set_active(layout)
+        if layout.recognized:
+            self.logger.info(f"Server: {version}; command {layout.describe()}")
+        else:
+            self.logger.warning(
+                f"Server: {version}. This build numbers its commands in a way this "
+                f"client does not know ({layout.describe()}). Commands in those "
+                f"blocks will be refused until Flamingo_Control is updated for it."
+            )
+
+    def _scope_settings_from_document(self, timeout: float = 5.0) -> str:
+        """Old-layout ScopeSettings text from the server's metadata document.
+
+        SUBSYSTEM_CONFIGURATION_GET (0x1001) makes the server send the document
+        to this client only, then its camera, stage and laser settings. It
+        only reads. META_DATA_DOCUMENT_LOAD would also return the document, but
+        the server re-reads its file, clamps the stage limits and saves the
+        system settings to answer it, so it is not used for a plain read.
+        """
+        from py2flamingo.core import metadata_document
+
+        _, extra = self._exchange_frames(
+            server_layout.SUBSYSTEM_CONFIGURATION_GET,
+            want=server_layout.code("META_DATA_DOCUMENT"),
+            timeout=timeout,
+        )
+        text = extra.decode("utf-8", errors="replace").replace("\x00", "")
+        raw_path = Path("microscope_settings") / "SystemMetaData.txt"
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_path.write_text(text, encoding="utf-8")
+        legacy, missing = metadata_document.legacy_scope_settings_text(
+            metadata_document.parse(text)
+        )
+        needed = [m for m in missing if m.startswith(("Type/", "Stage limits/"))]
+        if needed:
+            self.logger.warning(
+                f"Server metadata document has no value for {len(needed)} setting(s) "
+                f"this client reads: {', '.join(needed[:8])}"
+                + (" ..." if len(needed) > 8 else "")
+            )
+        self.logger.info(
+            f"Settings from the server's metadata document ({len(text)} bytes, "
+            f"saved as {raw_path}), rendered in the ScopeSettings layout"
+        )
+        return legacy
 
     def connect_live(self, timeout: float = 2.0) -> socket.socket:
         """
@@ -833,15 +981,18 @@ class MVCConnectionService:
 
             # Create STORAGE_PATH_GET command with int32Data0=0 (query mode, not selection)
             # Note: Command code 0x1013 is named "SET" on server but handles queries when int32Data0=0
+            storage_code = server_layout.code(
+                "COMMON_STORAGE_PATH_SET", fallback=SystemCommands.STORAGE_PATH_GET
+            )
             cmd = Command(
-                code=SystemCommands.STORAGE_PATH_GET,
+                code=storage_code,
                 parameters={
                     "params": [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]
                 },
             )
 
             self.logger.info(
-                f"Querying storage drives: cmd=0x{SystemCommands.STORAGE_PATH_GET:04X}, "
+                f"Querying storage drives: cmd=0x{storage_code:04X}, "
                 f"callback_flag=0x{CommandDataBits.TRIGGER_CALL_BACK:08X}"
             )
 
@@ -1265,18 +1416,25 @@ class MVCConnectionService:
         self.logger.info("Retrieving microscope settings...")
 
         try:
-            # Step 1: Send command to load settings from microscope
-            COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = 4105
-            cmd_load = Command(code=COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)
+            # Step 1: Get the settings text from the microscope
+            layout = server_layout.active()
+            if layout is not None and layout.has_metadata_document:
+                # 2026-10-06 builds on: no ScopeSettings, a metadata document.
+                settings_data = self._scope_settings_from_document()
+            else:
+                COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD = server_layout.code(
+                    "COMMON_SCOPE_SETTINGS_LOAD", fallback=4105
+                )
+                cmd_load = Command(code=COMMAND_CODES_COMMON_SCOPE_SETTINGS_LOAD)
 
-            self.logger.debug("Sending SCOPE_SETTINGS_LOAD command")
+                self.logger.debug("Sending SCOPE_SETTINGS_LOAD command")
 
-            # CRITICAL: This command sends 128-byte ack + additional text data
-            # We must read ALL data from socket and write to file
-            # Otherwise it stays on socket and interferes with next command
-            settings_data = self._send_command_with_text_response(
-                cmd_load, expected_min_size=2000  # Settings are usually 2-3KB
-            )
+                # CRITICAL: This command sends 128-byte ack + additional text data
+                # We must read ALL data from socket and write to file
+                # Otherwise it stays on socket and interferes with next command
+                settings_data = self._send_command_with_text_response(
+                    cmd_load, expected_min_size=2000  # Settings are usually 2-3KB
+                )
 
             # Step 2: Write settings data to file
             settings_path = Path("microscope_settings") / "ScopeSettings.txt"
