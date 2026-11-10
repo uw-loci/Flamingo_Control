@@ -10,6 +10,8 @@ import socket
 import time
 import unittest
 
+import numpy as np
+
 from py2flamingo.core.command_codes import (
     CameraCommands,
     LEDCommands,
@@ -240,6 +242,74 @@ class TestCameraAndLed(SyntheticScopeTestCase):
         """27 means 27%. It used to be a scaled 16-bit level."""
         self.send(LEDCommands.SET_VALUE, params=[0, 0, 0, 0, 27, 0, 0])
         self.assertEqual(self.scope.led_percent, 27.0)
+
+
+class TestLiveView(SyntheticScopeTestCase):
+    """Frames in the server's format, of a sample the LED lights."""
+
+    def _live_socket(self):
+        live = socket.create_connection((HOST, self.scope.live_port), timeout=5)
+        self.addCleanup(live.close)
+        return live
+
+    @staticmethod
+    def _frame(live):
+        from py2flamingo.services.camera_service import ImageHeader
+
+        def exactly(n):
+            buf = b""
+            while len(buf) < n:
+                chunk = live.recv(n - len(buf))
+                if not chunk:
+                    raise AssertionError("live socket closed")
+                buf += chunk
+            return buf
+
+        header = ImageHeader.from_bytes(exactly(40))
+        assert header.is_plausible(), header
+        pixels = np.frombuffer(exactly(header.image_size), dtype="<u2")
+        return header, pixels.reshape(header.image_height, header.image_width)
+
+    def test_frames_arrive_in_the_client_format_and_count_up(self):
+        self.scope.image_shape = (256, 320)
+        live = self._live_socket()
+        self.send(CameraCommands.LIVE_VIEW_START)
+        first, image = self._frame(live)
+        second, _ = self._frame(live)
+        self.assertEqual(image.shape, (256, 320))
+        self.assertGreater(second.frame_number, first.frame_number)
+
+    def test_nothing_is_sent_without_live_view(self):
+        live = self._live_socket()
+        live.settimeout(0.4)
+        with self.assertRaises(socket.timeout):
+            live.recv(1)
+
+    def test_the_sample_shows_only_with_the_led_on(self):
+        from py2flamingo.testing import synthetic_microscope as synth
+
+        self.scope.image_shape = (256, 256)
+        self.scope.stage.position.update(
+            x=synth.SAMPLE_CENTER_MM[0],
+            y=synth.SAMPLE_CENTER_MM[1],
+            z=synth.SAMPLE_FOCUS_Z_MM,
+        )
+        dark = self.scope.frame_now()
+        self.send(LEDCommands.SET_VALUE, params=[0, 0, 0, 0, 50, 0, 0])
+        self.send(LEDCommands.ENABLE)
+        lit = self.scope.frame_now()
+        self.assertLess(dark.mean(), 200)
+        self.assertGreater(lit.mean(), 600)
+
+    def test_focus_sharpens_the_texture(self):
+        from py2flamingo.testing import synthetic_microscope as synth
+
+        cx, cy = synth.SAMPLE_CENTER_MM
+        focused = synth.render_frame(cx, cy, synth.SAMPLE_FOCUS_Z_MM, 1.0, (256, 256))
+        blurred = synth.render_frame(
+            cx, cy, synth.SAMPLE_FOCUS_Z_MM + 2.0, 1.0, (256, 256)
+        )
+        self.assertGreater(focused.std(), 3 * blurred.std())
 
 
 class TestItIsLoopbackOnly(unittest.TestCase):

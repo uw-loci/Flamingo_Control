@@ -41,6 +41,12 @@ faults:
   matching version string, and on the newer layout the old codes reach the
   commands now at those numbers: 0x1013 sets ``sleep_minutes``, as it would
   on the rig.
+* **Live view streams frames of a synthetic sample.** Between
+  ``LIVE_VIEW_START`` and ``LIVE_VIEW_STOP`` the live port sends the real
+  frame format (40-byte header, 16-bit pixels) rendered at the current stage
+  position: a textured ellipse around the home position, bright only while
+  the LED is enabled and sharp only near ``SAMPLE_FOCUS_Z_MM``. An overview
+  scan therefore finds the sample, and a Z sweep finds its focus.
 * **Every command is recorded.** :meth:`received` is the oracle. An ack is not
   an effect, so a test asserts on what the scope was asked to do, not on what
   the client believes it did.
@@ -58,10 +64,13 @@ Usage::
 
 import logging
 import socket
+import struct
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 
 from py2flamingo.core import server_layout as layouts
 from py2flamingo.core.command_codes import (
@@ -94,6 +103,48 @@ ACCEPT_POLL_S = 0.1
 #: only have to make "the ack arrived but the axis has not got there" happen.
 SPEED_MM_PER_S = 2.0
 SPEED_DEG_PER_S = 45.0
+
+
+#: Image pixel size the settings imply (6.5 um sensor / 6.205x), and the
+#: synthetic sample in stage millimetres: an ellipse around the home position,
+#: in focus at one depth.
+PIXEL_SIZE_MM = 6.5e-3 / 6.205
+SAMPLE_CENTER_MM = (6.0, 12.0)
+SAMPLE_RADII_MM = (1.6, 1.2)
+SAMPLE_FOCUS_Z_MM = 19.0
+SAMPLE_DEPTH_OF_FIELD_MM = 0.4
+LIVE_FPS = 10.0
+
+
+def render_frame(
+    x_mm: float, y_mm: float, z_mm: float, led_fraction: float, shape: Tuple[int, int]
+) -> np.ndarray:
+    """One 16-bit camera frame of the synthetic sample at this stage position.
+
+    Rendered on a grid 8x coarser than the sensor and enlarged, which keeps a
+    2048 x 2048 frame cheap enough to stream at 10 frames a second. Columns
+    follow stage X and rows stage Y."""
+    rows, cols = int(shape[0]), int(shape[1])
+    step = 8
+    r, c = max(1, rows // step), max(1, cols // step)
+    span = PIXEL_SIZE_MM * step
+    ys = y_mm + (np.arange(r) - r / 2 + 0.5) * span
+    xs = x_mm + (np.arange(c) - c / 2 + 0.5) * span
+    yy, xx = np.meshgrid(ys, xs, indexing="ij")
+    (cx, cy), (rx, ry) = SAMPLE_CENTER_MM, SAMPLE_RADII_MM
+    inside = ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2 <= 1.0
+    focus = float(
+        np.exp(-(((z_mm - SAMPLE_FOCUS_Z_MM) / SAMPLE_DEPTH_OF_FIELD_MM) ** 2))
+    )
+    texture = 0.5 + 0.5 * np.sin(xx * 40.0) * np.cos(yy * 35.0)
+    signal = np.where(inside, 0.35 + 0.65 * (focus * texture + (1 - focus) * 0.5), 0.05)
+    frame = 100.0 + led_fraction * 3000.0 * signal
+    frame = np.repeat(np.repeat(frame, step, axis=0), step, axis=1)[:rows, :cols]
+    if frame.shape != (rows, cols):
+        frame = np.pad(
+            frame, ((0, rows - frame.shape[0]), (0, cols - frame.shape[1])), mode="edge"
+        )
+    return frame.astype(np.uint16)
 
 
 #: Travel limits reported in the settings (mm, and degrees for r). The
@@ -267,7 +318,10 @@ class SyntheticMicroscope:
         command_port: Command port to bind. 0 picks a free port, which is what
             concurrent tests should use; read it back from
             :attr:`command_port` once started.
-        live_port: Live-image port to bind. 0 picks a free port.
+        live_port: Live-image port to bind. 0 picks a free port. The
+            application opens the live port at the command port + 1, as on
+            the instrument (53717 / 53718), so a scope the app connects to
+            needs ``live_port = command_port + 1``.
         scope_name: Reported in the settings, whichever form they take.
         layout: A :class:`~py2flamingo.core.server_layout.ServerLayout` to
             number commands by: ``REFERENCE`` (3.0.0, the default) or
@@ -295,6 +349,10 @@ class SyntheticMicroscope:
         self.exposure_us = 10_000
         self.image_shape = (2048, 2048)
         self.led_percent = 0.0
+        self.led_enabled = False
+        self.live_view = False
+        #: Frames sent on the live port, all connections together.
+        self.frames_sent = 0
         self.laser_levels: Dict[int, float] = {}
         self.workflow_running = False
         #: Workflow text the client uploaded, newest last.
@@ -530,6 +588,10 @@ class SyntheticMicroscope:
             CameraCommands.WORKFLOW_START: self._on_workflow_start,
             CameraCommands.WORKFLOW_STOP: self._on_workflow_stop,
             LEDCommands.SET_VALUE: self._on_led_set,
+            LEDCommands.ENABLE: self._on_led_enable,
+            LEDCommands.DISABLE: self._on_led_disable,
+            CameraCommands.LIVE_VIEW_START: self._on_live_start,
+            CameraCommands.LIVE_VIEW_STOP: self._on_live_stop,
         }
 
     # -------------------------------------------------------------- behaviours
@@ -683,6 +745,28 @@ class SyntheticMicroscope:
 
     # --------------------------------------------------------------- live port
 
+    def _on_led_enable(self, client, code, params, value, additional) -> None:
+        self.led_enabled = True
+        self._reply(client, code)
+
+    def _on_led_disable(self, client, code, params, value, additional) -> None:
+        self.led_enabled = False
+        self._reply(client, code)
+
+    def _on_live_start(self, client, code, params, value, additional) -> None:
+        self.live_view = True
+        self._reply(client, code)
+
+    def _on_live_stop(self, client, code, params, value, additional) -> None:
+        self.live_view = False
+        self._reply(client, code)
+
+    def frame_now(self) -> np.ndarray:
+        """The frame the camera would see at this instant."""
+        pos = self.stage_position()
+        led = (self.led_percent / 100.0) if self.led_enabled else 0.0
+        return render_frame(pos["x"], pos["y"], pos["z"], led, self.image_shape)
+
     def _serve_live(self, listener: socket.socket) -> None:
         while self._running:
             try:
@@ -691,6 +775,45 @@ class SyntheticMicroscope:
                 continue
             except OSError:
                 return
+            thread = threading.Thread(
+                target=self._stream_live, args=(client,), daemon=True
+            )
+            thread.start()
+            with self._lock:
+                self._threads.append(thread)
+
+    def _stream_live(self, client: socket.socket) -> None:
+        """Send frames while live view is on, in the server's frame format."""
+        period = 1.0 / LIVE_FPS
+        try:
+            while self._running:
+                if not self.live_view:
+                    time.sleep(0.02)
+                    continue
+                started = time.monotonic()
+                frame = self.frame_now()
+                rows, cols = frame.shape
+                with self._lock:
+                    self.frames_sent += 1
+                    number = self.frames_sent
+                header = struct.pack(
+                    "<10I",
+                    frame.nbytes,
+                    cols,
+                    rows,
+                    int(frame.min()),
+                    int(frame.max()),
+                    int(time.time() * 1000) & 0xFFFFFFFF,
+                    number,
+                    int(self.exposure_us),
+                    0,
+                    0,
+                )
+                client.sendall(header + frame.tobytes())
+                time.sleep(max(0.0, period - (time.monotonic() - started)))
+        except OSError:
+            pass
+        finally:
             try:
                 client.close()
             except OSError:
