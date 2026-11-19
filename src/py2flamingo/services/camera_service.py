@@ -1011,11 +1011,20 @@ class CameraService(MicroscopeCommandService):
         if self._data_thread and self._data_thread.is_alive():
             self._data_thread.join(timeout=2.0)
             if self._data_thread.is_alive():
-                self.logger.warning(
-                    "Data receiver thread did not stop within 2s timeout"
+                # Blocked in recv() (5 s timeout). Left alone it keeps reading
+                # the live socket after the next receiver starts on it, the two
+                # split the stream between them and neither assembles a frame
+                # (Start Live after a snapshot or tile workflow showed nothing).
+                # Close the socket, as stop_live_view_streaming does, so the
+                # thread ends now; the next user reconnects on demand.
+                self.logger.info(
+                    "Data receiver still in recv(); closing the live socket so it stops"
                 )
+                self._close_live_socket()
+                self._data_thread.join(timeout=2.0)
+                if self._data_thread.is_alive():
+                    self.logger.warning("Data receiver thread did not stop")
 
-        # Clear socket reference (but don't close it - tcp_connection owns it)
         self._data_socket = None
 
         self.logger.info("Stopped data receiver (no LIVE_VIEW_STOP sent)")
