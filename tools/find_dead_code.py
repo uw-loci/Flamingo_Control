@@ -147,6 +147,17 @@ def _is_exempt(name: str) -> bool:
     return name in KNOWN_OVERRIDES
 
 
+# Decorators that register the function they wrap, so the function is reached
+# through a registry rather than called by name.
+REGISTERING_DECORATORS = {"check"}
+
+
+def _is_registering(dec: ast.expr) -> bool:
+    target = dec.func if isinstance(dec, ast.Call) else dec
+    name = getattr(target, "id", None) or getattr(target, "attr", None)
+    return name in REGISTERING_DECORATORS
+
+
 class _Definitions(ast.NodeVisitor):
     """Collect every def, with the class it belongs to."""
 
@@ -162,7 +173,10 @@ class _Definitions(ast.NodeVisitor):
 
     def _record(self, node) -> None:
         qualifier = ".".join(self._class_stack) if self._class_stack else "<module>"
-        self.defs.append((node.name, qualifier, node.lineno))
+        # A function handed to a registering decorator is used by the registry
+        # (verification checks: ``@check("t0.state", ...)``).
+        if not any(_is_registering(dec) for dec in node.decorator_list):
+            self.defs.append((node.name, qualifier, node.lineno))
         self.generic_visit(node)
 
     visit_FunctionDef = _record

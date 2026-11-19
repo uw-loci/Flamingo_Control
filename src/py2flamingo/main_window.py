@@ -477,6 +477,14 @@ class MainWindow(QMainWindow):
         self.save_settings_action.triggered.connect(self._on_save_settings)
         self.conn_tests_menu.addAction(self.save_settings_action)
 
+        self.conn_tests_menu.addSeparator()
+        self.verification_action = QAction("Post-update &verification...", self)
+        self.verification_action.setStatusTip(
+            "Check every command this app uses against the connected microscope"
+        )
+        self.verification_action.triggered.connect(self._on_verification)
+        self.conn_tests_menu.addAction(self.verification_action)
+
         # Extensions menu (requires connection + Sample View open)
         extensions_menu = menubar.addMenu("&Extensions")
 
@@ -1057,6 +1065,16 @@ class MainWindow(QMainWindow):
     def _on_debug_query(self, command_code: int, command_name: str):
         """Handle Connection Tests → Query command menu action."""
         self.connection_view.send_debug_query(command_code, command_name)
+
+    def _on_verification(self):
+        """Handle Connection Tests -> Post-update verification."""
+        from py2flamingo.views.dialogs.verification_dialog import VerificationDialog
+
+        dialog = getattr(self, "_verification_dialog", None)
+        if dialog is None or not dialog.isVisible():
+            self._verification_dialog = VerificationDialog(self.app, self)
+        self._verification_dialog.show()
+        self._verification_dialog.raise_()
 
     def _on_save_settings(self):
         """Handle Connection Tests → Save Settings menu action."""
