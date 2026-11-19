@@ -20,6 +20,9 @@ from py2flamingo.core.tcp_protocol import ProtocolEncoder
 POST_1006 = (
     "ControlSystem - Oct  6 2026 - 14:03:00 - 3.0.0 - 20.10.58.7.2.20.19.9.8.8.7.4"
 )
+POST_1113 = (
+    "ControlSystem - Nov 13 2026 - 10:00:00 - 3.0.0 - 21.10.62.7.2.20.19.9.8.8.7.4"
+)
 SERVER_300 = (
     "ControlSystem - Sep 19 2026 - 09:00:00 - 3.0.0 - 26.10.58.7.2.20.19.9.8.8.7.5"
 )
@@ -162,6 +165,52 @@ class TestABuildThisClientDoesNotKnow(LayoutTestCase):
             del os.environ[sl.OVERRIDE_ENV]
 
 
+class TestThe2026_11_13Build(LayoutTestCase):
+    """COMMON renumbered again; CAMERA grew at its end only (binning)."""
+
+    def setUp(self):
+        self.layout = sl.layout_for(sl.parse_server_version(POST_1113))
+        sl.set_active(self.layout)
+
+    def test_it_is_recognized(self):
+        self.assertIs(self.layout, sl.LAYOUT_2026_11_13)
+        self.assertTrue(self.layout.has_metadata_document)
+
+    def test_camera_commands_still_go_out(self):
+        # Without appended_blocks the count change (58 -> 62) would refuse these.
+        for code in (0x3004, 0x3006, 0x3007, 0x3009, 0x3027, 0x302B, 0x3033, 0x3039):
+            sl.check_sendable(code)
+
+    def test_the_new_binning_codes_are_looked_up_by_name(self):
+        self.assertEqual(sl.code("CAMERA_BINNING_GET"), 0x303D)
+        sl.check_sendable(0x303D)
+
+    def test_a_code_past_the_old_camera_end_is_not_assumed(self):
+        # 0x3042 is a client constant no server header defines.
+        with self.assertRaises(sl.CommandUnavailable):
+            sl.check_sendable(0x3042)
+
+    def test_storage_paths_moved_again_and_stale_numbers_are_refused(self):
+        self.assertEqual(sl.code("COMMON_STORAGE_PATH_SET", fallback=0x1013), 0x100F)
+        self.assertEqual(sl.code("COMMON_STORAGE_PATH_TEST"), 0x1011)
+        # 10-06's STORAGE_PATH_SET is COMM_SUPPORT_EXE_CMD here; 3.0.0's is SLEEP.
+        for code in (0x100D, 0x1013, 0x1008, 0x1009, 0x1014):
+            with self.assertRaises(sl.CommandUnavailable, msg=hex(code)):
+                sl.check_sendable(code)
+
+    def test_a_later_build_with_the_same_camera_count_inherits_the_append(self):
+        later = sl.layout_for(
+            sl.parse_server_version(
+                "ControlSystem - Jan  1 2027 - 08:00:00 - 3.0.0 - "
+                "22.10.62.7.2.20.19.9.8.8.7.4"
+            )
+        )
+        self.assertFalse(later.recognized)
+        self.assertIn("CAMERA", later.appended_blocks)
+        later.check_sendable(0x3004)
+        self.assertEqual(later.unknown_blocks, {"COMMON"})
+
+
 class TestTheSettingsDocument(unittest.TestCase):
     DOC = (
         "<MetaData>\n  <Instrument>\n    <Microscope characteristics>\n"
@@ -261,6 +310,36 @@ class TestAgainstTheSyntheticScope(LayoutTestCase):
         self.assertEqual(service.query_available_drives(), ["/media/synthetic/drive1"])
         self.assertTrue(scope.received(0x100D))
         self.assertIsNone(scope.sleep_minutes, "0x1013 would have set the sleep timer")
+
+    def test_a_2026_11_13_server_is_identified_and_its_camera_still_answers(self):
+        scope, service = self._connect(sl.LAYOUT_2026_11_13)
+        self.assertIs(sl.active(), sl.LAYOUT_2026_11_13)
+        _, settings = service.get_microscope_settings()
+        self.assertEqual(settings["Type"]["Microscope name"], "synthetic")
+        self.assertEqual(service.query_available_drives(), ["/media/synthetic/drive1"])
+        self.assertTrue(scope.received(0x100F))
+        self.assertIsNone(scope.sleep_minutes)
+        # A camera command passes the guard and reaches the scope.
+        from py2flamingo.services.camera_service import CameraService
+
+        width, height = CameraService(service).get_image_size()
+        self.assertGreater(width, 0)
+        self.assertTrue(scope.received(0x3027))
+
+    def test_a_board_notice_is_logged_as_a_warning(self):
+        from types import SimpleNamespace
+
+        scope, service = self._connect(sl.LAYOUT_2026_11_13)
+        message = SimpleNamespace(
+            subsystem_id=7,
+            hardware_id=0,
+            additional_data=b"4\n12\nScope_Board\x00",
+        )
+        with self.assertLogs(service.logger, level="WARNING") as logs:
+            service._on_device_notice("COMMON_DEVICE_LOST", message)
+        self.assertIn("board lost", logs.output[0])
+        self.assertIn("Scope_Board", logs.output[0])
+        self.assertEqual(service.device_notices[-1][1], "COMMON_DEVICE_LOST")
 
     def test_a_3_0_0_server_is_read_exactly_as_before(self):
         scope, service = self._connect(sl.REFERENCE)

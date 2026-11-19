@@ -30,7 +30,9 @@ block; the server-source check (``check_server_updates.sh`` and the
 flamingo-server-api skill) is what catches that.
 
 To add the next build: resolve its ``CommandCodes.h`` and add a
-``ServerLayout`` entry with its counts and its COMMON and META_DATA codes.
+``ServerLayout`` entry with its counts, the codes of every block it renumbered,
+and ``appended_blocks`` for blocks that only gained codes at their end (the
+3.0.0 codes in those stay sendable).
 """
 
 from __future__ import annotations
@@ -79,6 +81,11 @@ CLIENT_LOOKUPS: FrozenSet[str] = frozenset(
         "COMMON_STORAGE_PATH_TEST",
         "COMMON_SCOPE_SETTINGS_LOAD",
         "COMMON_SCOPE_SETTINGS_SAVE",
+        # Binning reads (2026-11-13 build on). Not BINNING_SET: it resets the
+        # camera ROI to the full frame, and nothing here restores that yet.
+        "CAMERA_BINNING_GET",
+        "CAMERA_BINNING_MAX_DESC",
+        "CAMERA_BINNING_STEPPING_DESC",
         # Not DOCUMENT_LOAD or DOCUMENT_SAVE: both write on the server (LOAD
         # re-reads the file, clamps stage limits and saves the system
         # settings), and nothing here sends them yet. Settings are read with
@@ -108,6 +115,11 @@ class ServerLayout:
     # Scope and control settings live in the system metadata document.
     has_metadata_document: bool = False
     recognized: bool = True
+    # Blocks that only grew at their end: every code the 3.0.0 layout has in
+    # them keeps its value and meaning (CAMERA on the 2026-11-13 build, which
+    # appended four binning codes). A count alone cannot tell an append from a
+    # renumbering, so this is only ever set from a resolved header.
+    appended_blocks: FrozenSet[str] = frozenset()
 
     @property
     def counts_text(self) -> str:
@@ -142,7 +154,9 @@ class ServerLayout:
         if key in self.codes:
             return self.codes[key]
         block = _block_of_name(key)
-        if block is not None and block not in self.changed_blocks:
+        if block is not None and (
+            block not in self.changed_blocks or block in self.appended_blocks
+        ):
             ref = REFERENCE.codes.get(key)
             if ref is not None:
                 return ref
@@ -162,6 +176,8 @@ class ServerLayout:
         if block is None or block not in self.changed_blocks:
             return
         if code in _ALWAYS_SENDABLE or code in self.sendable_in_changed_blocks:
+            return
+        if block in self.appended_blocks and code < _reference_block_end(block):
             return
         if os.environ.get(OVERRIDE_ENV) == "1":
             logger.warning(
@@ -201,6 +217,12 @@ class ServerLayout:
             for i, block in enumerate(BLOCK_ORDER)
             if all(k.counts[i] != self.counts[i] for k in KNOWN_LAYOUTS.values())
         )
+
+
+def _reference_block_end(block: str) -> int:
+    """First code past the block's end in the 3.0.0 layout (its END value)."""
+    i = BLOCK_ORDER.index(block)
+    return ((i + 1) << 12) + REFERENCE.counts[i]
 
 
 def _block_of_name(key: str) -> Optional[str]:
@@ -285,9 +307,61 @@ LAYOUT_2026_10_06 = ServerLayout(
     has_metadata_document=True,
 )
 
+# Server source 2026-11-04 to 11-10 (commits 88a404dad .. 14dc9512d; unchanged
+# through 468c2b804, 2026-11-19). COMMON: DEVICE_RESET and DEVICE_LOST inserted
+# after MESSAGE_FROM_CONTROLLER (unsolicited: a board reset, or its USB/serial
+# link dropped), the three SYSTEM_UPDATE codes collapsed into one, and
+# DEVICE_RECOVERED appended. SYSTEM_SLEEP lands back on 0x1013 by coincidence.
+# CAMERA: BINNING_MAX_DESC, BINNING_STEPPING_DESC, BINNING_SET, BINNING_GET
+# appended at 0x303A-0x303D; no camera code moved. META_DATA as on 10-06.
+# Still reports system version 3.0.0.
+LAYOUT_2026_11_13 = ServerLayout(
+    name="2026-11-13 (device notices, camera binning)",
+    counts=(21, 10, 62, 7, 2, 20, 19, 9, 8, 8, 7, 4),
+    codes={
+        "COMMON_SUBSYSTEM_CONFIGURATION_GET": 0x1001,
+        "COMMON_UI_CONTROLLER_ID_GET": 0x1002,
+        "COMMON_WORK_FLOW_SETTINGS_EMPTY": 0x1003,
+        "COMMON_POWER_DOWN": 0x1004,
+        "COMMON_REBOOT": 0x1005,
+        "COMMON_MESSAGE_FROM_CONTROLLER": 0x1006,
+        "COMMON_DEVICE_RESET": 0x1007,
+        "COMMON_DEVICE_LOST": 0x1008,
+        "COMMON_MEMS_CAL_SETTINGS_SAVE": 0x1009,
+        "COMMON_MEMS_CAL_SETTINGS_LOAD": 0x100A,
+        "COMMON_MEMS_SPEC_SETTINGS_SAVE": 0x100B,
+        "COMMON_MEMS_SPEC_SETTINGS_LOAD": 0x100C,
+        "COMMON_COMM_SUPPORT_SET_OPTIONS": 0x100D,
+        "COMMON_COMM_SUPPORT_EXE_CMD": 0x100E,
+        "COMMON_STORAGE_PATH_SET": 0x100F,
+        "COMMON_STORAGE_PATH_UNMOUNT": 0x1010,
+        "COMMON_STORAGE_PATH_TEST": 0x1011,
+        "COMMON_SYSTEM_UPDATE": 0x1012,
+        "COMMON_SYSTEM_SYSTEM_SLEEP": 0x1013,
+        "COMMON_DEVICE_RECOVERED": 0x1014,
+        "CAMERA_BINNING_MAX_DESC": 0x303A,
+        "CAMERA_BINNING_STEPPING_DESC": 0x303B,
+        "CAMERA_BINNING_SET": 0x303C,
+        "CAMERA_BINNING_GET": 0x303D,
+        "META_DATA_DOCUMENT": 0xC001,
+        "META_DATA_DOCUMENT_SAVE": 0xC002,
+        "META_DATA_DOCUMENT_LOAD": 0xC003,
+    },
+    has_metadata_document=True,
+    appended_blocks=frozenset({"CAMERA"}),
+)
+
 KNOWN_LAYOUTS: Dict[Tuple[int, ...], ServerLayout] = {
-    layout.counts: layout for layout in (REFERENCE, LAYOUT_2026_10_06)
+    layout.counts: layout
+    for layout in (REFERENCE, LAYOUT_2026_10_06, LAYOUT_2026_11_13)
 }
+
+# Unsolicited notices about the instrument's boards (2026-11-13 build on).
+DEVICE_NOTICES: Tuple[str, ...] = (
+    "COMMON_DEVICE_LOST",
+    "COMMON_DEVICE_RESET",
+    "COMMON_DEVICE_RECOVERED",
+)
 
 
 # --------------------------------------------------------------------------
@@ -343,9 +417,12 @@ def layout_for(version: ServerVersion) -> ServerLayout:
     # matches no known count gets no codes, so check_sendable refuses it.
     codes: Dict[str, int] = {}
     inherited: Dict[str, str] = {}
+    appended = set()
     for block, count in zip(BLOCK_ORDER, version.counts):
         for layout in KNOWN_LAYOUTS.values():
             if layout.counts[BLOCK_ORDER.index(block)] == count:
+                if block in layout.appended_blocks:
+                    appended.add(block)
                 codes.update(
                     {
                         k: v
@@ -361,10 +438,12 @@ def layout_for(version: ServerVersion) -> ServerLayout:
         counts=version.counts,
         codes=codes,
         has_metadata_document=(
-            inherited.get("META_DATA") == LAYOUT_2026_10_06.name
-            and version.counts[meta] == LAYOUT_2026_10_06.counts[meta]
+            version.counts[meta] == LAYOUT_2026_10_06.counts[meta]
+            and inherited.get("META_DATA")
+            in (LAYOUT_2026_10_06.name, LAYOUT_2026_11_13.name)
         ),
         recognized=False,
+        appended_blocks=frozenset(appended),
     )
 
 

@@ -762,6 +762,55 @@ class MVCConnectionService:
                 f"client does not know ({layout.describe()}). Commands in those "
                 f"blocks will be refused until Flamingo_Control is updated for it."
             )
+        self._watch_device_notices(layout)
+
+    def _watch_device_notices(self, layout) -> None:
+        """Log the server's board notices (2026-11-13 build on).
+
+        DEVICE_LOST: a board's USB/serial link dropped; additionalData lists the
+        sub-system IDs that went with it, one per line, then the board's name.
+        DEVICE_RESET: a board printed its own "STARTED <board> reset <cause>"
+        line (the raw line is in additionalData). DEVICE_RECOVERED: the board
+        was found and bound again. Without a handler these arrive as unhandled
+        messages and are logged only at DEBUG level.
+        """
+        for code, handler in getattr(self, "_device_notice_handlers", []):
+            try:
+                self.unregister_callback(code, handler)
+            except Exception:
+                pass
+        self._device_notice_handlers = []
+        self.device_notices = []
+        for name in server_layout.DEVICE_NOTICES:
+            code = layout.codes.get(name)
+            if code is None:
+                continue
+
+            def handler(message, _name=name):
+                self._on_device_notice(_name, message)
+
+            self.register_callback(code, handler)
+            self._device_notice_handlers.append((code, handler))
+
+    def _on_device_notice(self, name: str, message) -> None:
+        extra = (getattr(message, "additional_data", None) or b"").decode(
+            "utf-8", errors="replace"
+        )
+        text = " | ".join(
+            line.strip()
+            for line in extra.replace("\x00", "").splitlines()
+            if line.strip()
+        )
+        what = name.removeprefix("COMMON_DEVICE_").lower()
+        line = (
+            f"Server reports a board {what}: subsystem {message.subsystem_id}, "
+            f"hardware {message.hardware_id}" + (f": {text}" if text else "")
+        )
+        self.device_notices.append((time.time(), name, line))
+        if name == "COMMON_DEVICE_RECOVERED":
+            self.logger.info(line)
+        else:
+            self.logger.warning(line)
 
     def _scope_settings_from_document(self, timeout: float = 5.0) -> str:
         """Old-layout ScopeSettings text from the server's metadata document.
@@ -1447,9 +1496,7 @@ class MVCConnectionService:
             # cached hardware config so derived pixel size / FOV pick up the
             # freshly-written ScopeSettings.txt instead of the stale YAML values.
             try:
-                from py2flamingo.configs.config_loader import (
-                    invalidate_hardware_config,
-                )
+                from py2flamingo.configs.config_loader import invalidate_hardware_config
 
                 invalidate_hardware_config()
             except Exception:
