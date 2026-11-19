@@ -78,9 +78,7 @@ class PositionController:
         # preferred; construct one only as a fallback to avoid a duplicate
         # settings load at startup).
         if config_service is None:
-            from py2flamingo.services.configuration_service import (
-                ConfigurationService,
-            )
+            from py2flamingo.services.configuration_service import ConfigurationService
 
             config_service = ConfigurationService()
         self._config_service = config_service
@@ -884,15 +882,23 @@ class PositionController:
         try:
             from py2flamingo.core.command_codes import StageCommands
             from py2flamingo.models.command import Command
+            from py2flamingo.services.stage_service import AxisCode
 
-            # Send HALT command (0x6002) to stop stage motion immediately
+            # HALT (0x6003) for every axis. int32Data0 must name the axes: the
+            # server runs a stage command only for axis 1-4 or STAGE_AXIS_ALL
+            # (0xFF) and silently drops axis 0 (STAGE_AXIS_NONE), which is what
+            # this sent until 2026-11-19 (StageControl::exeCommandValidAxis,
+            # PIStageBase::halt; the same in the 3.0.0 server).
             halt_cmd = Command(
                 code=StageCommands.HALT,
-                parameters={"params": [0, 0, 0, 0, 0, 0, 0], "value": 0.0},
+                parameters={
+                    "params": [0, 0, 0, AxisCode.ALL, 0, 0, 0],
+                    "value": 0.0,
+                },
             )
 
             if self.connection.is_connected():
-                self.logger.info("Sending HALT (0x6002) command to stop stage motion")
+                self.logger.info("Sending HALT (0x6003, all axes) to stop stage motion")
                 self.connection.send_command(halt_cmd)
                 self.logger.info(
                     "HALT command sent - stage motion should stop immediately"

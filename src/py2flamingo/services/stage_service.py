@@ -39,6 +39,10 @@ class AxisCode:
     Y_AXIS = 2
     Z_AXIS = 3
     ROTATION = 4
+    # STAGE_AXIS_ALL in the server's SystemIDs.h. HALT and HOME act only on a
+    # valid axis (1-4) or on this; axis 0 is STAGE_AXIS_NONE, and the server
+    # drops a stage command carrying it before any stage sees it.
+    ALL = 0xFF
 
 
 class StageService(MicroscopeCommandService):
