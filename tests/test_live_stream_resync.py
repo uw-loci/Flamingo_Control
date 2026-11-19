@@ -36,19 +36,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 def _header(width, height, frame_number=0):
-    """A well-formed 40-byte header."""
+    """A well-formed header as the server sends it: struct ImageHeader, 48 bytes."""
     return struct.pack(
-        "<10I",
-        width * height * 2,  # image_size
+        "<8I4i",
+        width * height * 2,  # imageSize
         width,
         height,
-        0,  # scale_min
-        4095,  # scale_max
-        1000 + frame_number,  # timestamp_ms
-        frame_number,
-        10000,  # exposure_us
-        0,
-        0,
+        0,  # imageScaleMin
+        4095,  # imageScaleMax
+        0,  # deviceIndex
+        0,  # optionsSettings1
+        0,  # optionsSettings2
+        0,  # imageIndexStart
+        0,  # imageIndexStop
+        frame_number,  # image_index
+        0,  # image_total
     )
 
 
@@ -102,7 +104,7 @@ class TestAHeaderIsRecognisedOrRejected:
 
     def test_the_rigs_misread_header_is_not(self):
         # image_height=2097152, image_width=6488170 -- the actual failure.
-        raw = struct.pack("<10I", 0, 6488170, 2097152, 0, 0, 0, 0, 0, 0, 0)
+        raw = struct.pack("<8I4i", 0, 6488170, 2097152, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         assert not self._parse(raw).is_plausible()
 
     def test_a_non_square_aoi_is_accepted(self):
@@ -114,11 +116,11 @@ class TestAHeaderIsRecognisedOrRejected:
     def test_a_size_that_contradicts_the_dimensions_is_rejected(self):
         # The check that actually does the work: three unrelated words almost
         # never satisfy image_size == width * height * 2.
-        raw = struct.pack("<10I", 999, 1024, 1024, 0, 0, 0, 0, 0, 0, 0)
+        raw = struct.pack("<8I4i", 999, 1024, 1024, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         assert not self._parse(raw).is_plausible()
 
     def test_image_data_does_not_masquerade_as_a_header(self):
-        raw = struct.pack("<H", 106) + struct.pack("<H", 99) * 19
+        raw = struct.pack("<H", 106) + struct.pack("<H", 99) * 23
         assert not self._parse(raw).is_plausible()
 
 
@@ -238,6 +240,26 @@ class TestTheRigsBrokenStreamKeepsFlowing:
         # No extra bytes: the resync path must never engage.
         frames = _run(streaming_service, self._short_stream(5, extra=0))
         assert len(frames) == 5
+
+    def test_the_servers_own_stream_needs_no_resync_and_keeps_every_pixel(
+        self, streaming_service, caplog
+    ):
+        # The rig's 2026-08-27 drift was this reader taking the 48-byte header
+        # for 40: the last two header words began every frame's pixel data.
+        import logging
+
+        def frame(i):
+            pixels = struct.pack("<4096H", *[(i * 7 + k) % 65536 for k in range(4096)])
+            return _header(64, 64, frame_number=i) + pixels
+
+        with caplog.at_level(logging.WARNING):
+            frames = _run(streaming_service, b"".join(frame(i) for i in range(4)))
+        assert len(frames) == 4
+        assert not [r for r in caplog.records if "recovered" in r.getMessage()]
+        for i, (image, header) in enumerate(frames):
+            assert header.image_index == i
+            assert int(image[0, 0]) == (i * 7) % 65536
+            assert int(image[-1, -1]) == (i * 7 + 4095) % 65536
 
     def test_it_still_stops_when_the_connection_closes(self, streaming_service):
         # Recovery must not turn a closed socket into an infinite loop.

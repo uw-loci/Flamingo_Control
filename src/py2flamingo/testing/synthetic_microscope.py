@@ -43,7 +43,7 @@ faults:
   on the rig.
 * **Live view streams frames of a synthetic sample.** Between
   ``LIVE_VIEW_START`` and ``LIVE_VIEW_STOP`` the live port sends the real
-  frame format (40-byte header, 16-bit pixels) rendered at the current stage
+  frame format (48-byte header, 16-bit pixels) rendered at the current stage
   position: a textured ellipse around the home position, bright only while
   the LED is enabled and sharp only near ``SAMPLE_FOCUS_Z_MM``. An overview
   scan therefore finds the sample, and a Z sweep finds its focus.
@@ -796,17 +796,22 @@ class SyntheticMicroscope:
                 with self._lock:
                     self.frames_sent += 1
                     number = self.frames_sent
+                # The server's struct ImageHeader, 48 bytes: size, width,
+                # height, scale min/max, device index, two option words, then
+                # image index start/stop, image index and total (int32).
                 header = struct.pack(
-                    "<10I",
+                    "<8I4i",
                     frame.nbytes,
                     cols,
                     rows,
                     int(frame.min()),
                     int(frame.max()),
-                    int(time.time() * 1000) & 0xFFFFFFFF,
-                    number,
-                    int(self.exposure_us),
                     0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    number,
                     0,
                 )
                 client.sendall(header + frame.tobytes())

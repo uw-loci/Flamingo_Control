@@ -16,26 +16,46 @@ import numpy as np
 
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
+# Bytes before each frame's pixels on the live-view socket: the server's
+# ``struct ImageHeader`` (Shared/IncludesCamera/CameraInc.h), 12 x 32-bit,
+# written whole by TCPIPServerDataRelay::sendDataToClients. The same in 3.0.0.
+LIVE_HEADER_SIZE = 48
+_LIVE_HEADER_FORMAT = "<8I4i"
+
 
 @dataclass
 class ImageHeader:
-    """
-    Image header structure (40 bytes total).
+    """The header the server sends before each live-view frame (48 bytes).
 
-    Received before each image frame with metadata about the image.
-    Structure: 10 x uint32 (4 bytes each) = 40 bytes
+    Until 2026-11-19 this read 10 fields (40 bytes) and named fields 5-7
+    timestamp, frame number and exposure; the server has none of those. The
+    two words it did not read began every frame's pixel data, so each image
+    was shifted by 4 pixels and the framing had to be recovered on every frame
+    (the "8 bytes short per frame" of 2026-08-27, ``_resync_to_header``).
     """
 
     image_size: int  # Total size of image data in bytes
     image_width: int  # Width in pixels
     image_height: int  # Height in pixels
-    image_scale_min: int  # Minimum intensity value in image (for display scaling)
-    image_scale_max: int  # Maximum intensity value in image (for display scaling)
-    timestamp_ms: int  # Timestamp in milliseconds
-    frame_number: int  # Sequential frame number
-    exposure_us: int  # Exposure time in microseconds
-    reserved1: int  # Reserved field
-    reserved2: int  # Reserved field
+    image_scale_min: int  # Display scaling minimum
+    image_scale_max: int  # Display scaling maximum
+    device_index: int = 0  # Which camera
+    options_settings1: int = 0  # Display options (zoom, crosshair, overlay)
+    options_settings2: int = 0  # Crosshair position
+    image_index_start: int = 0  # Workflow: first plane saved
+    image_index_stop: int = 0  # Workflow: last plane saved
+    image_index: int = 0  # Index of this image (counts up in a stack)
+    image_total: int = 0  # Images in the stack
+
+    @property
+    def frame_number(self) -> int:
+        """The server's image index; it has no separate frame counter."""
+        return self.image_index
+
+    @property
+    def timestamp_ms(self) -> int:
+        """Always 0: the server's header carries no timestamp."""
+        return 0
 
     # Largest sensor dimension we will believe. The PCO Edge is 2048; this
     # leaves generous room for a bigger camera without accepting the
@@ -61,36 +81,16 @@ class ImageHeader:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "ImageHeader":
-        """
-        Parse 40-byte header from binary data.
-
-        Args:
-            data: 40 bytes of header data
-
-        Returns:
-            ImageHeader instance
+        """Parse the 48-byte header.
 
         Raises:
-            ValueError: If data is not 40 bytes
+            ValueError: If data is not LIVE_HEADER_SIZE bytes
         """
-        if len(data) != 40:
-            raise ValueError(f"Header must be 40 bytes, got {len(data)}")
-
-        # Unpack 10 uint32 values (little-endian)
-        values = struct.unpack("<10I", data)
-
-        return cls(
-            image_size=values[0],
-            image_width=values[1],
-            image_height=values[2],
-            image_scale_min=values[3],
-            image_scale_max=values[4],
-            timestamp_ms=values[5],
-            frame_number=values[6],
-            exposure_us=values[7],
-            reserved1=values[8],
-            reserved2=values[9],
-        )
+        if len(data) != LIVE_HEADER_SIZE:
+            raise ValueError(
+                f"Header must be {LIVE_HEADER_SIZE} bytes, got {len(data)}"
+            )
+        return cls(*struct.unpack(_LIVE_HEADER_FORMAT, data))
 
 
 class CameraCommandCode:
@@ -1222,8 +1222,7 @@ class CameraService(MicroscopeCommandService):
                     )
                     last_log_time = current_time
 
-                # Read 40-byte header
-                header_bytes = self._receive_exact(self._data_socket, 40)
+                header_bytes = self._receive_exact(self._data_socket, LIVE_HEADER_SIZE)
                 if not header_bytes:
                     self.logger.warning("Connection closed by server")
                     break
@@ -1406,28 +1405,31 @@ class CameraService(MicroscopeCommandService):
         froze on its first image and an LED overview collected nothing for two
         hours.
 
-        Whether those 8 bytes are a longer header or a per-frame trailer cannot
-        be told apart from the stream alone, so this does not assume either. It
-        recovers, and it **logs the measured offset** -- which is the number that
-        settles it.
+        Those 8 bytes were the last two words of the server's 48-byte header,
+        which this reader took for 40 (settled from the server source on
+        2026-11-19; see ImageHeader). With the header read whole a clean stream
+        never comes here; this stays for a stream that does lose framing, and
+        still logs how many bytes it skipped.
         """
         scan = bytearray(window)
         skipped = 0
 
         while skipped <= self.MAX_RESYNC_BYTES:
             offset = 0
-            while offset + 40 <= len(scan):
-                candidate = ImageHeader.from_bytes(bytes(scan[offset : offset + 40]))
+            while offset + LIVE_HEADER_SIZE <= len(scan):
+                candidate = ImageHeader.from_bytes(
+                    bytes(scan[offset : offset + LIVE_HEADER_SIZE])
+                )
                 if candidate.is_plausible():
                     self.logger.warning(
                         f"Live stream framing recovered after skipping "
                         f"{skipped + offset} byte(s): next frame is "
                         f"{candidate.image_width}x{candidate.image_height}. "
                         f"A steady non-zero skip means each frame occupies that "
-                        f"many bytes more than the 40-byte header plus "
+                        f"many bytes more than the {LIVE_HEADER_SIZE}-byte header plus "
                         f"image_size this reader assumes."
                     )
-                    leftover = scan[offset + 40 :]
+                    leftover = scan[offset + LIVE_HEADER_SIZE :]
                     if leftover:
                         self._rx_pushback[0:0] = leftover
                     return candidate

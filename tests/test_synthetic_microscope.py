@@ -265,7 +265,7 @@ class TestLiveView(SyntheticScopeTestCase):
                 buf += chunk
             return buf
 
-        header = ImageHeader.from_bytes(exactly(40))
+        header = ImageHeader.from_bytes(exactly(48))
         assert header.is_plausible(), header
         pixels = np.frombuffer(exactly(header.image_size), dtype="<u2")
         return header, pixels.reshape(header.image_height, header.image_width)
