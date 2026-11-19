@@ -145,12 +145,25 @@ class TestHaltIsNotHome(SyntheticScopeTestCase):
             params=[0, 0, 0, AXIS_X, 0, 0, 0],
             value=12.0,
         )
-        self.send(StageCommands.HALT)
+        self.send(StageCommands.HALT, params=[0, 0, 0, 0xFF, 0, 0, 0])
         self.assertFalse(self.scope.stage.moving)
         stopped_at = self.scope.stage_position()["x"]
         self.assertLess(stopped_at, 12.0, "HALT must not complete the move")
         self.assertGreaterEqual(stopped_at, 6.0)
         self.assertTrue(self.scope.stage.halted)
+
+    def test_halt_for_axis_0_is_ignored_as_the_server_does(self):
+        """STAGE_AXIS_NONE: the server drops it, no reply, the stage moves on."""
+        self.scope.stage.position["x"] = 6.0
+        self.send(
+            StageCommands.POSITION_SET_MOVE,
+            params=[0, 0, 0, AXIS_X, 0, 0, 0],
+            value=12.0,
+        )
+        self.sock.sendall(self.encoder.encode_command(code=StageCommands.HALT))
+        time.sleep(0.2)
+        self.assertTrue(self.scope.stage.moving)
+        self.assertFalse(self.scope.stage.halted)
 
     def test_home_drives_to_the_reference_and_is_not_a_stop(self):
         self.send(StageCommands.HOME)
@@ -159,7 +172,7 @@ class TestHaltIsNotHome(SyntheticScopeTestCase):
 
     def test_the_history_distinguishes_them(self):
         self.send(StageCommands.HOME)
-        self.send(StageCommands.HALT)
+        self.send(StageCommands.HALT, params=[0, 0, 0, 0xFF, 0, 0, 0])
         self.assertEqual(len(self.scope.received(StageCommands.HALT)), 1)
         self.assertEqual(len(self.scope.received(StageCommands.HOME)), 1)
         self.assertNotEqual(StageCommands.HALT, StageCommands.HOME)
@@ -226,11 +239,15 @@ class TestWorkflowUpload(SyntheticScopeTestCase):
 
 
 class TestCameraAndLed(SyntheticScopeTestCase):
-    def test_exposure_round_trips_through_int32data0(self):
-        self.send(CameraCommands.EXPOSURE_SET, params=[0, 0, 0, 25_000, 0, 0, 0])
-        self.assertEqual(self.scope.exposure_us, 25_000)
+    def test_exposure_round_trips_through_int32data0_in_ms(self):
+        # The server answers EXPOSURE_SET with FPS_GET then EXPOSURE_GET.
+        first = self.send(CameraCommands.EXPOSURE_SET, params=[0, 0, 0, 25, 0, 0, 0])
+        self.assertEqual(first["code"], 0x3018)
+        second = self.decoder.decode_command(self._read_exactly(128))
+        self.assertEqual((second["code"], second["params"][3]), (0x300A, 25))
+        self.assertEqual(self.scope.exposure_ms, 25)
         decoded = self.send(CameraCommands.EXPOSURE_GET)
-        self.assertEqual(decoded["params"][3], 25_000)
+        self.assertEqual(decoded["params"][3], 25)
 
     def test_image_size_reports_rows_and_columns(self):
         decoded = self.send(CameraCommands.IMAGE_SIZE_GET)

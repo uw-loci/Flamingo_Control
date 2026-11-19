@@ -63,6 +63,7 @@ Usage::
 """
 
 import logging
+import re
 import socket
 import struct
 import threading
@@ -158,6 +159,10 @@ STAGE_LIMITS = {
 STAGE_HOME = {"x": 6.0, "y": 12.0, "z": 19.0, "r": 0.0}
 
 
+#: Laser lines the synthetic scope has (UI number: wavelength in nm).
+SYNTHETIC_LASERS = {1: 405, 2: 488, 3: 561, 4: 640}
+
+
 def metadata_document(scope_name: str, command_port: int) -> str:
     """A system metadata document like a 2026-10-06 server's, for this scope.
 
@@ -176,9 +181,11 @@ def metadata_document(scope_name: str, command_port: int) -> str:
         for axis, (lo, hi) in STAGE_LIMITS.items()
     )
     lasers = "".join(
-        f"          <Laser {i}>\n          Filter wheel position = {i - 1}\n"
+        f"          <Laser {i}>\n          Attached = true\n"
+        f"          Wavelength (nm) = {wave}\n"
+        f"          Filter wheel position = {i - 1}\n"
         f"          </Laser {i}>\n"
-        for i in range(1, 5)
+        for i, wave in SYNTHETIC_LASERS.items()
     )
     wheel = "".join(
         f"          Filter wheel position {i} = {i * 500} {8 - i}\n"
@@ -311,6 +318,17 @@ class StageState:
     _started_at: Dict[str, float] = field(default_factory=dict)
 
 
+def _workflow_value(text: str, key: str) -> Optional[float]:
+    """First ``key = number`` in a workflow text, or None."""
+    m = re.search(rf"^\s*{re.escape(key)}\s*=\s*([-0-9.,]+)", text, re.M)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
 class SyntheticMicroscope:
     """A loopback server that answers the Flamingo command protocol.
 
@@ -346,14 +364,27 @@ class SyntheticMicroscope:
 
         self.stage = StageState()
         self.system_state = SystemCommands.STATE_VALUE_IDLE
-        self.exposure_us = 10_000
+        #: Exposure in integer ms, as the server's camera reports it.
+        self.exposure_ms = 10
+        self.trigger_mode = 0
         self.image_shape = (2048, 2048)
+        self.sensor_shape = (2048, 2048)
+        self.binning = (1, 1)
+        self.light_sheet = {"mode": 0, "line_time_ns": 44364, "lines": 40, "delay": 0}
+        #: Lasers present (UI numbers) and their power in percent.
+        self.lasers = dict(SYNTHETIC_LASERS)
+        self.lasers_on: set = set()
+        #: Snapshots requested so far; each live connection sends one frame
+        #: per new snapshot (the server sends to every data client it has).
+        self._snapshot_seq = 0
+        self._send_locks: Dict[int, threading.Lock] = {}
+        self._workflow_stop = threading.Event()
         self.led_percent = 0.0
         self.led_enabled = False
         self.live_view = False
         #: Frames sent on the live port, all connections together.
         self.frames_sent = 0
-        self.laser_levels: Dict[int, float] = {}
+        self.laser_levels: Dict[int, float] = {i: 5.0 for i in self.lasers}
         self.workflow_running = False
         #: Workflow text the client uploaded, newest last.
         self.workflows: List[str] = []
@@ -536,6 +567,9 @@ class SyntheticMicroscope:
                 )
             )
 
+        self._last_buffer = decoded.get("data") or b""
+        if isinstance(self._last_buffer, str):
+            self._last_buffer = self._last_buffer.encode("utf-8", "replace")
         handler = self._handlers().get(code)
         if handler is None:
             logger.debug("Synthetic scope: no behaviour for 0x%04X, acking", code)
@@ -592,6 +626,36 @@ class SyntheticMicroscope:
             LEDCommands.DISABLE: self._on_led_disable,
             CameraCommands.LIVE_VIEW_START: self._on_live_start,
             CameraCommands.LIVE_VIEW_STOP: self._on_live_stop,
+            # Modelled on the server source (claude-reports design
+            # server-command-reply-reference.md): which code answers, what is
+            # in which field, and what is never answered at all.
+            0x3006: self._on_snapshot,
+            0x300D: self._on_trigger_mode_set,
+            0x300E: self._on_trigger_mode_get,
+            0x300F: self._on_roi_set,
+            0x3011: self._on_roi_set,
+            0x3010: self._on_roi_get,
+            0x3012: self._on_roi_get,
+            0x3018: self._on_fps_get,
+            0x302B: self._on_check_stack,
+            0x302C: self._on_frame_period_get,
+            0x3030: self._on_light_sheet,
+            0x3031: self._on_light_sheet,
+            0x3032: self._on_light_sheet,
+            0x3033: self._on_light_sheet,
+            0x3037: self._on_pixel_fov_get,
+            0x2001: self._on_laser_level_set,
+            0x2002: self._on_laser_level_get,
+            0x2003: self._on_laser_enable,
+            0x2004: self._on_laser_enable,
+            0x2005: self._on_laser_enable,
+            0x2006: self._on_laser_disable,
+            0x2007: self._on_laser_disable_all,
+            **(
+                {self.layout.codes["CAMERA_BINNING_GET"]: self._on_binning_get}
+                if "CAMERA_BINNING_GET" in self.layout.codes
+                else {}
+            ),
         }
 
     # -------------------------------------------------------------- behaviours
@@ -604,6 +668,7 @@ class SyntheticMicroscope:
         value: float = 0.0,
         data: bytes = b"",
         additional: bytes = b"",
+        status: int = 1,
     ) -> None:
         """Send one well-formed 128-byte reply, plus ``additional`` after it.
 
@@ -613,7 +678,7 @@ class SyntheticMicroscope:
         """
         packet = self._encoder.encode_command(
             code=code,
-            status=self.system_state,
+            status=status,
             params=params or [0, 0, 0, 0, 0, 0, 0],
             value=value,
             data=data,
@@ -621,10 +686,26 @@ class SyntheticMicroscope:
             check_server_layout=False,
         )
         assert len(packet) == 128, f"reply was {len(packet)} bytes, not 128"
+        lock = self._send_locks.setdefault(id(client), threading.Lock())
         try:
-            client.sendall(packet + additional)
+            with lock:
+                client.sendall(packet + additional)
         except OSError:
             pass
+
+    def _later(self, delay: float, fn, *args) -> None:
+        """Run ``fn`` after ``delay`` s on a daemon thread (unsolicited frames)."""
+        timer = threading.Timer(delay, fn, args=args)
+        timer.daemon = True
+        timer.start()
+
+    def _state_code(self) -> int:
+        """The state's own command code, as SYSTEM_STATE_GET's int32Data0."""
+        if self.workflow_running:
+            return 0xA005
+        if self.live_view:
+            return 0xA004
+        return SystemCommands.STATE_IDLE
 
     def _on_controller_id(self, client, code, params, value, additional) -> None:
         # int32Data0 (params[3]) carries the server's verdict on the client's
@@ -676,7 +757,12 @@ class SyntheticMicroscope:
             else SystemCommands.STATE_VALUE_IDLE
         )
         self.system_state = state
-        self._reply(client, code, value=float(state))
+        self._reply(
+            client,
+            code,
+            params=[0, 0, 0, self._state_code(), 0, 0, 0],
+            value=float(state),
+        )
 
     def _on_state_idle(self, client, code, params, value, additional) -> None:
         self.system_state = SystemCommands.STATE_VALUE_IDLE
@@ -692,6 +778,24 @@ class SyntheticMicroscope:
         # Acknowledge now, arrive later. A caller that treats this ack as
         # arrival reads a stale position, exactly as it would on the rig.
         self._reply(client, code, value=float(value))
+        arrival = self.stage.arrives_at.get(axis, time.monotonic())
+        self._later(
+            max(0.0, arrival - time.monotonic()) + 0.02,
+            self._motion_stopped,
+            client,
+            axis,
+            arrival,
+        )
+
+    def _motion_stopped(self, client, axis: str, arrival: float) -> None:
+        """MOTION_STOPPED (int32Data0 0xFF) once this move ended, unless a
+        later move of the same axis superseded it."""
+        if self.stage.arrives_at.get(axis) not in (None, arrival):
+            return
+        self.stage.settle()
+        self._reply(
+            client, StageCommands.MOTION_STOPPED, params=[0, 0, 0, 0xFF, 0, 0, 0]
+        )
 
     def _on_position_get(self, client, code, params, value, additional) -> None:
         axis = AXIS_NAMES.get(params[3] if len(params) > 3 else None)
@@ -702,8 +806,21 @@ class SyntheticMicroscope:
         self._reply(client, code, params=list(params), value=position[axis])
 
     def _on_halt(self, client, code, params, value, additional) -> None:
+        # The server runs a stage command only for axis 1-4 or 0xFF (all);
+        # axis 0 is STAGE_AXIS_NONE and is dropped with no reply at all.
+        axis = params[3] if len(params) > 3 else 0
+        if axis not in (1, 2, 3, 4, 0xFF):
+            logger.info(
+                "Synthetic scope: HALT for axis %s ignored, as the server does", axis
+            )
+            return
+        was_moving = self.stage.moving
         self.stage.halt()
-        self._reply(client, code)
+        self._reply(client, code, params=[0, 0, 0, axis, 0, 0, 0])
+        if was_moving:
+            self._reply(
+                client, StageCommands.MOTION_STOPPED, params=[0, 0, 0, 0xFF, 0, 0, 0]
+            )
 
     def _on_home(self, client, code, params, value, additional) -> None:
         # HOME drives to the reference; it is not a stop. Kept distinct from
@@ -713,30 +830,77 @@ class SyntheticMicroscope:
         self._reply(client, code)
 
     def _on_exposure_set(self, client, code, params, value, additional) -> None:
-        self.exposure_us = int(params[3]) if len(params) > 3 else int(value)
-        self._reply(client, code)
+        # int32Data0 in integer ms; answered with FPS_GET then EXPOSURE_GET.
+        self.exposure_ms = int(params[3]) if len(params) > 3 else int(value)
+        self._reply(client, 0x3018, value=LIVE_FPS)
+        self._reply(client, 0x300A, params=[0, 0, 0, self.exposure_ms, 0, 0, 0])
 
     def _on_exposure_get(self, client, code, params, value, additional) -> None:
-        self._reply(client, code, params=[0, 0, 0, self.exposure_us, 0, 0, 0])
+        self._reply(client, code, params=[0, 0, 0, self.exposure_ms, 0, 0, 0])
 
     def _on_image_size_get(self, client, code, params, value, additional) -> None:
         rows, cols = self.image_shape
-        self._reply(client, code, params=[0, 0, 0, rows, cols, 0, 0])
+        self._reply(
+            client,
+            code,
+            params=[0, 0, 0, cols, rows, 0, 0],
+            value=6.5 * self.binning[0],
+        )
 
     def _on_workflow_start(self, client, code, params, value, additional) -> None:
-        if additional:
-            try:
-                self.workflows.append(additional.decode("utf-8", errors="replace"))
-            except Exception:
-                pass
+        """Never answered under 0x3004: the workflow-running state (0xA005),
+        then per stack gauge size, images saved, STACK_COMPLETE, then idle."""
+        text = (additional or b"").decode("utf-8", errors="replace")
+        if text:
+            self.workflows.append(text)
+        if self.workflow_running:
+            return
+        planes = _workflow_value(text, "Number of planes")
+        exposure = None
+        for label in ("Exposure time (ms)", "Exposure time (ns)"):
+            exposure = exposure or _workflow_value(text, label)
+        if exposure:
+            # The server reads only these labels (value in ms both ways);
+            # "Exposure time (us)", which the client writes, is not one.
+            self.exposure_ms = int(exposure)
         self.workflow_running = True
         self.system_state = SystemCommands.STATE_VALUE_BUSY
-        self._reply(client, code)
+        self._workflow_stop.clear()
+        self._reply(client, 0xA005)
+        self._workflow_thread = None
+        if planes:
+            self._workflow_thread = threading.Thread(
+                target=self._run_workflow, args=(client, int(planes)), daemon=True
+            )
+            self._workflow_thread.start()
 
-    def _on_workflow_stop(self, client, code, params, value, additional) -> None:
+    def _run_workflow(self, client, planes: int) -> None:
+        self._reply(client, 0x9003, params=[0, 0, 0, planes, 0, 0, 0])
+        saved = 0
+        while saved < planes and not self._workflow_stop.is_set():
+            time.sleep(1.0 / (4 * LIVE_FPS))
+            saved += 1
+            if saved % 10 == 0 or saved == planes:
+                self._reply(client, 0x9007, params=[0, 0, 0, saved, 0, 0, 0])
+        if not self._workflow_stop.is_set():
+            self._reply(client, 0x3014)
         self.workflow_running = False
         self.system_state = SystemCommands.STATE_VALUE_IDLE
-        self._reply(client, code)
+        self._reply(client, SystemCommands.STATE_IDLE)
+
+    def _on_workflow_stop(self, client, code, params, value, additional) -> None:
+        running = self.workflow_running
+        self._workflow_stop.set()
+        text = b"Work flow terminated" if running else b"No active work flow running"
+        self.stage.halt()
+        self._reply(client, code, data=text)
+        thread = getattr(self, "_workflow_thread", None)
+        if thread is not None and thread.is_alive():
+            return  # it sends idle itself once it sees the stop
+        self.workflow_running = False
+        self.system_state = SystemCommands.STATE_VALUE_IDLE
+        if running:
+            self._reply(client, SystemCommands.STATE_IDLE)
 
     def _on_led_set(self, client, code, params, value, additional) -> None:
         # int32Data1 carries the percentage; 27 means 27%, not a scaled level.
@@ -755,11 +919,176 @@ class SyntheticMicroscope:
 
     def _on_live_start(self, client, code, params, value, additional) -> None:
         self.live_view = True
-        self._reply(client, code)
+        self._reply(client, code, data=b"Live view thread started")
+        self._reply(client, 0xA004)
 
     def _on_live_stop(self, client, code, params, value, additional) -> None:
+        running = self.live_view
         self.live_view = False
-        self._reply(client, code)
+        if running:
+            self._reply(client, code, data=b"Live view thread terminated")
+        else:
+            self._reply(client, code, data=b"Live view thread not running", status=0)
+        self._reply(client, SystemCommands.STATE_IDLE)
+
+    # --------------------------------------------------- more camera, lasers
+
+    def _on_snapshot(self, client, code, params, value, additional) -> None:
+        rows, cols = self.image_shape
+        self._reply(client, code, data=b"Live view thread started")
+        self._reply(client, 0xA003)
+        buffer = struct.pack("<3i", 0, cols, rows)
+        self._reply(
+            client,
+            code,
+            params=[0, 0, 0, rows * cols * 2, 0, 0, 0],
+            data=buffer,
+            status=3,
+        )
+        self._snapshot_seq += 1
+        self._reply(client, SystemCommands.STATE_IDLE)
+
+    def _on_trigger_mode_set(self, client, code, params, value, additional) -> None:
+        self.trigger_mode = int(params[3]) if len(params) > 3 else 0
+        self._on_trigger_mode_get(client, 0x300E, params, value, additional)
+
+    def _on_trigger_mode_get(self, client, code, params, value, additional) -> None:
+        names = {0: b"Auto", 1: b"SW-Trig", 2: b"Ext-Exp. Start", 3: b"Ext-Exp. Ctrl"}
+        self._reply(
+            client,
+            0x300E,
+            params=[0, 0, 0, self.trigger_mode, 0, 0, 0],
+            data=names.get(self.trigger_mode, b""),
+        )
+
+    def _roi_edges(self) -> Tuple[int, int, int, int]:
+        rows, cols = self.image_shape
+        s_rows, s_cols = max(self.sensor_shape[0], rows), max(
+            self.sensor_shape[1], cols
+        )
+        left = (s_cols - cols) // 2 + 1
+        top = (s_rows - rows) // 2 + 1
+        return left, left + cols - 1, top, top + rows - 1
+
+    def _on_roi_get(self, client, code, params, value, additional) -> None:
+        left, right, top, bottom = self._roi_edges()
+        lo, hi = (left, right) if code == 0x3010 else (top, bottom)
+        self._reply(client, code, params=[0, 0, 0, lo, hi, 0, 0])
+
+    def _on_roi_set(self, client, code, params, value, additional) -> None:
+        """int32Data0 = left (top) edge, int32Data1 = right (bottom) edge,
+        1-based. An edge pair the camera cannot use is reverted (status 2),
+        as the 2026-11-13 server does."""
+        lo = int(params[3]) if len(params) > 3 else 0
+        hi = int(params[4]) if len(params) > 4 else 0
+        limit = self.sensor_shape[1] if code == 0x300F else self.sensor_shape[0]
+        rows, cols = self.image_shape
+        if 1 <= lo < hi <= limit:
+            if code == 0x300F:
+                cols = hi - lo + 1
+            else:
+                rows = hi - lo + 1
+            self.image_shape = (rows, cols)
+            status = 1
+        else:
+            status = 2
+        self._reply(client, code, params=[0, 0, 0, lo, hi, 0, 0], status=status)
+        self._reply(client, 0x3018, value=LIVE_FPS)
+        self._on_roi_get(client, 0x3010, params, value, additional)
+        self._on_roi_get(client, 0x3012, params, value, additional)
+
+    def _on_fps_get(self, client, code, params, value, additional) -> None:
+        self._reply(client, code, value=LIVE_FPS)
+
+    def _on_frame_period_get(self, client, code, params, value, additional) -> None:
+        self._reply(client, code, value=1000.0 / LIVE_FPS)
+
+    def _on_pixel_fov_get(self, client, code, params, value, additional) -> None:
+        self._reply(client, code, value=PIXEL_SIZE_MM * self.binning[0])
+
+    def _on_binning_get(self, client, code, params, value, additional) -> None:
+        self._reply(
+            client, code, params=[0, 0, 0, self.binning[0], self.binning[1], 0, 0]
+        )
+
+    def _on_check_stack(self, client, code, params, value, additional) -> None:
+        planes = _workflow_value(
+            (additional or b"").decode("utf-8", "replace"), "Number of planes"
+        )
+        seconds = int((planes or 0) / LIVE_FPS) + 1
+        report = f"Stack 1 OK\nExperiment run time 00:00:00:{seconds:02d}\n"
+        status = params[0] if params else 0  # the server echoes the request's status
+        self._reply(client, code, additional=report.encode("utf-8"), status=status)
+
+    def _on_light_sheet(self, client, code, params, value, additional) -> None:
+        v = int(params[3]) if len(params) > 3 else 0
+        key = {
+            0x3030: "mode",
+            0x3031: "lines",
+            0x3032: "delay",
+            0x3033: "line_time_ns",
+        }[code]
+        self.light_sheet[key] = (
+            1 if (key == "mode" and v == 1) else (0 if key == "mode" else v)
+        )
+        ls = self.light_sheet
+        self._reply(client, 0x1006, data=b"Light sheet mode settings updated")
+        for c, k in (
+            (0x3030, "mode"),
+            (0x3033, "line_time_ns"),
+            (0x3031, "lines"),
+            (0x3032, "delay"),
+        ):
+            self._reply(client, c, params=[0, 0, 0, ls[k], 0, 0, 0])
+
+    def _laser_reply(self, client, code, laser: int, **kw) -> None:
+        self._reply(client, code, params=[0, 0, 0, laser, laser, 0, 0], **kw)
+
+    def _on_laser_level_get(self, client, code, params, value, additional) -> None:
+        laser = int(params[3]) if len(params) > 3 else 0
+        if laser not in self.lasers:
+            return
+        level = self.laser_levels.get(laser, 0.0)
+        self._laser_reply(
+            client, 0x2002, laser, value=level, data=f"{level:.2f}".encode()
+        )
+
+    def _on_laser_level_set(self, client, code, params, value, additional) -> None:
+        """Percent as text in the buffer; answered with LEVEL_GET only."""
+        laser = int(params[3]) if len(params) > 3 else 0
+        if laser not in self.lasers:
+            return
+        text = self._last_buffer.split(b"\x00", 1)[0].decode("utf-8", "replace").strip()
+        try:
+            self.laser_levels[laser] = float(text)
+        except ValueError:
+            pass
+        self._on_laser_level_get(client, 0x2002, params, value, additional)
+
+    def _on_laser_enable(self, client, code, params, value, additional) -> None:
+        laser = int(params[3]) if len(params) > 3 else 0
+        if laser not in self.lasers:
+            return
+        for other in sorted(self.lasers_on - {laser}):
+            self._laser_reply(client, 0x2006, other)
+        self.lasers_on = {laser}
+        self._laser_reply(client, 0x2003, laser)
+
+    def _on_laser_disable(self, client, code, params, value, additional) -> None:
+        laser = int(params[3]) if len(params) > 3 else 0
+        if laser not in self.lasers:
+            return
+        self.lasers_on.discard(laser)
+        self._laser_reply(client, 0x2006, laser)
+
+    def _on_laser_disable_all(self, client, code, params, value, additional) -> None:
+        # Acts only when int32Data0 names a real laser; 0 does nothing.
+        laser = int(params[3]) if len(params) > 3 else 0
+        if laser not in self.lasers:
+            return
+        for each in sorted(self.lasers):
+            self.lasers_on.discard(each)
+            self._laser_reply(client, 0x2006, each)
 
     def frame_now(self) -> np.ndarray:
         """The frame the camera would see at this instant."""
@@ -785,11 +1114,13 @@ class SyntheticMicroscope:
     def _stream_live(self, client: socket.socket) -> None:
         """Send frames while live view is on, in the server's frame format."""
         period = 1.0 / LIVE_FPS
+        seen_snapshot = self._snapshot_seq
         try:
             while self._running:
-                if not self.live_view:
+                if not self.live_view and self._snapshot_seq == seen_snapshot:
                     time.sleep(0.02)
                     continue
+                seen_snapshot = self._snapshot_seq
                 started = time.monotonic()
                 frame = self.frame_now()
                 rows, cols = frame.shape
