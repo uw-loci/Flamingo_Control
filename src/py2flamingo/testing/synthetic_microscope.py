@@ -353,11 +353,15 @@ class SyntheticMicroscope:
         live_port: int = DEFAULT_LIVE_PORT,
         scope_name: str = "synthetic",
         layout: Optional["layouts.ServerLayout"] = None,
+        data_root: Optional[str] = None,
     ) -> None:
         self._requested_command_port = command_port
         self._requested_live_port = live_port
         self.scope_name = scope_name
         self.layout = layout or layouts.REFERENCE
+        #: When set, a workflow writes its files here as the server does
+        #: (the folder the save drive appears as on the client computer).
+        self.data_root = data_root
         #: Set when a client hits SYSTEM_SLEEP, which on the 2026-10-06 layout
         #: is the code the 3.0.0 "list storage drives" used to be.
         self.sleep_minutes: Optional[int] = None
@@ -644,6 +648,7 @@ class SyntheticMicroscope:
             0x3032: self._on_light_sheet,
             0x3033: self._on_light_sheet,
             0x3037: self._on_pixel_fov_get,
+            0x8002: self._on_filter_wheel_stopped,
             0x2001: self._on_laser_level_set,
             0x2002: self._on_laser_level_get,
             0x2003: self._on_laser_enable,
@@ -652,7 +657,10 @@ class SyntheticMicroscope:
             0x2006: self._on_laser_disable,
             0x2007: self._on_laser_disable_all,
             **(
-                {self.layout.codes["CAMERA_BINNING_GET"]: self._on_binning_get}
+                {
+                    self.layout.codes["CAMERA_BINNING_GET"]: self._on_binning_get,
+                    self.layout.codes["CAMERA_BINNING_SET"]: self._on_binning_set,
+                }
                 if "CAMERA_BINNING_GET" in self.layout.codes
                 else {}
             ),
@@ -867,12 +875,78 @@ class SyntheticMicroscope:
         self.system_state = SystemCommands.STATE_VALUE_BUSY
         self._workflow_stop.clear()
         self._reply(client, 0xA005)
+        if planes and self.data_root:
+            try:
+                self._write_acquisition(text, int(planes))
+            except OSError as exc:
+                logger.warning(
+                    "Synthetic scope could not write the acquisition: %s", exc
+                )
         self._workflow_thread = None
         if planes:
             self._workflow_thread = threading.Thread(
                 target=self._run_workflow, args=(client, int(planes)), daemon=True
             )
             self._workflow_thread.start()
+
+    def _write_acquisition(self, text: str, planes: int) -> None:
+        """The experiment folder the server writes: Workflow.txt and, per
+        stack, the image file and its _Settings.txt sidecar; the metadata
+        copy this build writes (ScopeSettings.txt up to 3.0.0,
+        SystemMetaData.txt from 10-06 on). From 10-06 on the workflow keys
+        are the server's new ones (ROI, bit binning, exposure in ms,
+        "Left path recording = true")."""
+        import os
+
+        m = re.search(r"Save image directory\s*=\s*(.+)", text)
+        folder = os.path.join(
+            self.data_root, (m.group(1).strip() if m else "experiment")
+        )
+        os.makedirs(folder, exist_ok=True)
+        out = text
+        if self.layout.has_metadata_document:
+
+            def path_line(match):
+                v = match.group(2).strip().upper()
+                on = v.startswith("ON") or v.endswith("1")
+                return f"{match.group(1)} path recording = {'true' if on else 'false'}"
+
+            out = re.sub(r"(Left|Right) path\s*=\s*([^\n]*)", path_line, out)
+            out = out.replace("AOI width", "ROI width").replace(
+                "AOI height", "ROI height"
+            )
+            out = re.sub(
+                r"Exposure time \(us\)\s*=\s*[^\n]*",
+                f"Exposure time (ms) = {self.exposure_ms}",
+                out,
+            )
+            out = out.replace(
+                "  </Camera Settings>",
+                f"    Bit binning width = {self.binning[0]}\n"
+                f"    Bit binning height = {self.binning[1]}\n  </Camera Settings>",
+            )
+        with open(os.path.join(folder, "Workflow.txt"), "w", encoding="utf-8") as f:
+            f.write(out)
+        doc = metadata_document(self.scope_name, self.command_port)
+        if self.layout.has_metadata_document:
+            with open(
+                os.path.join(folder, "SystemMetaData.txt"), "w", encoding="utf-8"
+            ) as f:
+                f.write(doc)
+        else:
+            legacy, _ = legacy_scope_settings_text(parse(doc))
+            with open(
+                os.path.join(folder, "ScopeSettings.txt"), "w", encoding="utf-8"
+            ) as f:
+                f.write(legacy)
+        rows, cols = self.image_shape
+        stem = os.path.join(
+            folder, f"S000_t000000_V000_R0000_X000_Y000_C00_I0_D0_P{planes:05d}"
+        )
+        with open(stem + ".raw", "wb") as f:
+            f.truncate(planes * rows * cols * 2)
+        with open(stem + "_Settings.txt", "w", encoding="utf-8") as f:
+            f.write(out)
 
     def _run_workflow(self, client, planes: int) -> None:
         self._reply(client, 0x9003, params=[0, 0, 0, planes, 0, 0, 0])
@@ -961,11 +1035,16 @@ class SyntheticMicroscope:
             data=names.get(self.trigger_mode, b""),
         )
 
+    def _binned_sensor(self) -> Tuple[int, int]:
+        return (
+            self.sensor_shape[0] // self.binning[1],
+            self.sensor_shape[1] // self.binning[0],
+        )
+
     def _roi_edges(self) -> Tuple[int, int, int, int]:
         rows, cols = self.image_shape
-        s_rows, s_cols = max(self.sensor_shape[0], rows), max(
-            self.sensor_shape[1], cols
-        )
+        b_rows, b_cols = self._binned_sensor()
+        s_rows, s_cols = max(b_rows, rows), max(b_cols, cols)
         left = (s_cols - cols) // 2 + 1
         top = (s_rows - rows) // 2 + 1
         return left, left + cols - 1, top, top + rows - 1
@@ -981,7 +1060,8 @@ class SyntheticMicroscope:
         as the 2026-11-13 server does."""
         lo = int(params[3]) if len(params) > 3 else 0
         hi = int(params[4]) if len(params) > 4 else 0
-        limit = self.sensor_shape[1] if code == 0x300F else self.sensor_shape[0]
+        b_rows, b_cols = self._binned_sensor()
+        limit = b_cols if code == 0x300F else b_rows
         rows, cols = self.image_shape
         if 1 <= lo < hi <= limit:
             if code == 0x300F:
@@ -1005,6 +1085,27 @@ class SyntheticMicroscope:
 
     def _on_pixel_fov_get(self, client, code, params, value, additional) -> None:
         self._reply(client, code, value=PIXEL_SIZE_MM * self.binning[0])
+
+    def _on_binning_set(self, client, code, params, value, additional) -> None:
+        """Powers of two up to 4 are taken and reset the ROI to the full frame
+        in binned pixels; anything else is reverted (status 2)."""
+        h = int(params[3]) if len(params) > 3 else 1
+        v = int(params[4]) if len(params) > 4 else 1
+        if h in (1, 2, 4) and v in (1, 2, 4):
+            self.binning = (h, v)
+            self.image_shape = self._binned_sensor()
+            status = 1
+        else:
+            status = 2
+        self._reply(client, code, params=[0, 0, 0, h, v, 0, 0], status=status)
+        self._on_binning_get(
+            client, self.layout.codes["CAMERA_BINNING_GET"], params, value, additional
+        )
+        self._reply(client, 0x3018, value=LIVE_FPS)
+
+    def _on_filter_wheel_stopped(self, client, code, params, value, additional) -> None:
+        # The Scope board answers the query; data0 1 = stopped.
+        self._reply(client, code, params=[0, 0, 0, 1, 0, 0, 0])
 
     def _on_binning_get(self, client, code, params, value, additional) -> None:
         self._reply(
