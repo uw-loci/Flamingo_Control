@@ -77,6 +77,7 @@ def render_text(data: Dict[str, Any]) -> str:
         "app_commit",
         "server_version",
         "command_layout",
+        "area",
         "tiers",
         "confirmations",
         "envelope",

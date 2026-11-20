@@ -29,7 +29,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from py2flamingo.verification import report  # noqa: E402
 from py2flamingo.verification.context import RunOptions  # noqa: E402
-from py2flamingo.verification.model import Outcome, Tier, checks_for  # noqa: E402
+from py2flamingo.verification.model import (  # noqa: E402
+    AREAS,
+    Outcome,
+    Tier,
+    checks_for,
+)
 from py2flamingo.verification.runner import RunCallbacks  # noqa: E402
 
 
@@ -58,10 +63,20 @@ def main(argv=None) -> int:
     )
     p.add_argument(
         "--tiers",
-        default="T0",
-        help="highest tier to run, e.g. T1 or T0,T1 (cumulative)",
+        default=None,
+        help="highest tier to run, e.g. T1 (cumulative); default T0, or with --area that area's highest",
     )
     p.add_argument("--only", help="comma-separated check ids to run (within the tiers)")
+    p.add_argument(
+        "--area",
+        choices=sorted(AREAS),
+        help="one functional area (its prerequisites are included); default all",
+    )
+    p.add_argument(
+        "--data-root",
+        default="",
+        help="where the server's save drive appears on this computer (e.g. D:\\CTLSM1), for t4.acquisition_files",
+    )
     p.add_argument(
         "--sample", default="", help="what is mounted (required for T2 and above)"
     )
@@ -101,13 +116,22 @@ def main(argv=None) -> int:
         )
         return 0
 
-    top = _parse_tiers(args.tiers)
-    options = RunOptions(sample=args.sample, server_save_drive=args.save_drive)
+    if args.tiers:
+        top = _parse_tiers(args.tiers)
+    else:
+        from py2flamingo.verification.session import top_tier_of
+
+        top = top_tier_of(args.area) if args.area else Tier.READ_ONLY
+    options = RunOptions(
+        sample=args.sample,
+        server_save_drive=args.save_drive,
+        local_data_root=args.data_root,
+    )
     only = [s.strip() for s in args.only.split(",")] if args.only else None
     tiers = [t for t in Tier if t <= top]
 
     if args.dry_run:
-        for c in checks_for(tiers, only):
+        for c in checks_for(tiers, only, args.area):
             needs = f"  (after {', '.join(c.after)})" if c.after else ""
             print(f"{c.tier.label} {c.check_id:<24} {c.title}{needs}")
             for s in c.sends:
@@ -166,10 +190,6 @@ def main(argv=None) -> int:
             if top >= Tier.MOTION
             else None
         )
-        n_total = [0]
-
-        def started(i, n, chk):
-            n_total[0] = n
 
         def finished(i, n, result):
             print(
@@ -185,12 +205,11 @@ def main(argv=None) -> int:
             target=target,
             report_root=args.out,
             confirmations=confirmations,
-            callbacks=RunCallbacks(check_started=started, check_finished=finished),
+            callbacks=RunCallbacks(check_finished=finished),
             abort=abort,
             only=only,
+            area=args.area,
         )
-        for r in summary.results[n_total[0] :]:
-            print(f"        {r.outcome.value:<8} {r.title}: {r.detail}")
         counts = ", ".join(
             f"{summary.count(o)} {o.value}" for o in Outcome if summary.count(o)
         )

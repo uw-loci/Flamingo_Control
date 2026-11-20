@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_KEY_PARENT = "verification/report_parent"
 SETTINGS_KEY_SAMPLE = "verification/sample"
+SETTINGS_KEY_DATA_ROOT = "verification/data_root"
 LOCK_NAME = "Post-update verification"
 
 OUTCOME_COLORS = {
@@ -61,9 +62,18 @@ class _RunThread(QThread):
     failed = pyqtSignal(str)
 
     def __init__(
-        self, prepared, tiers, options, target, report_root, confirmations, abort
+        self,
+        prepared,
+        tiers,
+        options,
+        target,
+        report_root,
+        confirmations,
+        abort,
+        area=None,
     ):
         super().__init__()
+        self._area = area
         self._args = (
             prepared,
             tiers,
@@ -97,6 +107,7 @@ class _RunThread(QThread):
                 confirmations=confirmations,
                 callbacks=callbacks,
                 abort=abort,
+                area=self._area,
             )
             counts = {o.value: summary.count(o) for o in Outcome if summary.count(o)}
             restores = [
@@ -116,10 +127,18 @@ class _RunThread(QThread):
 class VerificationDialog(PersistentDialog):
     """Post-update verification: does every command still do what it should."""
 
-    def __init__(self, app, parent=None):
-        super().__init__(parent)
+    def __init__(self, app, parent=None, area: Optional[str] = None):
+        # One window position per area: each menu entry is its own window.
+        super().__init__(parent, window_id=f"VerificationDialog_{area or 'all'}")
+        from py2flamingo.verification.model import AREAS
+
         self.app = app
-        self.setWindowTitle("Post-update verification")
+        self.area = area
+        self.setWindowTitle(
+            f"Verification: {AREAS[area]}"
+            if area
+            else "Post-update verification: all checks"
+        )
         self.setMinimumSize(820, 560)
         self._settings = QSettings("Flamingo", "Py2Flamingo")
         self._thread: Optional[_RunThread] = None
@@ -174,6 +193,24 @@ class VerificationDialog(PersistentDialog):
         folder_row.addWidget(self.folder_edit, 1)
         folder_row.addWidget(browse)
         form.addRow("Report folder:", folder_row)
+
+        data_row = QHBoxLayout()
+        self.data_root_edit = QLineEdit(
+            self._settings.value(SETTINGS_KEY_DATA_ROOT, "", type=str)
+        )
+        self.data_root_edit.setPlaceholderText(
+            "e.g. D:\\CTLSM1 (where the server's save drive appears here)"
+        )
+        self.data_root_edit.setToolTip(
+            "Used by the acquisition data check: the folder on this computer that "
+            "holds what the server saves (its save drive, e.g. /media/deploy/ctlsm1 "
+            "appears here as D:\\CTLSM1). Leave empty to skip that check."
+        )
+        data_browse = QPushButton("Browse...")
+        data_browse.clicked.connect(self._browse_data_root)
+        data_row.addWidget(self.data_root_edit, 1)
+        data_row.addWidget(data_browse)
+        form.addRow("Server data folder:", data_row)
         layout.addLayout(form)
 
         tiers_row = QHBoxLayout()
@@ -205,6 +242,16 @@ class VerificationDialog(PersistentDialog):
         tiers_row.addStretch(1)
         self.tier_boxes[Tier.READ_ONLY].setChecked(True)
         self.tier_boxes[Tier.READ_ONLY].setEnabled(False)
+        if self.area:
+            from py2flamingo.verification.session import top_tier_of
+
+            top = top_tier_of(self.area)
+            self.tier_boxes[top].setChecked(True)
+            # Tiers above what this area has would add nothing.
+            for tier, box in self.tier_boxes.items():
+                if tier > top:
+                    box.setEnabled(False)
+                    box.setToolTip(box.toolTip() + " (no checks of this area)")
         layout.addLayout(tiers_row)
 
         buttons = QHBoxLayout()
@@ -318,6 +365,15 @@ class VerificationDialog(PersistentDialog):
                 box.setChecked(False)
             box.blockSignals(False)
 
+    def _browse_data_root(self) -> None:
+        start = self.data_root_edit.text() or os.getcwd()
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Where the server's save drive appears", start
+        )
+        if chosen:
+            self.data_root_edit.setText(chosen)
+            self._settings.setValue(SETTINGS_KEY_DATA_ROOT, chosen)
+
     def _browse(self) -> None:
         start = self.folder_edit.text() or os.getcwd()
         chosen = QFileDialog.getExistingDirectory(
@@ -334,15 +390,14 @@ class VerificationDialog(PersistentDialog):
 
         top = self._selected_top()
         lines = []
-        for c in checks_for([t for t in Tier if t <= top]):
+        selected = checks_for([t for t in Tier if t <= top], area=self.area)
+        for c in selected:
             lines.append(f"{c.tier.label}  {c.check_id}: {c.title}")
             for s in c.sends:
                 lines.append(f"        sends {s}")
         box = QMessageBox(self)
         box.setWindowTitle("Dry run: what would be sent")
-        box.setText(
-            f"{len(checks_for([t for t in Tier if t <= top]))} checks, nothing sent."
-        )
+        box.setText(f"{len(selected)} checks, nothing sent.")
         box.setDetailedText("\n".join(lines))
         box.exec_()
 
@@ -355,7 +410,10 @@ class VerificationDialog(PersistentDialog):
             return
         top = self._selected_top()
         sample = self.sample_edit.text().strip()
-        options = RunOptions(sample=sample)
+        options = RunOptions(
+            sample=sample, local_data_root=self.data_root_edit.text().strip()
+        )
+        self._settings.setValue(SETTINGS_KEY_DATA_ROOT, options.local_data_root)
         if top >= Tier.MOTION and not sample:
             QMessageBox.warning(
                 self, "Sample required", "Say what test sample or target is mounted."
@@ -416,6 +474,7 @@ class VerificationDialog(PersistentDialog):
             root,
             confirmations,
             self._abort,
+            area=self.area,
         )
         self._thread.check_started.connect(self._on_started)
         self._thread.check_finished.connect(self._on_finished)
@@ -476,8 +535,6 @@ class VerificationDialog(PersistentDialog):
         self._set_running(False)
         self._folder = Path(folder)
         self.open_button.setEnabled(True)
-        for r in info.get("restores", []):
-            self._add_row(r)
         counts = ", ".join(f"{v} {k}" for k, v in info.get("counts", {}).items())
         prefix = "Aborted. " if info.get("aborted") else "Done. "
         self.step_label.setText(

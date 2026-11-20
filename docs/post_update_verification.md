@@ -16,10 +16,26 @@ Windows PC on the instrument network, either in the app or from a command prompt
 
 ## In the app
 
-**Tools > Connection Tests > Post-update verification...**
+**Tools > Connection Tests > Post-update verification** has one entry per area, so each
+part of the instrument can be checked on its own, and **All checks** for the combined run:
+
+| Menu entry | Checks |
+|---|---|
+| All checks... | everything below, in one run and one report |
+| Server and connection... | command layout, version string, stale codes refused, settings, state, drives, board notices during the run |
+| Stage... | positions, go to the target, each axis a step and back, HALT on a moving stage |
+| Camera... | size, pixel size, exposure, trigger mode, frame rate, ROI, light-sheet registers, binning, snapshot, live view |
+| Lasers, LED and illumination... | laser power, laser preview, filter wheel, LED, left/right paths, LED brightness in the live image |
+| Workflows and acquisition... | the server's stack check, image of the target, a small workflow, stopping a workflow |
+| Acquisition data files... | the folder a workflow wrote, read back with the app's and the stitcher's own readers |
+
+An area brings along the checks it depends on (the stage area reads the settings and
+positions first), and its window opens with the highest tier that area needs.
 
 1. Type what is mounted (needed from T2 up).
 2. Pick a target position, or **Current position**.
+   For the data check, fill **Server data folder**: where the server's save drive appears
+   on this computer (for example `D:\CTLSM1` for `/media/deploy/ctlsm1`).
 3. Tick the highest tier to run. Each tier includes the ones before it:
 
    | Tier | What it does |
@@ -33,7 +49,10 @@ Windows PC on the instrument network, either in the app or from a command prompt
 4. **Dry run** lists every command the selected checks would send, and sends nothing.
 5. **Run** asks for confirmation above T1, then shows each result as it finishes. The bar
    counts checks.
-6. **Abort** stops at once: all axes halted, lasers and LED off, live view and workflow
+6. Settings a check changes are put back as soon as that check ends, so one check never
+   leaves the camera or a laser changed for the next. The stage returns from the target to
+   where the run started at the end.
+7. **Abort** stops at once: all axes halted, lasers and LED off, live view and workflow
    stopped. Changed settings are restored; the stage stays where it stopped.
 
 ## From a command prompt
@@ -46,6 +65,10 @@ python -m py2flamingo.verification --host 10.129.37.20 --tiers T4 --sample "bead
 python -m py2flamingo.verification --dry-run --tiers T4
 python -m py2flamingo.verification --compare verification\n7_20261119_101500 verification\n7_20261120_093000
 ```
+
+`--area stage` (or `server`, `camera`, `light`, `acquisition`, `data`) runs one area,
+at that area's highest tier unless `--tiers` says otherwise. `--data-root D:\CTLSM1` is the
+server data folder for the data check.
 
 T2 and above ask for confirmation at the prompt (or take `--confirm-motion`,
 `--confirm-light`, `--confirm-acquisition`). Ctrl+C aborts as above. `--target NAME` picks a
@@ -93,10 +116,15 @@ verification move may enter.
 
 ## Known results on a correct server
 
-Two checks are expected to fail until their client fixes land, because they measure
+Three checks are expected to fail until their client fixes land, because they measure
 known client issues:
 
 - `t1.roi`: the app sets the camera ROI with the left/top edge only. The server also reads
   the right/bottom edge and, on the 2026-11-13 build, reverts the change (status 2).
 - `t4.workflow`: the app writes the workflow exposure as `Exposure time (us)`. Servers
   read only `Exposure time (ms)` or `(ns)`, so the camera keeps its previous exposure.
+- `t4.acquisition_files` (servers from 2026-10-06 on): the build writes
+  `Left path recording = true`, `ROI width` and a `SystemMetaData.txt` instead of
+  `Left path = ON 1`, `AOI width` and `ScopeSettings.txt`. The app's illumination reader and
+  the stitcher's microscope-name and objective readers know only the old form. On a 3.0.0
+  server the same check passes.

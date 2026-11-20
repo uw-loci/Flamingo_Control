@@ -81,11 +81,12 @@ CLIENT_LOOKUPS: FrozenSet[str] = frozenset(
         "COMMON_STORAGE_PATH_TEST",
         "COMMON_SCOPE_SETTINGS_LOAD",
         "COMMON_SCOPE_SETTINGS_SAVE",
-        # Binning reads (2026-11-13 build on). Not BINNING_SET: it resets the
-        # camera ROI to the full frame, and nothing here restores that yet.
+        # Binning (2026-11-13 build on). BINNING_SET resets the camera ROI to
+        # the full frame; the verification check that sets it restores both.
+        # The two _DESC codes are not requestable (the server answers
+        # "Unknown command"), so they are not listed.
         "CAMERA_BINNING_GET",
-        "CAMERA_BINNING_MAX_DESC",
-        "CAMERA_BINNING_STEPPING_DESC",
+        "CAMERA_BINNING_SET",
         # Not DOCUMENT_LOAD or DOCUMENT_SAVE: both write on the server (LOAD
         # re-reads the file, clamps stage limits and saves the system
         # settings), and nothing here sends them yet. Settings are read with

@@ -732,12 +732,20 @@ class MVCConnectionService:
         from py2flamingo import __version__
 
         mine = server_layout.client_version_string(__version__)
+        self.server_version_text = ""
+        self.server_version_verdict = None
         try:
-            _, extra = self._exchange_frames(
+            frame, extra = self._exchange_frames(
                 server_layout.UI_CONTROLLER_ID_GET,
                 want=server_layout.UI_CONTROLLER_ID_GET,
                 additional=mine.encode("utf-8"),
             )
+            # int32Data0 (bytes 24-27): the server's verdict on our version
+            # string, 2 = matches, 1 = does not (logged and otherwise ignored).
+            if len(frame) >= 28:
+                import struct
+
+                self.server_version_verdict = struct.unpack_from("<i", frame, 24)[0]
         except Exception as e:
             self.logger.warning(
                 f"Could not read the server's version ({e}); assuming the 3.0.0 "
@@ -745,6 +753,7 @@ class MVCConnectionService:
             )
             return
         text = extra.decode("utf-8", errors="replace")
+        self.server_version_text = text.replace("\x00", "").strip()
         version = server_layout.parse_server_version(text)
         if version is None:
             self.logger.warning(

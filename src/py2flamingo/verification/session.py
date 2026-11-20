@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from py2flamingo.core import server_layout
 from py2flamingo.verification import report
 from py2flamingo.verification.context import RunOptions, Target
-from py2flamingo.verification.model import Check, Tier, checks_for
+from py2flamingo.verification.model import AREAS, Check, Tier, checks_for
 from py2flamingo.verification.rig import RigProfile, load_rig
 from py2flamingo.verification.runner import RunCallbacks, Runner, RunSummary
 
@@ -156,6 +156,7 @@ def execute(
     callbacks: Optional[RunCallbacks] = None,
     abort: Optional[threading.Event] = None,
     only: Optional[List[str]] = None,
+    area: Optional[str] = None,
 ) -> tuple[RunSummary, Path]:
     """Run the checks of ``tiers`` (cumulative: T3 includes T0-T2) and write
     the run folder. Returns the summary and the folder."""
@@ -163,7 +164,7 @@ def execute(
 
     top = max(tiers)
     selected_tiers = [t for t in Tier if t <= top]
-    checks: List[Check] = checks_for(selected_tiers, only)
+    checks: List[Check] = checks_for(selected_tiers, only, area)
     options.rig = options.rig or prepared.microscope_name
     folder = report.run_folder(report_root or DEFAULT_REPORT_ROOT, options.rig)
     options.report_dir = folder
@@ -197,6 +198,7 @@ def execute(
         "server_version": prepared.server_version,
         "command_layout": summary.facts.get("command_layout", prepared.server_version),
         "tiers": [t.label for t in selected_tiers],
+        "area": AREAS.get(area, "all checks") if area else "all checks",
         "confirmations": confirmations or [],
         "envelope": (
             prepared.rig.envelope.describe()
@@ -208,3 +210,11 @@ def execute(
     }
     report.write(folder, summary, info, runner.tap.messages)
     return summary, folder
+
+
+def top_tier_of(area: Optional[str]) -> Tier:
+    """The highest tier any check of ``area`` needs (all areas: T4)."""
+    from py2flamingo.verification.model import all_checks
+
+    tiers = [c.tier for c in all_checks() if area is None or c.area == area]
+    return max(tiers) if tiers else Tier.READ_ONLY

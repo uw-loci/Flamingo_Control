@@ -37,7 +37,9 @@ from py2flamingo.verification.runner import RunCallbacks
 REPO = Path(__file__).resolve().parents[1]
 
 # Checks that fail on purpose against a faithful server (see module docstring).
-KNOWN_CLIENT_DEFECTS = {"t1.roi", "t4.workflow"}
+# t4.acquisition_files: the app's illumination reader and the stitcher's name
+# and objective readers know only the pre-10-06 keys and ScopeSettings.txt.
+KNOWN_CLIENT_DEFECTS = {"t1.roi", "t4.workflow", "t4.acquisition_files"}
 
 
 def _adjacent_ports():
@@ -105,8 +107,14 @@ class VerificationTestCase(unittest.TestCase):
         shutil.copy(REPO / "workflows" / "ZStack.txt", "workflows/ZStack.txt")
 
         port = _adjacent_ports()
+        # The server's save drive, as this computer sees it.
+        self.data_root = Path(self.tmp.name) / "server_drive"
+        self.data_root.mkdir()
         self.scope = synth.SyntheticMicroscope(
-            command_port=port, live_port=port + 1, layout=self.layout
+            command_port=port,
+            live_port=port + 1,
+            layout=self.layout,
+            data_root=str(self.data_root),
         )
         self.scope.start()
         self.addCleanup(self.scope.stop)
@@ -116,9 +124,12 @@ class VerificationTestCase(unittest.TestCase):
             lambda: self.connection.is_connected() and self.connection.disconnect()
         )
 
-    def run_tiers(self, top=Tier.ACQUISITION, abort=None, callbacks=None, **opts):
+    def run_tiers(
+        self, top=Tier.ACQUISITION, abort=None, callbacks=None, area=None, **opts
+    ):
         prepared = session.prepare(self.connection, base_path=Path.cwd())
         target = session.target_for(prepared, None, self.scope.stage_position())
+        opts.setdefault("local_data_root", str(self.data_root))
         options = RunOptions(sample="synthetic sample", live_frames=8, **opts)
         summary, folder = session.execute(
             prepared,
@@ -129,6 +140,7 @@ class VerificationTestCase(unittest.TestCase):
             confirmations=["test"],
             abort=abort,
             callbacks=callbacks,
+            area=area,
         )
         return summary, folder, {r.check_id: r for r in summary.results}
 
@@ -150,6 +162,24 @@ class TestFullRun(VerificationTestCase):
         self.assertEqual(by_id["t0.binning"].outcome, Outcome.PASS)
         self.assertIn("status 2", by_id["t1.roi"].detail)
         self.assertIn("exposure", by_id["t4.workflow"].detail)
+        files = by_id["t4.acquisition_files"].detail
+        self.assertIn("illumination as left=False", files)
+        self.assertIn("no microscope name", files)
+        for cid in (
+            "t1.binning",
+            "t1.exposure_set",
+            "t3.filter_wheel",
+            "t0.server_version",
+        ):
+            self.assertEqual(
+                by_id[cid].outcome, Outcome.PASS, f"{cid}: {by_id[cid].detail}"
+            )
+        self.assertEqual(by_id["t9.board_notices"].outcome, Outcome.PASS)
+        # Settings go back after their own check, not at the end of the run.
+        ids = [r.check_id for r in summary.results]
+        self.assertLess(
+            ids.index("restore.binning 1x1 and ROI"), ids.index("t1.laser_level")
+        )
         # Restores all ran and passed; the stage is back where it started.
         restores = [r for r in summary.results if r.check_id.startswith("restore.")]
         self.assertTrue(restores)
@@ -272,12 +302,19 @@ class TestFaultsAreCaught(VerificationTestCase):
         self.assertEqual(by_id["t4.workflow"].outcome, Outcome.SKIPPED)
         halts = [h for h in self.scope.received(0x6003) if h.axis == 0xFF]
         self.assertTrue(halts, "the safe state must halt every axis")
+        # Restores of checks done before the abort ran then; any stage restore
+        # after the abort is reported and not run.
+        ids = [r.check_id for r in summary.results]
+        after_abort = summary.results[ids.index("t2.move_z") :]
         moved_back = [
             r
-            for r in summary.results
-            if r.check_id.startswith("restore.") and "back to" in r.check_id
+            for r in after_abort
+            if r.check_id.startswith("restore.") and "back" in r.check_id
         ]
-        self.assertTrue(all(r.outcome == Outcome.SKIPPED for r in moved_back))
+        self.assertTrue(moved_back, "the run-end stage return is still reported")
+        self.assertTrue(
+            all(r.outcome == Outcome.SKIPPED for r in moved_back), moved_back
+        )
 
 
 class TestCompare(unittest.TestCase):
@@ -398,4 +435,51 @@ class TestImageMeasures(unittest.TestCase):
         m = images.metrics(ref)
         self.assertGreater(
             m["focus"], images.metrics(np.full_like(ref, m["mean"]))["focus"]
+        )
+
+
+class TestAreas(VerificationTestCase):
+    """Each menu entry runs one area with only the prerequisites it needs."""
+
+    layout = sl.LAYOUT_2026_11_13
+
+    def test_the_stage_area_runs_alone(self):
+        from py2flamingo.verification.session import top_tier_of
+
+        _, _, by_id = self.run_tiers(top=top_tier_of("stage"), area="stage")
+        self.assertIn("t2.halt", by_id)
+        self.assertNotIn("t0.camera_settings", by_id)
+        self.assertNotIn("t3.led", by_id)
+        problems = {c: r.detail for c, r in by_id.items() if r.outcome.is_problem}
+        self.assertEqual(problems, {})
+
+    def test_the_data_area_brings_its_workflow_even_though_it_fails(self):
+        _, _, by_id = self.run_tiers(area="data")
+        self.assertEqual(by_id["t4.workflow"].outcome, Outcome.FAIL)  # exposure label
+        self.assertEqual(by_id["t4.acquisition_files"].outcome, Outcome.FAIL)
+        self.assertNotIn("t3.led", by_id)
+
+    def test_a_lost_board_during_the_run_fails_the_notice_check(self):
+        import time as _time
+
+        self.connection.device_notices.append(
+            (
+                _time.time() + 1,
+                "COMMON_DEVICE_LOST",
+                "Server reports a board lost: subsystem 7",
+            )
+        )
+        _, _, by_id = self.run_tiers(top=Tier.READ_ONLY, area="server")
+        self.assertEqual(by_id["t9.board_notices"].outcome, Outcome.FAIL)
+
+
+class TestOldDataFormat(VerificationTestCase):
+    """3.0.0 writes ScopeSettings.txt and the old keys; the readers know those."""
+
+    def test_the_data_check_passes_on_3_0_0_output(self):
+        _, _, by_id = self.run_tiers(area="data")
+        self.assertEqual(
+            by_id["t4.acquisition_files"].outcome,
+            Outcome.PASS,
+            by_id["t4.acquisition_files"].detail,
         )

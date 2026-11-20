@@ -478,12 +478,23 @@ class MainWindow(QMainWindow):
         self.conn_tests_menu.addAction(self.save_settings_action)
 
         self.conn_tests_menu.addSeparator()
-        self.verification_action = QAction("Post-update &verification...", self)
+        # One entry per functional area, each runnable on its own (its
+        # prerequisites come along), and "All checks" for the combined run.
+        from py2flamingo.verification.model import AREAS
+
+        verification_menu = self.conn_tests_menu.addMenu("Post-update &verification")
+        self.verification_action = QAction("&All checks...", self)
         self.verification_action.setStatusTip(
             "Check every command this app uses against the connected microscope"
         )
-        self.verification_action.triggered.connect(self._on_verification)
-        self.conn_tests_menu.addAction(self.verification_action)
+        self.verification_action.triggered.connect(lambda: self._on_verification(None))
+        verification_menu.addAction(self.verification_action)
+        verification_menu.addSeparator()
+        for area, label in AREAS.items():
+            action = QAction(f"{label}...", self)
+            action.setStatusTip(f"Verification checks for {label.lower()} only")
+            action.triggered.connect(lambda _checked, a=area: self._on_verification(a))
+            verification_menu.addAction(action)
 
         # Extensions menu (requires connection + Sample View open)
         extensions_menu = menubar.addMenu("&Extensions")
@@ -1066,15 +1077,17 @@ class MainWindow(QMainWindow):
         """Handle Connection Tests → Query command menu action."""
         self.connection_view.send_debug_query(command_code, command_name)
 
-    def _on_verification(self):
-        """Handle Connection Tests -> Post-update verification."""
+    def _on_verification(self, area=None):
+        """Handle Connection Tests -> Post-update verification (one area or all)."""
         from py2flamingo.views.dialogs.verification_dialog import VerificationDialog
 
-        dialog = getattr(self, "_verification_dialog", None)
+        dialogs = self.__dict__.setdefault("_verification_dialogs", {})
+        dialog = dialogs.get(area)
         if dialog is None or not dialog.isVisible():
-            self._verification_dialog = VerificationDialog(self.app, self)
-        self._verification_dialog.show()
-        self._verification_dialog.raise_()
+            dialog = VerificationDialog(self.app, self, area=area)
+            dialogs[area] = dialog
+        dialog.show()
+        dialog.raise_()
 
     def _on_save_settings(self):
         """Handle Connection Tests → Save Settings menu action."""

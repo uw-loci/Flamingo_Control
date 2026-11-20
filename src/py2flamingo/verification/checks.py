@@ -194,6 +194,7 @@ def _server_lasers(ctx: RunContext) -> Optional[List[Tuple[int, int]]]:
     "t0.connect",
     "Connected and the server's command layout identified",
     Tier.READ_ONLY,
+    area="server",
     sends=("UI_CONTROLLER_ID_GET (at connect)",),
 )
 def t0_connect(ctx: RunContext) -> None:
@@ -217,9 +218,44 @@ def t0_connect(ctx: RunContext) -> None:
 
 
 @check(
+    "t0.server_version",
+    "Server version string and its verdict on this client",
+    Tier.READ_ONLY,
+    area="server",
+    after=("t0.connect",),
+    sends=("UI_CONTROLLER_ID_GET (at connect)",),
+)
+def t0_server_version(ctx: RunContext) -> None:
+    """The server's own version string (program, build date and time, system
+    version, code counts) as it answered at connect, and its verdict on this
+    client's string (2 = matches, 1 = does not; the server only logs a
+    mismatch). Recorded so a before/after comparison shows the build changed
+    even when the system version still says 3.0.0."""
+    text = getattr(ctx.connection, "server_version_text", "")
+    verdict = getattr(ctx.connection, "server_version_verdict", None)
+    if not text:
+        raise Failed("no version string was received at connect")
+    version = server_layout.parse_server_version(text)
+    ctx.record("version_string", text)
+    ctx.record("verdict", verdict)
+    if version is None:
+        raise Failed(f"version string not understood: {text!r}")
+    ctx.record("build", f"{version.build_date} {version.build_time}")
+    ctx.record("system_version", version.system_version)
+    ctx.note(
+        f"{version.program} {version.system_version}, built {version.build_date} {version.build_time}"
+    )
+    if verdict == 1:
+        ctx.note(
+            "server says this client's version string does not match (expected; logged only)"
+        )
+
+
+@check(
     "t0.guard",
     "Stale command codes are refused, not sent",
     Tier.READ_ONLY,
+    area="server",
     after=("t0.connect",),
 )
 def t0_guard(ctx: RunContext) -> None:
@@ -244,6 +280,7 @@ def t0_guard(ctx: RunContext) -> None:
     "t0.settings",
     "Microscope settings read (name, stage limits)",
     Tier.READ_ONLY,
+    area="server",
     after=("t0.connect",),
     sends=(
         "SUBSYSTEM_CONFIGURATION_GET (10-06+) or SCOPE_SETTINGS_LOAD (3.0.0), once",
@@ -279,6 +316,7 @@ def t0_settings(ctx: RunContext) -> None:
     "t0.state",
     "System state is idle",
     Tier.READ_ONLY,
+    area="server",
     after=("t0.connect",),
     sends=("SYSTEM_STATE_GET",),
 )
@@ -303,6 +341,7 @@ def t0_state(ctx: RunContext) -> None:
     "t0.positions",
     "Stage positions read on all four axes, inside the stage limits",
     Tier.READ_ONLY,
+    area="stage",
     after=("t0.settings",),
     sends=("STAGE_POSITION_GET x4",),
 )
@@ -334,6 +373,7 @@ def t0_positions(ctx: RunContext) -> None:
     "t0.camera_size",
     "Camera image size and pixel size",
     Tier.READ_ONLY,
+    area="camera",
     after=("t0.connect",),
     sends=("CAMERA_IMAGE_SIZE_GET", "CAMERA_PIXEL_FIELD_OF_VIEW_GET"),
 )
@@ -366,6 +406,7 @@ def t0_camera_size(ctx: RunContext) -> None:
     "t0.camera_settings",
     "Camera exposure, trigger mode, frame rate, ROI",
     Tier.READ_ONLY,
+    area="camera",
     after=("t0.connect",),
     sends=(
         "CAMERA_EXPOSURE_GET",
@@ -418,6 +459,7 @@ def t0_camera_settings(ctx: RunContext) -> None:
     "t0.binning",
     "Camera binning (2026-11-13 build on)",
     Tier.READ_ONLY,
+    area="camera",
     after=("t0.connect",),
     sends=("CAMERA_BINNING_GET",),
 )
@@ -437,6 +479,7 @@ def t0_binning(ctx: RunContext) -> None:
     "t0.lasers",
     "Laser power read for every laser line",
     Tier.READ_ONLY,
+    area="light",
     after=("t0.connect",),
     sends=("LASER_LEVEL_GET per line",),
 )
@@ -476,6 +519,7 @@ def t0_lasers(ctx: RunContext) -> None:
     "t0.drives",
     "Storage drives listed",
     Tier.READ_ONLY,
+    area="server",
     after=("t0.connect",),
     sends=("COMMON_STORAGE_PATH_SET (as a list request)",),
 )
@@ -497,6 +541,7 @@ def t0_drives(ctx: RunContext) -> None:
     "t1.trigger_mode",
     "Trigger mode set, read back, restored",
     Tier.SETTINGS,
+    area="camera",
     after=("t0.state", "t0.camera_settings"),
     sends=("CAMERA_TRIGGER_MODE_SET", "CAMERA_TRIGGER_MODE_GET"),
 )
@@ -523,6 +568,7 @@ def t1_trigger_mode(ctx: RunContext) -> None:
     "t1.roi",
     "Camera ROI set through the app (centered AOI), image size follows",
     Tier.SETTINGS,
+    area="camera",
     after=("t0.state", "t0.camera_size", "t0.camera_settings"),
     sends=("CAMERA_ROI_LEFT_SET", "CAMERA_ROI_TOP_SET", "CAMERA_IMAGE_SIZE_GET"),
 )
@@ -580,6 +626,7 @@ def t1_roi(ctx: RunContext) -> None:
     "t1.light_sheet",
     "Light-sheet (ASLM) registers answer with their state",
     Tier.SETTINGS,
+    area="camera",
     after=("t0.state",),
     sends=("CAMERA_LIGHT_SHEET_MODE_ON_OFF (current value)",),
 )
@@ -604,9 +651,105 @@ def t1_light_sheet(ctx: RunContext) -> None:
 
 
 @check(
+    "t1.exposure_set",
+    "Camera exposure set directly, read back, restored",
+    Tier.SETTINGS,
+    area="camera",
+    after=("t0.state", "t0.camera_settings"),
+    sends=("CAMERA_EXPOSURE_SET", "CAMERA_EXPOSURE_GET"),
+)
+def t1_exposure_set(ctx: RunContext) -> None:
+    """EXPOSURE_SET takes integer ms in int32Data0 and answers with FPS_GET
+    then EXPOSURE_GET (no frame under its own code). The app does not send it
+    today (exposure goes in workflows); this is the path a fix for the
+    workflow exposure label could use. In light-sheet mode the server does
+    not set it; the same value twice gets no reply at all."""
+    original = int(ctx.facts.get("exposure_ms") or 10)
+    new = original + 2 if original < 40 else original - 2
+
+    def set_ms(ms: int) -> Message:
+        return ctx.exchange("CAMERA_EXPOSURE_SET", int0=ms, reply="CAMERA_EXPOSURE_GET")
+
+    ctx.on_restore(f"exposure {original} ms", lambda: set_ms(original))
+    reply = set_ms(new)
+    ctx.record("set_ms", new)
+    ctx.record("read_back_ms", reply.int0)
+    if reply.int0 != new:
+        raise Failed("exposure did not change (light-sheet mode on?)", new, reply.int0)
+
+
+@check(
+    "t1.binning",
+    "Camera binning 2x2 and back, image size and pixel size follow (11-13 build on)",
+    Tier.SETTINGS,
+    area="camera",
+    after=("t0.state", "t0.binning", "t0.camera_size", "t0.camera_settings"),
+    sends=(
+        "CAMERA_BINNING_SET",
+        "CAMERA_IMAGE_SIZE_GET",
+        "CAMERA_PIXEL_FIELD_OF_VIEW_GET",
+    ),
+)
+def t1_binning(ctx: RunContext) -> None:
+    """BINNING_SET (horizontal int32Data0, vertical int32Data1) answers with
+    its own code, status 1 or 2 (REVERTED: the camera kept its binning), then
+    BINNING_GET; the ROI resets to the full frame. At 2x2 the image is half
+    as wide and high and each pixel twice the size. The original binning and
+    ROI are restored."""
+    b0 = ctx.facts.get("binning", (1, 1))
+    w0, h0 = ctx.facts["image_size"]
+    left0, right0, top0, bottom0 = ctx.facts["roi"]
+    fov0 = ctx.facts.get("mm_per_pixel", 0.0)
+    test = (2, 2) if tuple(b0) == (1, 1) else (1, 1)
+
+    def restore():
+        ctx.exchange(
+            "CAMERA_BINNING_SET", int0=b0[0], int1=b0[1], reply="CAMERA_BINNING_SET"
+        )
+        ctx.exchange(
+            "CAMERA_ROI_LEFT_SET", int0=left0, int1=right0, reply="CAMERA_ROI_LEFT_SET"
+        )
+        ctx.exchange(
+            "CAMERA_ROI_TOP_SET", int0=top0, int1=bottom0, reply="CAMERA_ROI_TOP_SET"
+        )
+
+    ctx.on_restore(f"binning {b0[0]}x{b0[1]} and ROI", restore)
+    reply = ctx.exchange(
+        "CAMERA_BINNING_SET", int0=test[0], int1=test[1], reply="CAMERA_BINNING_SET"
+    )
+    got = ctx.exchange("CAMERA_BINNING_GET")
+    size = ctx.exchange("CAMERA_IMAGE_SIZE_GET")
+    fov = ctx.exchange("CAMERA_PIXEL_FIELD_OF_VIEW_GET")
+    ctx.record("set_status", reply.status)
+    ctx.record("binning_after", [got.int0, got.int1])
+    ctx.record("image_size_after", [size.int0, size.int1])
+    ctx.record("mm_per_pixel_after", fov.value)
+    if reply.status == 2 or (got.int0, got.int1) != test:
+        raise Failed(
+            "binning not taken (status 2: the camera kept its binning)",
+            list(test),
+            [got.int0, got.int1],
+        )
+    factor = test[0] / max(b0[0], 1)
+    # The ROI resets to the full frame in binned pixels.
+    sensor_w = max(right0, w0) * max(b0[0], 1)
+    expected_w = sensor_w // test[0]
+    problems = []
+    if size.int0 != expected_w:
+        problems.append(
+            f"width {size.int0} at {test[0]}x binning, expected {expected_w} (full frame)"
+        )
+    if fov0 > 0 and abs(fov.value / fov0 - factor) > 0.02:
+        problems.append(f"pixel size {fov.value:.6g} mm, expected {fov0 * factor:.6g}")
+    if problems:
+        raise Failed("; ".join(problems))
+
+
+@check(
     "t1.laser_level",
     "Laser power set and read back with the laser off",
     Tier.SETTINGS,
+    area="light",
     after=("t0.state", "t0.lasers"),
     sends=("LASER_DISABLE per line", "LASER_LEVEL_SET", "LASER_LEVEL_GET"),
 )
@@ -673,6 +816,7 @@ def _axis_round_trip(ctx: RunContext, axis: str) -> None:
     "t2.go_to_target",
     "Go to the verification target",
     Tier.MOTION,
+    area="stage",
     after=("t0.positions", "t0.state"),
     sends=("STAGE_POSITION_SET_SLIDER per axis", "STAGE_POSITION_GET"),
 )
@@ -700,6 +844,7 @@ def t2_go_to_target(ctx: RunContext) -> None:
         "stage back to the starting position",
         lambda: [_stage(ctx).move_to_position(AXIS[a], start[a]) for a in AXIS],
         moves=True,
+        at_end=True,
     )
     for axis in AXIS:
         want = target.position[axis]
@@ -735,6 +880,7 @@ for _axis in ("x", "y", "z", "r"):
         f"t2.move_{_axis}",
         f"{_axis.upper()} axis moves and returns",
         Tier.MOTION,
+        area="stage",
         after=("t0.positions", "t0.state"),
         sends=("STAGE_POSITION_SET_SLIDER", "STAGE_POSITION_GET"),
     )(_make(_axis))
@@ -744,6 +890,7 @@ for _axis in ("x", "y", "z", "r"):
     "t2.halt",
     "HALT stops a move part way (the emergency stop's command)",
     Tier.MOTION,
+    area="stage",
     after=("t2.move_x",),
     sends=("STAGE_POSITION_SET_SLIDER", "STAGE_HALT (axis 0xFF)", "STAGE_POSITION_GET"),
 )
@@ -798,6 +945,7 @@ def t2_halt(ctx: RunContext) -> None:
     "t3.laser_preview",
     "Each laser turns on in preview at low power and off again",
     Tier.LIGHT,
+    area="light",
     after=("t0.state", "t0.lasers"),
     sends=("LASER_LEVEL_SET", "LASER_ENABLE_PREVIEW", "LASER_DISABLE"),
 )
@@ -850,9 +998,66 @@ def t3_laser_preview(ctx: RunContext) -> None:
 
 
 @check(
+    "t3.filter_wheel",
+    "The filter wheel moves for a laser and reports it has stopped",
+    Tier.LIGHT,
+    area="light",
+    after=("t0.state", "t0.lasers"),
+    sends=(
+        "LASER_ENABLE_PREVIEW",
+        "SERVO_FILTER_WHEEL_MOTION_STOPPED (query)",
+        "LASER_DISABLE",
+    ),
+)
+def t3_filter_wheel(ctx: RunContext) -> None:
+    """LASER_ENABLE_PREVIEW moves the filter wheel to that laser's position
+    first. 0x8002 asked as a query answers data0 = 1 (stopped) / 0 (moving) on
+    the Scope board; an STM board never answers it (it forwards its own lines
+    as messages), which is reported ACK-ONLY with those lines."""
+    service = _laser_led(ctx)
+    lasers = ctx.facts["lasers"]
+    if len(lasers) < 2:
+        raise Skipped("needs two lasers to make the wheel move")
+    ctx.on_restore("lasers off", service.disable_all_lasers)
+    results = []
+    for laser in lasers[:2]:
+        service.set_laser_power(laser.index, ctx.options.laser_test_percent)
+        service.enable_laser_preview(laser.index)
+        mark = ctx.tap.mark()
+        stopped = None
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline:
+            try:
+                reply = ctx.exchange("SERVO_FILTER_WHEEL_MOTION_STOPPED", timeout=3.0)
+            except Failed:
+                break
+            if reply.int0 == 1:
+                stopped = reply
+                break
+            ctx.sleep(0.2)
+        messages = [
+            m.text
+            for m in ctx.tap.since(
+                mark, "rx", ctx.code("COMMON_MESSAGE_FROM_CONTROLLER")
+            )
+        ]
+        results.append((laser.index, stopped is not None, messages))
+        service.disable_all_lasers()
+    ctx.record("stopped_reported", [r[1] for r in results])
+    if not any(r[1] for r in results):
+        lines = [m for r in results for m in r[2]][:4]
+        raise AckOnly(
+            "no 0x8002 answer (an STM-board wheel answers only with messages)"
+            + (f": {' | '.join(lines)}" if lines else "")
+        )
+    ctx.note(", ".join(f"laser {i}: stopped" for i, ok, _ in results if ok))
+
+
+@check(
     "t3.led",
     "LED preview on and off",
     Tier.LIGHT,
+    area="light",
     after=("t0.state",),
     sends=("LED_SET", "LED_PREVIEW_ENABLE", "LED_PREVIEW_DISABLE"),
 )
@@ -886,6 +1091,7 @@ def t3_led(ctx: RunContext) -> None:
     "t3.illumination_paths",
     "Left and right illumination paths switch",
     Tier.LIGHT,
+    area="light",
     after=("t0.state",),
     sends=(
         "ILLUMINATION_LEFT_ENABLED",
@@ -920,6 +1126,7 @@ def t3_illumination_paths(ctx: RunContext) -> None:
     "t4.snapshot",
     "Snapshot: one frame of the reported size arrives",
     Tier.ACQUISITION,
+    area="camera",
     after=("t0.state", "t0.camera_size"),
     sends=("CAMERA_SNAPSHOT_GET",),
 )
@@ -953,6 +1160,7 @@ def t4_snapshot(ctx: RunContext) -> None:
     "t4.live_view",
     "Live view streams frames at the reported rate",
     Tier.ACQUISITION,
+    area="camera",
     after=("t0.state", "t0.camera_settings"),
     sends=("CAMERA_LIVE_VIEW_START", "CAMERA_LIVE_VIEW_STOP"),
 )
@@ -984,6 +1192,7 @@ def t4_live_view(ctx: RunContext) -> None:
     "t4.led_brightness",
     "Raising the LED brightens the live image",
     Tier.ACQUISITION,
+    area="light",
     after=("t4.live_view", "t3.led"),
     sends=(
         "LED_SET",
@@ -1030,6 +1239,7 @@ def t4_led_brightness(ctx: RunContext) -> None:
     "t4.target_image",
     "Image of the target, measured (and compared with its reference)",
     Tier.ACQUISITION,
+    area="acquisition",
     after=("t4.snapshot",),
     sends=("LED_PREVIEW_ENABLE", "CAMERA_SNAPSHOT_GET"),
 )
@@ -1095,6 +1305,7 @@ def _workflow_text(
     drive = ctx.options.server_save_drive or (ctx.facts.get("drives") or [""])[0]
     if not drive:
         raise Skipped("no save drive")
+    ctx.facts["workflow_drive"] = drive
     led_pct = ctx.options.led_test_percent
     values = {
         "Experiment Settings": {
@@ -1169,6 +1380,7 @@ def _server_dir(ctx: RunContext) -> str:
     "t4.check_stack",
     "The server checks a small workflow without complaint",
     Tier.ACQUISITION,
+    area="acquisition",
     after=("t0.positions", "t0.drives"),
     sends=("CAMERA_CHECK_STACK",),
 )
@@ -1197,6 +1409,7 @@ def t4_check_stack(ctx: RunContext) -> None:
     "t4.workflow",
     "A small workflow runs, saves every plane and returns to idle",
     Tier.ACQUISITION,
+    area="acquisition",
     after=("t4.check_stack", "t0.state"),
     sends=("CAMERA_WORK_FLOW_START", "SYSTEM_STATE_GET", "CAMERA_EXPOSURE_GET"),
 )
@@ -1212,6 +1425,9 @@ def t4_workflow(ctx: RunContext) -> None:
     asked = current + 3 if current < 40 else current - 3
     directory = _server_dir(ctx)
     text = _workflow_text(ctx, planes, directory, asked)
+    ctx.facts["workflow_folder"] = directory
+    ctx.facts["workflow_planes"] = planes
+    ctx.facts["workflow_exposure_ms"] = asked
     mark = ctx.tap.mark()
     ctx.exchange("CAMERA_WORK_FLOW_START", additional=text, reply=None)
     running = ctx.wait_for(WORKFLOW_RUNNING, mark, timeout=20.0)
@@ -1260,6 +1476,7 @@ def t4_workflow(ctx: RunContext) -> None:
     "t4.workflow_stop",
     "A running workflow stops on request",
     Tier.ACQUISITION,
+    area="acquisition",
     after=("t4.check_stack", "t0.state"),
     sends=("CAMERA_WORK_FLOW_START", "CAMERA_WORK_FLOW_STOP"),
 )
@@ -1290,3 +1507,161 @@ def t4_workflow_stop(ctx: RunContext) -> None:
         )
     if idle is None and _state(ctx) not in (IDLE, 0):
         raise Failed("not idle 30 s after stop")
+
+
+@check(
+    "t4.acquisition_files",
+    "The workflow's files on disk, read with the app's and stitcher's own readers",
+    Tier.ACQUISITION,
+    area="data",
+    after=("t4.check_stack", "t0.camera_size"),
+    uses=("t4.workflow",),
+    sends=(),
+)
+def t4_acquisition_files(ctx: RunContext) -> None:
+    """Reads back the folder t4.workflow wrote, through the folder where the
+    server's save drive appears on this computer (Report > local data root).
+    Checks every plane is in the image file, the per-stack _Settings.txt
+    sidecars, no _DEVICE_LOST files, the metadata copy the build writes
+    (ScopeSettings.txt on 3.0.0, SystemMetaData.txt from 10-06 on), and that
+    the readers the app and the stitcher use find the illumination side, the
+    microscope name and the objective in it. The 11-13 build writes
+    "Left path recording = true" and "ROI width" where older builds wrote
+    "Left path = ON 1" and "AOI width": this is where a reader that knows
+    only the old keys shows up."""
+    folder_name = ctx.facts.get("workflow_folder")
+    if not folder_name:
+        raise Skipped("t4.workflow did not run")
+    root = ctx.options.local_data_root
+    if not root:
+        raise Skipped(
+            "no local data root: give the folder where the server's save drive "
+            "appears on this computer (e.g. D:\\CTLSM1)"
+        )
+    folder = Path(root) / folder_name
+    deadline = time.monotonic() + 30.0
+    while not (folder / "Workflow.txt").exists() and time.monotonic() < deadline:
+        ctx.sleep(1.0)
+    if not folder.is_dir():
+        raise Failed(f"{folder} not found")
+    files = sorted(p.name for p in folder.iterdir())
+    ctx.record("files", files[:40])
+    problems = []
+    lost = [f for f in files if "_DEVICE_LOST" in f]
+    if lost:
+        problems.append(f"files marked DEVICE_LOST: {', '.join(lost[:3])}")
+    if "Workflow.txt" not in files:
+        problems.append("no Workflow.txt")
+    layout = server_layout.active()
+    meta = (
+        "SystemMetaData.txt"
+        if layout is not None and layout.has_metadata_document
+        else "ScopeSettings.txt"
+    )
+    if meta not in files:
+        problems.append(f"no {meta}")
+    sidecars = [f for f in files if f.endswith("_Settings.txt")]
+    images = [
+        f for f in files if f.endswith((".raw", ".tif")) and not f.endswith("_MP.tif")
+    ]
+    ctx.record("stacks", len(images))
+    if not sidecars:
+        problems.append("no per-stack _Settings.txt")
+    if not images:
+        problems.append("no image file")
+    planes = int(ctx.facts.get("workflow_planes") or 0)
+    w, h = ctx.facts.get("image_size", (0, 0))
+    for name in images[:1]:
+        path = folder / name
+        if name.endswith(".raw") and w and h:
+            got = path.stat().st_size // (w * h * 2)
+            ctx.record("planes_in_file", got)
+            if got != planes:
+                problems.append(f"{name}: {got} planes, asked {planes}")
+        elif name.endswith(".tif"):
+            try:
+                import tifffile
+
+                with tifffile.TiffFile(str(path)) as tif:
+                    got = len(tif.pages)
+                ctx.record("planes_in_file", got)
+                if got != planes:
+                    problems.append(f"{name}: {got} planes, asked {planes}")
+            except ImportError:
+                ctx.note("tifffile not installed: plane count not checked")
+
+    # The readers this data meets downstream.
+    if (folder / "Workflow.txt").exists():
+        from py2flamingo.utils.tile_workflow_parser import (
+            read_illumination_path_from_workflow,
+        )
+
+        sides = read_illumination_path_from_workflow(folder / "Workflow.txt")
+        ctx.record("app_reads_illumination", list(sides))
+        if tuple(sides) != (True, False):
+            problems.append(
+                f"the app reads the illumination as left={sides[0]}, right={sides[1]}; "
+                "the workflow asked for left only"
+            )
+        text = (folder / "Workflow.txt").read_text(encoding="utf-8", errors="replace")
+        ctx.record(
+            "workflow_keys",
+            [
+                k
+                for k in (
+                    "Left path recording",
+                    "Left path =",
+                    "ROI width",
+                    "AOI width",
+                    "Bit binning width",
+                    "Exposure time (ms)",
+                    "Exposure time (us)",
+                )
+                if k in text
+            ],
+        )
+    try:
+        from flamingo_stitcher import orientation, pipeline
+
+        name = orientation.read_microscope_name(folder)
+        mag = pipeline.read_objective_magnification(folder)
+        ctx.record("stitcher_microscope_name", name)
+        ctx.record("stitcher_objective", mag)
+        if not name:
+            problems.append(
+                "the stitcher finds no microscope name (tile orientation and Options profile key on it)"
+            )
+        if not mag:
+            problems.append(
+                "the stitcher finds no objective (pixel size falls back to its default)"
+            )
+    except ImportError:
+        ctx.note("flamingo_stitcher not installed: stitcher readers not checked")
+    if problems:
+        raise Failed("; ".join(problems))
+    ctx.note(f"{len(images)} stack(s) in {folder}")
+
+
+@check(
+    "t9.board_notices",
+    "No board was lost or reset during the run",
+    Tier.READ_ONLY,
+    area="server",
+    after=("t0.connect",),
+)
+def t9_board_notices(ctx: RunContext) -> None:
+    """The 2026-11-13 build reports a board that drops its USB/serial link
+    (DEVICE_LOST), resets (DEVICE_RESET) or comes back (DEVICE_RECOVERED).
+    Any of those during the run is listed; a loss or reset is a FAIL,
+    because every result after it is suspect. Older builds send none."""
+    layout = server_layout.active()
+    if layout is None or "COMMON_DEVICE_LOST" not in layout.codes:
+        raise Skipped("this server build sends no board notices")
+    t0 = ctx.facts.get("t0", 0.0)
+    seen = [n for n in getattr(ctx.connection, "device_notices", []) if n[0] >= t0]
+    ctx.record("notices", [line for _, _, line in seen])
+    bad = [line for _, name, line in seen if name != "COMMON_DEVICE_RECOVERED"]
+    if bad:
+        raise Failed(
+            f"{len(bad)} board notice(s) during the run: {' | '.join(bad[:3])}"
+        )

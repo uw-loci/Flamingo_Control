@@ -156,8 +156,20 @@ class Runner:
                 by_id[chk.check_id] = result
                 if self.callbacks.check_finished:
                     self.callbacks.check_finished(i, n, result)
+                # Put back what this check changed before the next one runs.
+                for restored in self._run_restores(
+                    aborted or self.abort.is_set(), at_end=False
+                ):
+                    results.append(restored)
+                    if self.callbacks.check_finished:
+                        self.callbacks.check_finished(i, n, restored)
         finally:
-            results.extend(self._run_restores(aborted or self.abort.is_set()))
+            for restored in self._run_restores(
+                aborted or self.abort.is_set(), at_end=True
+            ):
+                results.append(restored)
+                if self.callbacks.check_finished:
+                    self.callbacks.check_finished(n, n, restored)
             self.tap.remove()
         return RunSummary(results, started, time.time(), aborted, dict(self.ctx.facts))
 
@@ -215,12 +227,15 @@ class Runner:
             (mark, self.tap.mark()),
         )
 
-    def _run_restores(self, aborted: bool) -> List[Result]:
+    def _run_restores(self, aborted: bool, at_end: bool) -> List[Result]:
         out = []
         # Settings go back even after an abort; the abort flag would stop
         # every exchange, so it is cleared for them and set again after.
+        pending = self.ctx.restores(at_end)
+        if not pending:
+            return []
         self.abort.clear()
-        for label, fn, moves in self.ctx.restores():
+        for label, fn, moves in pending:
             mark = self.tap.mark()
             t = time.monotonic()
             if aborted and moves:

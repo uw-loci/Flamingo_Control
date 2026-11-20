@@ -236,6 +236,9 @@ class RunOptions:
     # Server-side folder name for T4 data, under the drive the workflow uses.
     server_save_drive: str = ""
     server_save_subdir: str = "verification"
+    # Where the server's save drive appears on this computer (e.g. D:\\CTLSM1 for
+    # /media/deploy/ctlsm1), for reading back what a workflow wrote.
+    local_data_root: str = ""
     motion_step_mm: float = 0.1
     rotation_step_deg: float = 1.0
     halt_test_distance_mm: float = 1.0
@@ -263,7 +266,9 @@ class RunContext:
     # Per-check scratch, reset by the runner before each check.
     notes: List[str] = field(default_factory=list)
     values: Dict[str, Any] = field(default_factory=dict)
-    _restores: List[Tuple[str, Callable[[], None], bool]] = field(default_factory=list)
+    _restores: List[Tuple[str, Callable[[], None], bool, bool]] = field(
+        default_factory=list
+    )
     progress: Optional[Callable[[str], None]] = None
 
     # -------------------------------------------------------------- helpers
@@ -295,20 +300,30 @@ class RunContext:
             raise Aborted("run aborted")
 
     def on_restore(
-        self, label: str, fn: Callable[[], None], moves: bool = False
+        self,
+        label: str,
+        fn: Callable[[], None],
+        moves: bool = False,
+        at_end: bool = False,
     ) -> None:
-        """Register how to put something back. Run in reverse at the end.
+        """Register how to put something back, newest first.
+
+        Restores run as soon as the check that registered them ends, so a
+        setting changed by one check never carries into the next. ``at_end``
+        keeps it to the end of the run instead (the stage returning from the
+        target to where the run started).
 
         ``moves``: the restore drives the stage. After an abort those are
         reported and not run: an operator who pressed Abort wants the stage
         to stay where it stopped.
         """
-        self._restores.append((label, fn, moves))
+        self._restores.append((label, fn, moves, at_end))
 
-    def restores(self) -> List[Tuple[str, Callable[[], None], bool]]:
-        out = list(reversed(self._restores))
-        self._restores.clear()
-        return out
+    def restores(self, at_end: bool) -> List[Tuple[str, Callable[[], None], bool]]:
+        """Take the restores of one kind (all of them when ``at_end``)."""
+        take = [r for r in self._restores if at_end or not r[3]]
+        self._restores = [r for r in self._restores if r not in take]
+        return [(label, fn, moves) for label, fn, moves, _ in reversed(take)]
 
     def code(self, name: str) -> int:
         """Wire code for this server build; Skipped if the build lacks it."""

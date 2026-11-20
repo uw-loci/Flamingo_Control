@@ -45,6 +45,17 @@ class Tier(enum.IntEnum):
         }[self]
 
 
+# Functional areas, each its own menu entry; "All checks" runs every area.
+AREAS: Dict[str, str] = {
+    "server": "Server and connection",
+    "stage": "Stage",
+    "camera": "Camera",
+    "light": "Lasers, LED and illumination",
+    "acquisition": "Workflows and acquisition",
+    "data": "Acquisition data files",
+}
+
+
 class Outcome(str, enum.Enum):
     PASS = "PASS"
     FAIL = "FAIL"
@@ -130,6 +141,10 @@ class Check:
     # Shown in dry run and in the GUI's tooltip: what is sent and why.
     sends: Tuple[str, ...] = ()
     description: str = ""
+    area: str = "server"
+    # Checks run before this one when it is selected, whose outcome does not
+    # block it (it reads what they leave behind, e.g. a workflow's files).
+    uses: Tuple[str, ...] = ()
 
 
 _REGISTRY: Dict[str, Check] = {}
@@ -142,13 +157,17 @@ def check(
     *,
     after: Tuple[str, ...] = (),
     sends: Tuple[str, ...] = (),
+    area: str = "server",
+    uses: Tuple[str, ...] = (),
 ) -> Callable[[Callable[[Any], None]], Callable[[Any], None]]:
     """Register a check. Order of registration is the order of the run."""
 
     def register(fn: Callable[[Any], None]) -> Callable[[Any], None]:
         if check_id in _REGISTRY:
             raise ValueError(f"duplicate check id {check_id}")
-        for dep in after:
+        if area not in AREAS:
+            raise ValueError(f"{check_id}: unknown area {area}")
+        for dep in tuple(after) + tuple(uses):
             if dep not in _REGISTRY:
                 raise ValueError(f"{check_id}: prerequisite {dep} not registered first")
         _REGISTRY[check_id] = Check(
@@ -159,6 +178,8 @@ def check(
             tuple(after),
             tuple(sends),
             (fn.__doc__ or "").strip(),
+            area,
+            tuple(uses),
         )
         return fn
 
@@ -171,10 +192,28 @@ def all_checks() -> List[Check]:
     return list(_REGISTRY.values())
 
 
-def checks_for(tiers: List[Tier], only: Optional[List[str]] = None) -> List[Check]:
+def checks_for(
+    tiers: List[Tier],
+    only: Optional[List[str]] = None,
+    area: Optional[str] = None,
+) -> List[Check]:
+    """Checks of these tiers, optionally one area or named ids, in run order.
+
+    A check another selected check depends on is always included, whatever
+    its area or tier, so an area runs on its own (the stage checks bring the
+    connection, settings and position reads they need)."""
     wanted = set(tiers)
-    selected = [c for c in all_checks() if c.tier in wanted]
+    every = all_checks()
+    chosen = {c.check_id for c in every if c.tier in wanted}
+    if area:
+        chosen = {cid for cid in chosen if _REGISTRY[cid].area == area}
     if only:
-        keep = set(only)
-        selected = [c for c in selected if c.check_id in keep]
-    return selected
+        chosen &= set(only)
+    pending = list(chosen)
+    while pending:
+        chk = _REGISTRY[pending.pop()]
+        for dep in chk.after + chk.uses:
+            if dep not in chosen:
+                chosen.add(dep)
+                pending.append(dep)
+    return [c for c in every if c.check_id in chosen]
