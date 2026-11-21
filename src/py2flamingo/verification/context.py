@@ -244,10 +244,17 @@ class RunOptions:
     halt_test_distance_mm: float = 1.0
     workflow_planes: int = 20
     laser_test_percent: float = 1.0
-    led_test_percent: float = 10.0
+    # Many of the LEDs on these rigs stay dark below about 25%, so the default
+    # sits above that. The brightness check also uses twice this level, so the
+    # operator's choice is limited to LED_TEST_PERCENT_MAX.
+    led_test_percent: float = 30.0
     live_frames: int = 20
     position_tolerance_mm: float = 0.005
     rotation_tolerance_deg: float = 0.05
+
+
+LED_TEST_PERCENT_DEFAULT = 30.0
+LED_TEST_PERCENT_MAX = 50.0
 
 
 @dataclass

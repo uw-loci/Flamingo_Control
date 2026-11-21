@@ -390,8 +390,15 @@ class StageService(MicroscopeCommandService):
 
         self.logger.debug(f"Moving axis {axis} to {position_mm} mm...")
 
+        # POSITION_SET (0x6004), as PositionController sends. The server
+        # sends no reply of its own to a move; what this waits for is the
+        # stage monitor's first position frame. 3.0.0 coded those frames with
+        # the code that was sent, but builds from 2026-10 code every one
+        # 0x6004 (StageControl.cpp threadMotionWaitForStop), so the slider
+        # variant (0x6005) this used to send timed out after 3 s on every move
+        # while the stage moved anyway (verification run, CTLSM1, 2026-11-20).
         result = self._send_movement_command(
-            StageCommandCode.POSITION_SET_SLIDER,  # Use slider variant from logs
+            StageCommandCode.POSITION_SET,
             "STAGE_POSITION_SET",
             axis=axis,
             position_mm=position_mm,

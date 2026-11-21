@@ -385,6 +385,9 @@ class SyntheticMicroscope:
         self._workflow_stop = threading.Event()
         self.led_percent = 0.0
         self.led_enabled = False
+        #: Below this level the LED gives no light. Many of the rigs' LEDs stay
+        #: dark below about 25%; 0 models an LED that lights at any level.
+        self.led_min_percent = 0.0
         self.live_view = False
         #: Frames sent on the live port, all connections together.
         self.frames_sent = 0
@@ -785,7 +788,16 @@ class SyntheticMicroscope:
         self.stage.start_move(axis, float(value))
         # Acknowledge now, arrive later. A caller that treats this ack as
         # arrival reads a stale position, exactly as it would on the rig.
-        self._reply(client, code, value=float(value))
+        # The server sends no reply of its own: what arrives is the stage
+        # monitor's position frames. 3.0.0 coded them with the code that was
+        # sent; later builds code every one 0x6004 (StageControl.cpp,
+        # threadMotionWaitForStop), so a client waiting for 0x6005 times out.
+        frame_code = (
+            code
+            if self.layout is layouts.REFERENCE
+            else StageCommands.POSITION_SET_MOVE
+        )
+        self._reply(client, frame_code, value=float(value))
         arrival = self.stage.arrives_at.get(axis, time.monotonic())
         self._later(
             max(0.0, arrival - time.monotonic()) + 0.02,
@@ -1194,7 +1206,8 @@ class SyntheticMicroscope:
     def frame_now(self) -> np.ndarray:
         """The frame the camera would see at this instant."""
         pos = self.stage_position()
-        led = (self.led_percent / 100.0) if self.led_enabled else 0.0
+        lit = self.led_enabled and self.led_percent >= self.led_min_percent
+        led = (self.led_percent / 100.0) if lit else 0.0
         return render_frame(pos["x"], pos["y"], pos["z"], led, self.image_shape)
 
     def _serve_live(self, listener: socket.socket) -> None:

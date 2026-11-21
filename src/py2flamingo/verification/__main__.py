@@ -28,7 +28,11 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from py2flamingo.verification import report  # noqa: E402
-from py2flamingo.verification.context import RunOptions  # noqa: E402
+from py2flamingo.verification.context import (  # noqa: E402
+    LED_TEST_PERCENT_DEFAULT,
+    LED_TEST_PERCENT_MAX,
+    RunOptions,
+)
 from py2flamingo.verification.model import (  # noqa: E402
     AREAS,
     Outcome,
@@ -92,6 +96,13 @@ def main(argv=None) -> int:
         default="",
         help="server drive for T4 data (default: first listed)",
     )
+    p.add_argument(
+        "--led-percent",
+        type=float,
+        default=LED_TEST_PERCENT_DEFAULT,
+        help=f"LED level for the light and acquisition checks, 1-{LED_TEST_PERCENT_MAX:g} "
+        f"(default {LED_TEST_PERCENT_DEFAULT:g}; many LEDs stay dark below about 25%%)",
+    )
     p.add_argument("--confirm-motion", action="store_true")
     p.add_argument("--confirm-light", action="store_true")
     p.add_argument("--confirm-acquisition", action="store_true")
@@ -122,10 +133,13 @@ def main(argv=None) -> int:
         from py2flamingo.verification.session import top_tier_of
 
         top = top_tier_of(args.area) if args.area else Tier.READ_ONLY
+    if not 1 <= args.led_percent <= LED_TEST_PERCENT_MAX:
+        p.error(f"--led-percent must be between 1 and {LED_TEST_PERCENT_MAX:g}")
     options = RunOptions(
         sample=args.sample,
         server_save_drive=args.save_drive,
         local_data_root=args.data_root,
+        led_test_percent=args.led_percent,
     )
     only = [s.strip() for s in args.only.split(",")] if args.only else None
     tiers = [t for t in Tier if t <= top]

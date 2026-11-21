@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 SETTINGS_KEY_PARENT = "verification/report_parent"
 SETTINGS_KEY_SAMPLE = "verification/sample"
 SETTINGS_KEY_DATA_ROOT = "verification/data_root"
+SETTINGS_KEY_LED_PERCENT = "verification/led_percent"
 LOCK_NAME = "Post-update verification"
 
 OUTCOME_COLORS = {
@@ -211,6 +213,26 @@ class VerificationDialog(PersistentDialog):
         data_row.addWidget(self.data_root_edit, 1)
         data_row.addWidget(data_browse)
         form.addRow("Server data folder:", data_row)
+
+        from py2flamingo.verification.context import (
+            LED_TEST_PERCENT_DEFAULT,
+            LED_TEST_PERCENT_MAX,
+        )
+
+        self.led_spin = QSpinBox()
+        self.led_spin.setRange(1, int(LED_TEST_PERCENT_MAX))
+        self.led_spin.setSuffix(" %")
+        self.led_spin.setValue(
+            self._settings.value(
+                SETTINGS_KEY_LED_PERCENT, int(LED_TEST_PERCENT_DEFAULT), type=int
+            )
+        )
+        self.led_spin.setToolTip(
+            "LED level for the LED, LED brightness, target image and workflow checks "
+            "(T3 and T4). The brightness check also uses twice this level. Many LEDs "
+            "stay dark below about 25%, so keep it above the level this LED lights at."
+        )
+        form.addRow("LED test level:", self.led_spin)
         layout.addLayout(form)
 
         tiers_row = QHBoxLayout()
@@ -411,9 +433,12 @@ class VerificationDialog(PersistentDialog):
         top = self._selected_top()
         sample = self.sample_edit.text().strip()
         options = RunOptions(
-            sample=sample, local_data_root=self.data_root_edit.text().strip()
+            sample=sample,
+            local_data_root=self.data_root_edit.text().strip(),
+            led_test_percent=float(self.led_spin.value()),
         )
         self._settings.setValue(SETTINGS_KEY_DATA_ROOT, options.local_data_root)
+        self._settings.setValue(SETTINGS_KEY_LED_PERCENT, self.led_spin.value())
         if top >= Tier.MOTION and not sample:
             QMessageBox.warning(
                 self, "Sample required", "Say what test sample or target is mounted."

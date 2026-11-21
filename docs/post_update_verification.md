@@ -12,7 +12,11 @@ Windows PC on the instrument network, either in the app or from a command prompt
   client, and a busy instrument fails the first state check.
 - For the motion, light and acquisition tiers, mount a **test sample or target**.
 - Have `microscope_settings/<name>_settings.json` with the stage limits (written by
-  **Edit > Microscope Setup**). Without it the motion checks are skipped.
+  **Edit > Microscope Setup**). Without it the motion checks are skipped. If the stage
+  is already outside those limits, `t0.positions` fails and no motion check runs: the
+  file describes a different stage. Two rigs that report the same microscope name (for
+  example the default `princess`) share one file, so set `Microscope name` in each
+  server's settings.
 
 ## In the app
 
@@ -36,6 +40,9 @@ positions first), and its window opens with the highest tier that area needs.
 2. Pick a target position, or **Current position**.
    For the data check, fill **Server data folder**: where the server's save drive appears
    on this computer (for example `D:\CTLSM1` for `/media/deploy/ctlsm1`).
+   **LED test level** (default 30%, at most 50%) is the LED level the T3 and T4 checks
+   use; the brightness check also uses twice it. Many of the LEDs stay dark below about
+   25%, so keep it above the level this LED lights at.
 3. Tick the highest tier to run. Each tier includes the ones before it:
 
    | Tier | What it does |
@@ -68,7 +75,8 @@ python -m py2flamingo.verification --compare verification\n7_20261119_101500 ver
 
 `--area stage` (or `server`, `camera`, `light`, `acquisition`, `data`) runs one area,
 at that area's highest tier unless `--tiers` says otherwise. `--data-root D:\CTLSM1` is the
-server data folder for the data check.
+server data folder for the data check. `--led-percent 40` sets the LED test level
+(1-50, default 30).
 
 T2 and above ask for confirmation at the prompt (or take `--confirm-motion`,
 `--confirm-light`, `--confirm-acquisition`). Ctrl+C aborts as above. `--target NAME` picks a

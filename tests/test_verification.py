@@ -279,6 +279,32 @@ class TestFaultsAreCaught(VerificationTestCase):
         _, _, by_id = self.run_tiers()
         self.assertEqual(by_id["t4.led_brightness"].outcome, Outcome.FAIL)
 
+    def test_an_led_that_stays_dark_below_25_percent(self):
+        # The default test level sits above the threshold; 10% would not light.
+        self.scope.led_min_percent = 25.0
+        _, _, by_id = self.run_tiers()
+        self.assertEqual(by_id["t4.led_brightness"].outcome, Outcome.PASS)
+        self.assertIn("mean_30pct", by_id["t4.led_brightness"].values)
+        _, _, by_id = self.run_tiers(led_test_percent=10.0)
+        self.assertEqual(by_id["t4.led_brightness"].outcome, Outcome.FAIL)
+        self.assertIn("below about 25%", by_id["t4.led_brightness"].detail)
+
+    def test_a_settings_json_for_another_stage_stops_the_motion_checks(self):
+        # CTLSM1, 2026-11-20: the stage sat at z 18.73 while the json (shared
+        # by two rigs called 'princess') said z 8..15.
+        path = Path("microscope_settings/synthetic_settings.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["stage_limits"]["z"] = {"min": 8.0, "max": 15.0}
+        data["verification_targets"] = []
+        path.write_text(json.dumps(data), encoding="utf-8")
+        self.scope.clear_received()
+        _, _, by_id = self.run_tiers(top=Tier.MOTION)
+        self.assertEqual(by_id["t0.positions"].outcome, Outcome.FAIL)
+        self.assertIn("does not match this stage", by_id["t0.positions"].detail)
+        self.assertEqual(by_id["t2.move_x"].outcome, Outcome.BLOCKED)
+        moves = [0x6004, 0x6005, 0x6006]
+        self.assertEqual([c for c in self.scope.received() if c.code in moves], [])
+
     def test_a_server_that_is_not_idle_blocks_the_changes(self):
         self.scope.live_view = True
         _, _, by_id = self.run_tiers(top=Tier.SETTINGS)
@@ -483,3 +509,14 @@ class TestOldDataFormat(VerificationTestCase):
             Outcome.PASS,
             by_id["t4.acquisition_files"].detail,
         )
+
+
+class TestCommandLine(unittest.TestCase):
+    def test_led_percent_outside_the_range_is_refused(self):
+        from py2flamingo.verification.__main__ import main
+
+        for bad in ("0", "60"):
+            with self.assertRaises(SystemExit) as caught:
+                main(["--dry-run", "--led-percent", bad])
+            self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(main(["--dry-run", "--led-percent", "40"]), 0)

@@ -347,26 +347,43 @@ def t0_state(ctx: RunContext) -> None:
 )
 def t0_positions(ctx: RunContext) -> None:
     """Each axis answers with status 1 and its position in doubleData, inside
-    the soft limits the server reported."""
+    the soft limits the server reported and inside the limits of the rig's
+    settings json, which every verification move is checked against. A stage
+    already outside the json's limits means the json does not describe this
+    stage (on 2026-11-20 two rigs both called 'princess' shared one), so the
+    motion checks would be refused or wrong: that fails here, before any move."""
     pos = _positions(ctx)
     ctx.facts["origin"] = pos
     out = []
+    unchecked = []
     for axis, value in pos.items():
         ctx.record(axis, round(value, 4))
         lo = _setting(ctx, "Stage limits", f"Soft limit min {axis}-axis")
         hi = _setting(ctx, "Stage limits", f"Soft limit max {axis}-axis")
         try:
-            if (
-                lo is not None
-                and hi is not None
-                and not float(lo) <= value <= float(hi)
-            ):
-                out.append(f"{axis} {value:.3f} outside {lo}..{hi}")
+            if lo is None or hi is None:
+                unchecked.append(axis)
+            elif not float(lo) <= value <= float(hi):
+                out.append(f"{axis} {value:.3f} outside the server's {lo}..{hi}")
         except ValueError:
-            pass
+            unchecked.append(axis)
+    envelope = ctx.envelope
+    if envelope is not None:
+        for axis, value in pos.items():
+            if axis not in envelope.limits:
+                continue
+            lo, hi = envelope.limits[axis]
+            if not lo <= value <= hi:
+                out.append(
+                    f"{axis} {value:.3f} outside {lo:g}..{hi:g} in {envelope.source}: "
+                    "that file does not match this stage (another rig's, or limits "
+                    "set wrong); fix it with Edit > Microscope Setup"
+                )
     if out:
         raise Failed("; ".join(out))
     ctx.note(", ".join(f"{a}={v:.3f}" for a, v in pos.items()))
+    if unchecked:
+        ctx.note(f"no server soft limits for {', '.join(unchecked)}")
 
 
 @check(
@@ -818,7 +835,7 @@ def _axis_round_trip(ctx: RunContext, axis: str) -> None:
     Tier.MOTION,
     area="stage",
     after=("t0.positions", "t0.state"),
-    sends=("STAGE_POSITION_SET_SLIDER per axis", "STAGE_POSITION_GET"),
+    sends=("STAGE_POSITION_SET per axis", "STAGE_POSITION_GET"),
 )
 def t2_go_to_target(ctx: RunContext) -> None:
     """With a target defined for this rig (verification_targets in its
@@ -882,7 +899,7 @@ for _axis in ("x", "y", "z", "r"):
         Tier.MOTION,
         area="stage",
         after=("t0.positions", "t0.state"),
-        sends=("STAGE_POSITION_SET_SLIDER", "STAGE_POSITION_GET"),
+        sends=("STAGE_POSITION_SET", "STAGE_POSITION_GET"),
     )(_make(_axis))
 
 
@@ -892,7 +909,7 @@ for _axis in ("x", "y", "z", "r"):
     Tier.MOTION,
     area="stage",
     after=("t2.move_x",),
-    sends=("STAGE_POSITION_SET_SLIDER", "STAGE_HALT (axis 0xFF)", "STAGE_POSITION_GET"),
+    sends=("STAGE_POSITION_SET", "STAGE_HALT (axis 0xFF)", "STAGE_POSITION_GET"),
 )
 def t2_halt(ctx: RunContext) -> None:
     """Starts a longer X move, sends HALT to all axes (int32Data0 = 0xFF, as
@@ -1204,7 +1221,8 @@ def t4_live_view(ctx: RunContext) -> None:
 def t4_led_brightness(ctx: RunContext) -> None:
     """The effect check the LED percent change of 2026-08-22 needed: mean
     image intensity with the LED off, at the test percent, and at twice it.
-    Needs a sample or target in view."""
+    Needs a sample or target in view, and a test level the LED lights at
+    (many stay dark below about 25%)."""
     service = _laser_led(ctx)
     pct = ctx.options.led_test_percent
     ctx.on_restore("LED off", service.disable_led_preview)
@@ -1229,7 +1247,9 @@ def t4_led_brightness(ctx: RunContext) -> None:
     ctx.record(f"mean_{2 * pct:g}pct", round(high, 1))
     if not (high > low > dark) or (low - dark) < 5:
         raise Failed(
-            "the image did not get brighter with the LED (is a sample in view?)",
+            f"the image did not get brighter with the LED at {pct:g}% and "
+            f"{min(100.0, 2 * pct):g}% (is a sample in view? does this LED light "
+            "at that level? many stay dark below about 25%)",
             "off < low < high",
             [round(dark, 1), round(low, 1), round(high, 1)],
         )
