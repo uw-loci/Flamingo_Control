@@ -37,8 +37,10 @@ from py2flamingo.verification.runner import RunCallbacks
 REPO = Path(__file__).resolve().parents[1]
 
 # Checks that fail on purpose against a faithful server (see module docstring).
-# t4.acquisition_files: the app's illumination reader and the stitcher's name
-# and objective readers know only the pre-10-06 keys and ScopeSettings.txt.
+# t4.acquisition_files: the app's illumination reader knows only the pre-10-06
+# keys ("Left path = ON 1", not "Left path recording = true"). The stitcher's
+# name and objective readers handle SystemMetaData.txt from flamingo-stitcher
+# 0.14.1 on.
 KNOWN_CLIENT_DEFECTS = {"t1.roi", "t4.workflow", "t4.acquisition_files"}
 
 
@@ -164,7 +166,9 @@ class TestFullRun(VerificationTestCase):
         self.assertIn("exposure", by_id["t4.workflow"].detail)
         files = by_id["t4.acquisition_files"].detail
         self.assertIn("illumination as left=False", files)
-        self.assertIn("no microscope name", files)
+        # flamingo-stitcher 0.14.1 reads SystemMetaData.txt: name and objective found.
+        self.assertNotIn("no microscope name", files)
+        self.assertNotIn("no objective", files)
         for cid in (
             "t1.binning",
             "t1.exposure_set",
