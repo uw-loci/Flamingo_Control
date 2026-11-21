@@ -57,6 +57,12 @@ def _camera(ctx: RunContext):
     return ctx.service("camera")
 
 
+def _led_percent(ctx: RunContext) -> float:
+    """The LED level for images: the one t4.led_brightness saw light the
+    image, or the test level when that check did not run."""
+    return float(ctx.facts.get("led_lit_percent", ctx.options.led_test_percent))
+
+
 def _laser_led(ctx: RunContext):
     return ctx.service("laser_led")
 
@@ -375,9 +381,9 @@ def t0_positions(ctx: RunContext) -> None:
             lo, hi = envelope.limits[axis]
             if not lo <= value <= hi:
                 out.append(
-                    f"{axis} {value:.3f} outside {lo:g}..{hi:g} in {envelope.source}: "
-                    "that file does not match this stage (another rig's, or limits "
-                    "set wrong); fix it with Edit > Microscope Setup"
+                    f"{axis} {value:.3f} outside {lo:g}..{hi:g} ({envelope.source}): "
+                    "the settings json does not match this stage (another rig's, "
+                    "or limits set wrong); fix it with Edit > Microscope Setup"
                 )
     if out:
         raise Failed("; ".join(out))
@@ -805,6 +811,12 @@ def _axis_round_trip(ctx: RunContext, axis: str) -> None:
     _need_motion(ctx)
     step = ctx.options.rotation_step_deg if axis == "r" else ctx.options.motion_step_mm
     start = ctx.facts["origin"][axis]
+    # Step away from the nearer limit: a stage parked close to its maximum
+    # (CTLSM1 z 18.73 with max 19 less the margin) has room only downward.
+    if ctx.envelope.problems(
+        axis, start + step, ctx.facts["origin"]
+    ) and not ctx.envelope.problems(axis, start - step, ctx.facts["origin"]):
+        step = -step
     tol = _tolerance(ctx, axis)
     ctx.on_restore(
         f"{axis} back to {start:.4f}",
@@ -1245,7 +1257,20 @@ def t4_led_brightness(ctx: RunContext) -> None:
     ctx.record("mean_off", round(dark, 1))
     ctx.record(f"mean_{pct:g}pct", round(low, 1))
     ctx.record(f"mean_{2 * pct:g}pct", round(high, 1))
-    if not (high > low > dark) or (low - dark) < 5:
+    lit_low = (low - dark) >= 5
+    lit_high = (high - dark) >= 5 and high > low
+    if lit_low and lit_high:
+        ctx.facts["led_lit_percent"] = pct
+    elif lit_high:
+        # Dark at the test level, lit at twice it (CTLSM1, 2026-11-20: off
+        # 99.4, 30% 99.5, 60% 3146): the LED works; the later LED images use
+        # the level that lit.
+        ctx.facts["led_lit_percent"] = min(100.0, 2 * pct)
+        ctx.note(
+            f"the LED stays dark at {pct:g}% and lights at {min(100.0, 2 * pct):g}%; "
+            "the target image and the workflow use the higher level"
+        )
+    else:
         raise Failed(
             f"the image did not get brighter with the LED at {pct:g}% and "
             f"{min(100.0, 2 * pct):g}% (is a sample in view? does this LED light "
@@ -1270,7 +1295,7 @@ def t4_target_image(ctx: RunContext) -> None:
     service = _laser_led(ctx)
     camera = _camera(ctx)
     ctx.on_restore("LED off", service.disable_led_preview)
-    service.set_led_intensity(0, ctx.options.led_test_percent)
+    service.set_led_intensity(0, _led_percent(ctx))
     service.enable_led_preview()
     frames, _ = _snapshot_frames(ctx)
     service.disable_led_preview()
@@ -1326,7 +1351,7 @@ def _workflow_text(
     if not drive:
         raise Skipped("no save drive")
     ctx.facts["workflow_drive"] = drive
-    led_pct = ctx.options.led_test_percent
+    led_pct = _led_percent(ctx)
     values = {
         "Experiment Settings": {
             "Plane spacing (um)": f"{step_um}",

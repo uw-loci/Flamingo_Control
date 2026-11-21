@@ -352,6 +352,7 @@ class VerificationDialog(PersistentDialog):
         self._prepared = session.prepare(
             conn, services=self._services(), read_settings=False
         )
+        self.run_button.setEnabled(True)
         rig = self._prepared.rig
         lines = [
             f"<b>Microscope:</b> {self._prepared.microscope_name or 'unknown'} &nbsp; "
@@ -360,6 +361,7 @@ class VerificationDialog(PersistentDialog):
         ]
         lines += [f"<i>{n}</i>" for n in self._prepared.notes]
         self.server_label.setText("<br>".join(lines))
+        chosen = self.target_combo.currentData()
         self.target_combo.clear()
         for t in rig.targets:
             self.target_combo.addItem(
@@ -367,6 +369,9 @@ class VerificationDialog(PersistentDialog):
                 t.name,
             )
         self.target_combo.addItem("Current position (no target defined)", None)
+        index = self.target_combo.findData(chosen)
+        if index >= 0:
+            self.target_combo.setCurrentIndex(index)
 
     def _selected_top(self):
         from py2flamingo.verification.model import Tier
@@ -428,7 +433,11 @@ class VerificationDialog(PersistentDialog):
         from py2flamingo.verification.context import RunOptions
         from py2flamingo.verification.model import Tier
 
-        if self._prepared is None:
+        # Read the rig's settings json again: the window can stay open while
+        # Edit > Microscope Setup changes the stage limits or the targets, and
+        # a run must use what is saved now, not what was there when it opened.
+        self._load_rig()
+        if self._prepared is None or not self.run_button.isEnabled():
             return
         top = self._selected_top()
         sample = self.sample_edit.text().strip()

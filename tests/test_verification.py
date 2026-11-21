@@ -293,6 +293,19 @@ class TestFaultsAreCaught(VerificationTestCase):
         self.assertEqual(by_id["t4.led_brightness"].outcome, Outcome.FAIL)
         self.assertIn("below about 25%", by_id["t4.led_brightness"].detail)
 
+    def test_an_led_that_lights_only_at_twice_the_test_level(self):
+        # CTLSM1, 2026-11-20: off 99.4, 30% 99.5, 60% 3146.
+        self.scope.led_min_percent = 40.0
+        self.scope.clear_received()
+        _, _, by_id = self.run_tiers()
+        result = by_id["t4.led_brightness"]
+        self.assertEqual(result.outcome, Outcome.PASS, result.detail)
+        self.assertIn("lights at 60%", result.detail)
+        self.assertEqual(by_id["t4.target_image"].outcome, Outcome.PASS)
+        # The target image was taken at the level that lit.
+        levels = [c.params[4] for c in self.scope.received(0x4001)]
+        self.assertEqual(levels[-1], 60, levels)
+
     def test_a_settings_json_for_another_stage_stops_the_motion_checks(self):
         # CTLSM1, 2026-11-20: the stage sat at z 18.73 while the json (shared
         # by two rigs called 'princess') said z 8..15.
@@ -308,6 +321,39 @@ class TestFaultsAreCaught(VerificationTestCase):
         self.assertEqual(by_id["t2.move_x"].outcome, Outcome.BLOCKED)
         moves = [0x6004, 0x6005, 0x6006]
         self.assertEqual([c for c in self.scope.received() if c.code in moves], [])
+
+    def test_the_server_soft_limits_narrow_a_wider_settings_json(self):
+        # CTLSM1, 2026-11-20: the json allowed y from 1 and z from 8, the
+        # server's soft limits start at y 5 and z 11.
+        path = Path("microscope_settings/synthetic_settings.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["stage_limits"]["y"] = {"min": 1.0, "max": 30.0}
+        path.write_text(json.dumps(data), encoding="utf-8")
+        prepared = session.prepare(self.connection, base_path=Path.cwd())
+        lo, hi = synth.STAGE_LIMITS["y"]
+        self.assertEqual(prepared.rig.envelope.limits["y"], (lo, hi))
+        self.assertTrue(
+            any("y min 1 " in n and "soft limits" in n for n in prepared.notes),
+            prepared.notes,
+        )
+        self.assertIn("soft limits", prepared.rig.envelope.describe())
+        self.assertTrue(prepared.rig.envelope.problems("y", lo - 0.5, {"y": lo + 1.0}))
+
+    def test_a_stage_near_its_maximum_steps_the_other_way(self):
+        # z 19.0 with max 19.2: +0.1 would pass the 0.2 margin, -0.1 does not.
+        path = Path("microscope_settings/synthetic_settings.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["stage_limits"]["z"] = {"min": 12.5, "max": 19.2}
+        data["verification_targets"] = []
+        path.write_text(json.dumps(data), encoding="utf-8")
+        self.scope.clear_received()
+        _, _, by_id = self.run_tiers(top=Tier.MOTION)
+        self.assertEqual(
+            by_id["t2.move_z"].outcome, Outcome.PASS, by_id["t2.move_z"].detail
+        )
+        z_moves = [c.value for c in self.scope.received(0x6004) if c.params[3] == 3]
+        self.assertTrue(z_moves and min(z_moves) < 19.0 - 0.05, z_moves)
+        self.assertTrue(all(v <= 19.0 + 1e-6 for v in z_moves), z_moves)
 
     def test_a_server_that_is_not_idle_blocks_the_changes(self):
         self.scope.live_view = True
@@ -430,7 +476,15 @@ class TestTheDialog(VerificationTestCase):
         dialog.folder_edit.setText(str(Path.cwd() / "reports"))
         dialog.tier_boxes[Tier.SETTINGS].setChecked(True)
         self.assertIn("synthetic", dialog.server_label.text())
+        # Edit > Microscope Setup saves new limits while the window is open
+        # (CTLSM1, 2026-11-20): the run must use what is saved now.
+        path = Path("microscope_settings/synthetic_settings.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["stage_limits"]["z"] = {"min": 12.5, "max": 24.0}
+        path.write_text(json.dumps(data), encoding="utf-8")
         dialog._run()
+        self.assertEqual(dialog._prepared.rig.envelope.limits["z"], (12.5, 24.0))
+        self.assertIn("z 12.5..24", dialog.server_label.text())
         deadline = time.monotonic() + 60
         while dialog._thread.isRunning() and time.monotonic() < deadline:
             qt.processEvents()

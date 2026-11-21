@@ -16,7 +16,11 @@ Windows PC on the instrument network, either in the app or from a command prompt
   is already outside those limits, `t0.positions` fails and no motion check runs: the
   file describes a different stage. Two rigs that report the same microscope name (for
   example the default `princess`) share one file, so set `Microscope name` in each
-  server's settings.
+  server's settings. Verification moves also stay inside the server's own soft limits
+  (`Stage limits` in its settings): on each axis the narrower of the two applies, and
+  the window lists every bound the json set wider than the server. The limits are read
+  again each time **Run** is pressed, so a change saved in **Edit > Microscope Setup**
+  applies without reopening the window.
 
 ## In the app
 
@@ -42,7 +46,9 @@ positions first), and its window opens with the highest tier that area needs.
    on this computer (for example `D:\CTLSM1` for `/media/deploy/ctlsm1`).
    **LED test level** (default 30%, at most 50%) is the LED level the T3 and T4 checks
    use; the brightness check also uses twice it. Many of the LEDs stay dark below about
-   25%, so keep it above the level this LED lights at.
+   25%, so keep it above the level this LED lights at. If the LED is dark at the test
+   level but lights at twice it, the brightness check passes with a note, and the
+   target image and the workflow use the higher level.
 3. Tick the highest tier to run. Each tier includes the ones before it:
 
    | Tier | What it does |

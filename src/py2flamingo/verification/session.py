@@ -18,7 +18,7 @@ from py2flamingo.core import server_layout
 from py2flamingo.verification import report
 from py2flamingo.verification.context import RunOptions, Target
 from py2flamingo.verification.model import AREAS, Check, Tier, checks_for
-from py2flamingo.verification.rig import RigProfile, load_rig
+from py2flamingo.verification.rig import RigProfile, load_rig, server_soft_limits
 from py2flamingo.verification.runner import RunCallbacks, Runner, RunSummary
 
 logger = logging.getLogger(__name__)
@@ -109,6 +109,15 @@ def prepare(
     rig = load_rig(name, base_path)
     if rig.envelope is None:
         notes.append(f"motion checks will be skipped: {rig.why_no_envelope}")
+    else:
+        server = server_soft_limits(settings)
+        if server:
+            rig.envelope, narrowed = rig.envelope.limited_by(
+                server, "the server's soft limits"
+            )
+            notes += narrowed
+        else:
+            notes.append("the server's soft limits were not in its settings")
     layout = server_layout.active()
     return Prepared(
         connection=connection,

@@ -83,6 +83,43 @@ class Envelope:
                 out.append(f"{axis} {target:.3f} enters keep-out '{box.name}'")
         return out
 
+    def limited_by(
+        self, other: Dict[str, Tuple[float, float]], source: str
+    ) -> Tuple["Envelope", List[str]]:
+        """This envelope narrowed to ``other`` on every axis both name.
+
+        Used with the server's own soft limits: the settings json is what the
+        app keeps, the server's limits are what the instrument was set up
+        with, and a verification move must respect both. Returns the narrowed
+        envelope and one line per bound the json had set wider."""
+        limits = dict(self.limits)
+        notes = []
+        for axis, (olo, ohi) in other.items():
+            if axis not in limits:
+                continue
+            lo, hi = limits[axis]
+            if olo > lo:
+                notes.append(
+                    f"{axis} min {lo:g} in {self.source} raised to {olo:g} ({source})"
+                )
+            if ohi < hi:
+                notes.append(
+                    f"{axis} max {hi:g} in {self.source} lowered to {ohi:g} ({source})"
+                )
+            limits[axis] = (max(lo, olo), min(hi, ohi))
+        if not notes:
+            return self, []
+        narrowed = Envelope(
+            limits,
+            f"{self.source} and {source}",
+            self.keep_outs,
+            self.margin_mm,
+            self.margin_deg,
+            self.max_excursion_mm,
+            self.max_excursion_deg,
+        )
+        return narrowed, notes
+
     def describe(self) -> str:
         parts = [f"{a} {lo:g}..{hi:g}" for a, (lo, hi) in self.limits.items()]
         boxes = f", {len(self.keep_outs)} keep-out box(es)" if self.keep_outs else ""
@@ -96,6 +133,24 @@ class RigProfile:
     envelope: Optional[Envelope]
     targets: List[Target]
     why_no_envelope: str = ""
+
+
+def server_soft_limits(
+    settings: Dict[str, Dict[str, str]],
+) -> Dict[str, Tuple[float, float]]:
+    """The server's soft limits per axis, from its settings ('Stage limits',
+    'Soft limit min/max x-axis'); axes it does not give are left out."""
+    section = (settings or {}).get("Stage limits") or {}
+    out = {}
+    for axis in ("x", "y", "z", "r"):
+        try:
+            lo = float(section[f"Soft limit min {axis}-axis"])
+            hi = float(section[f"Soft limit max {axis}-axis"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if lo < hi:
+            out[axis] = (lo, hi)
+    return out
 
 
 def settings_path(microscope_name: str, base: Optional[Path] = None) -> Optional[Path]:
