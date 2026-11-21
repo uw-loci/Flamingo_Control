@@ -65,7 +65,7 @@ file.** `drive_mappings.json` likewise holds a dict of mappings.
 | File | Purpose | Mult. | In git | Missing ⇒ |
 |---|---|---|---|---|
 | `ScopeSettings.txt` | Downloaded from the scope. Type, **Microscope name**, stage limits, home | 1 (overwritten per connection) | yes | Name falls back to `"default"`, so `default_settings.json` is sought and stage limits are unknown |
-| `{name}_settings.json` | Stage soft limits, position-history sizing, **`reference_position`** (the recovery anchor). `n7_settings.json`, `liara_settings.json`. **This is the ONLY store that gates a stage move** — `position_controller.move_x/y/z/r` raise and `movement_controller._clamp_to_limits` clamps against it. `microscope_hardware.yaml`'s `stage_limits` block is a tile-count *estimate* only, and ScopeSettings.txt contributes just `Soft limit max y-axis`. Selected by name, so a case mismatch used to mean placeholders; the service now case-folds as a fallback and warns | **N** | yes | Placeholder limits 0-26 mm are used — a guess, possibly WIDER than the instrument. Run Edit ▸ Microscope Setup |
+| `{name}_settings.json` | Stage soft limits, position-history sizing, **`reference_position`** (the recovery anchor). `n7_settings.json`, `liara_settings.json`. **It gates every stage move** — `position_controller.move_x/y/z/r` raise and `movement_controller._clamp_to_limits` clamps against it — narrowed, while connected, to the server's own soft limits: on each bound the narrower of the two applies. `microscope_hardware.yaml`'s `stage_limits` block is a tile-count *estimate* only, and ScopeSettings.txt contributes just `Soft limit max y-axis`. Selected by name, so a case mismatch used to mean placeholders; the service now case-folds as a fallback and warns | **N** | yes | Placeholder limits 0-26 mm are used — a guess, possibly WIDER than the instrument. Run Edit ▸ Microscope Setup |
 | `{name}_start_position.txt` | **Vestigial.** Nothing reads its contents any more — `get_start_position()` was removed as dead in `2026-08-11`. `FlamingoConnect.check_start_position()` only checks that *some* `*_start_position.txt` exists and creates an empty `default_start_position.txt` if not | 1 | yes | An empty placeholder is created |
 | `{name}_pixel_calibration.json` | **Per scope since 2026-08-26.** XY Pixel Calibrator result (µm/px + the optics the config *believed* when it was measured). **Absent by default** — the 2026-06-26 one was removed 2026-08-17 as stale: it was stamped `5.000` (the YAML fallback of the day) while measuring 1.0276 µm/px, i.e. ~6.33×, against a scope now reporting 6.205. Two points, quality 0.37, 3.3° shear — and `residual_px: 0.0` is meaningless with two points, which exactly determine the affine | **N** | the shared seed is | Falls back to ScopeSettings/YAML optics |
 | `{name}_optics_guard.json` | Remembers optics config to detect a changed objective. Signature is `name|mag|sensor_px`. **Per scope since 2026-08-26** — one shared acknowledgement list mixed two instruments' entries with no way to tell them apart | **N** | the shared seed is | No mismatch warning |
@@ -240,9 +240,11 @@ move raises `MicroscopeNotConfiguredError` and the app says so on connect.
 
 ### Why it refuses rather than guessing
 
-`{name}_settings.json` is the only store that bounds a stage move
+`{name}_settings.json` is the app's store for the limits that bound a stage move
 (`position_controller.move_x/y/z/r` raise, `movement_controller._clamp_to_limits`
-clamps). When it is missing, `MicroscopeSettingsService` substitutes placeholder limits
+clamps). While connected, those limits are also narrowed to the server's own soft
+limits (`<Stage limits>`, `Soft limit min/max`), because the server applies no limit
+to a position command itself: on each bound the narrower of the two applies. When it is missing, `MicroscopeSettingsService` substitutes placeholder limits
 of **0–26 mm on every axis** — and those are *wider* than any real Flamingo: n7's X axis
 stops at 12.31 mm, Liara's at 5.0. So the fallback does not merely fail to protect the
 stage, it authorises travel the instrument cannot make, into the objective or the
@@ -251,10 +253,10 @@ chamber wall. Moving on a fabricated limit is worse than not moving.
 ### What to do
 
 1. **Edit ▸ Microscope Setup** — enter this instrument's X/Y/Z soft limits. The dialog
-   only *reads* the current stage position, so it works while motion is blocked. Take
-   the numbers from the scope's own `<Stage limits>` block in `ScopeSettings.txt`, and
-   tighten rather than widen where you are unsure: a limit can always be relaxed later,
-   but it cannot un-crash a stage.
+   only *reads* the current stage position, so it works while motion is blocked. When
+   connected it shows the server's soft limits, and **Use the server's soft limits**
+   copies them into the fields. Tighten rather than widen where you are unsure: a limit
+   can always be relaxed later, but it cannot un-crash a stage.
 2. **Reconnect.** Motion is enabled as soon as that file loads.
 
 ### Where the file goes

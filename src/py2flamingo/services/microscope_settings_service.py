@@ -38,6 +38,8 @@ class MicroscopeSettingsService:
         """
         self.logger = logging.getLogger(__name__)
         self.microscope_name = microscope_name
+        # Each "json bound narrowed to the server's" line is logged once.
+        self._limit_notes_logged: set = set()
         self.base_path = base_path or Path.cwd()
         self.settings_file = (
             self.base_path / "microscope_settings" / f"{microscope_name}_settings.json"
@@ -259,16 +261,30 @@ class MicroscopeSettingsService:
         }
 
     def get_stage_limits(self) -> Dict[str, Dict[str, float]]:
-        """Get stage movement limits for all axes.
+        """Stage movement limits for all axes: the settings json narrowed to
+        the connected server's own soft limits (services/server_stage_limits).
+
+        Every caller that bounds a move reads this, so a move stays inside both.
+        Edit > Microscope Setup edits the json itself and reads
+        :meth:`get_configured_stage_limits` instead.
 
         Returns:
             Dict with min/max for each axis (x, y, z, r)
-
-        Example:
-            >>> limits = settings.get_stage_limits()
-            >>> limits['x']
-            {'min': 1.0, 'max': 12.31}
         """
+        from py2flamingo.services import server_stage_limits
+
+        limits, notes = server_stage_limits.narrow(
+            self.get_configured_stage_limits(),
+            f"{self.microscope_name}_settings.json",
+        )
+        for note in notes:
+            if note not in self._limit_notes_logged:
+                self._limit_notes_logged.add(note)
+                self.logger.info("Stage limits: %s", note)
+        return limits
+
+    def get_configured_stage_limits(self) -> Dict[str, Dict[str, float]]:
+        """Stage limits exactly as the settings json holds them."""
         stage_limits = self.settings.get("stage_limits", {})
 
         return {

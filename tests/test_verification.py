@@ -271,6 +271,20 @@ class TestTheAppsWorkflowSendPath(VerificationTestCase):
         self.assertIn("Exposure time (ms) = ", sent)
 
 
+class TestServerSoftLimitsAtConnect(VerificationTestCase):
+    layout = sl.LAYOUT_2026_11_13
+
+    def test_the_settings_read_at_connect_store_the_server_soft_limits(self):
+        from py2flamingo.services import server_stage_limits
+
+        server_stage_limits.clear()
+        self.connection.get_microscope_settings()
+        stored = server_stage_limits.get()
+        self.assertEqual(stored["x"], synth.STAGE_LIMITS["x"])
+        self.connection.disconnect()
+        self.assertIsNone(server_stage_limits.get())
+
+
 class TestThe2026_10_06Build(VerificationTestCase):
     layout = sl.LAYOUT_2026_10_06
 

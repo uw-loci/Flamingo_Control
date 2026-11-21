@@ -634,6 +634,9 @@ class MVCConnectionService:
             # Close sockets via TCPConnection
             self.tcp_connection.disconnect()
             server_layout.clear_active()
+            from py2flamingo.services import server_stage_limits
+
+            server_stage_limits.clear()
 
             self._command_socket = None
             self._live_socket = None
@@ -1576,6 +1579,12 @@ class MVCConnectionService:
                     self.logger.error(f"Could not calculate pixel size: {e}")
                     # Do not use fallback - return None to indicate unknown
                     image_pixel_size = None
+
+            # Every stage move from here on stays inside the server's own soft
+            # limits as well as the settings json (services/server_stage_limits).
+            from py2flamingo.services import server_stage_limits
+
+            server_stage_limits.set_from_settings(scope_settings)
 
             self.logger.info("Successfully retrieved microscope settings")
             return image_pixel_size, scope_settings

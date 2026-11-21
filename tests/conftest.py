@@ -81,3 +81,15 @@ def _reset_stage_motion_gate():
     stage_motion_gate.set_motion_blocked(None)
     yield
     stage_motion_gate.set_motion_blocked(None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_server_stage_limits():
+    """The server soft limits stored at connect are module-level state too
+    (services/server_stage_limits); a test that connected to the synthetic
+    scope must not narrow the next test's stage limits."""
+    from py2flamingo.services import server_stage_limits
+
+    server_stage_limits.clear()
+    yield
+    server_stage_limits.clear()

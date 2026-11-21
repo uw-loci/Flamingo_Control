@@ -169,6 +169,37 @@ class StageLimitsStep(SetupStep):
             form.addRow(f"{axis.upper()}:", holder)
             self._spins[axis] = (lo_spin, hi_spin)
         layout.addWidget(box)
+
+        # The connected server's own soft limits: every move also stays inside
+        # them (services/server_stage_limits), so show them and offer to copy.
+        from py2flamingo.services import server_stage_limits
+
+        server = server_stage_limits.get()
+        if server:
+            shown = ", ".join(
+                f"{a.upper()} {lo:g} to {hi:g}" for a, (lo, hi) in server.items()
+            )
+            layout.addWidget(
+                _wrapped(
+                    f"The connected server's soft limits: {shown}. Every move also "
+                    "stays inside these, so on each bound the narrower of the two "
+                    "applies."
+                )
+            )
+            use = QPushButton("Use the server's soft limits")
+            use.setToolTip(
+                "Copy the server's soft limits into the fields above. Nothing is "
+                "saved until you finish the setup."
+            )
+
+            def _use_server():
+                for a, (lo, hi) in server.items():
+                    if a in self._spins:
+                        self._spins[a][0].setValue(lo)
+                        self._spins[a][1].setValue(hi)
+
+            use.clicked.connect(_use_server)
+            layout.addWidget(use)
         layout.addStretch()
 
     def validate(self) -> Optional[str]:
@@ -504,7 +535,12 @@ def _existing_limits(settings_service) -> dict:
     if settings_service is None:
         return limits
     try:
-        raw = settings_service.get_stage_limits() or {}
+        getter = getattr(
+            settings_service,
+            "get_configured_stage_limits",
+            settings_service.get_stage_limits,
+        )
+        raw = getter() or {}
     except Exception:  # noqa: BLE001
         return limits
     for axis in AXES:
