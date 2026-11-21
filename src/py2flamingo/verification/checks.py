@@ -1345,8 +1345,20 @@ def _workflow_text(
             "workflows/ZStack.txt not found (run from the Flamingo_Control folder)"
         )
     lines = template.read_text(encoding="utf-8").splitlines()
-    pos = ctx.target.position if ctx.target else ctx.facts["origin"]
+    pos = dict(ctx.target.position if ctx.target else ctx.facts["origin"])
     step_um = 2.5
+    length = planes * step_um / 1000
+    if ctx.envelope and ctx.envelope.problems("z", pos["z"] + length, pos):
+        # The stack runs upward from its start. Near the upper limit (CTLSM1:
+        # z 18.73, usable max 18.8, a 0.5 mm stop-test stack) start it lower
+        # so it ends inside the limits.
+        lo, hi = ctx.envelope.limits["z"]
+        lowered = round(hi - ctx.envelope.margin_mm - length - 0.001, 4)
+        if lowered >= lo + ctx.envelope.margin_mm and not ctx.envelope.problems(
+            "z", lowered, pos
+        ):
+            ctx.note(f"stack starts at z {lowered:.3f} so it ends inside the limits")
+            pos["z"] = lowered
     drive = ctx.options.server_save_drive or (ctx.facts.get("drives") or [""])[0]
     if not drive:
         raise Skipped("no save drive")
@@ -1577,18 +1589,45 @@ def t4_acquisition_files(ctx: RunContext) -> None:
     folder_name = ctx.facts.get("workflow_folder")
     if not folder_name:
         raise Skipped("t4.workflow did not run")
-    root = ctx.options.local_data_root
-    if not root:
+    drive = ctx.facts.get("workflow_drive", "")
+    roots = []
+    if ctx.options.local_data_root:
+        roots.append((ctx.options.local_data_root, "Server data folder"))
+    mapped = ctx.options.drive_mappings.get(drive)
+    if mapped and all(Path(mapped) != Path(r) for r, _ in roots):
+        roots.append((mapped, f"the app's drive mapping for {drive}"))
+    if not roots:
         raise Skipped(
-            "no local data root: give the folder where the server's save drive "
-            "appears on this computer (e.g. D:\\CTLSM1)"
+            f"no folder for the server's drive {drive}: fill Server data folder with "
+            "where it appears on this computer, or map it in the app"
         )
-    folder = Path(root) / folder_name
+    candidates = [(Path(r) / folder_name, why) for r, why in roots]
     deadline = time.monotonic() + 30.0
-    while not (folder / "Workflow.txt").exists() and time.monotonic() < deadline:
+    found = None
+    while found is None:
+        found = next((f for f, _ in candidates if (f / "Workflow.txt").exists()), None)
+        if found is not None or time.monotonic() >= deadline:
+            break
         ctx.sleep(1.0)
-    if not folder.is_dir():
-        raise Failed(f"{folder} not found")
+    if found is None:
+        found = next((f for f, _ in candidates if f.is_dir()), None)
+    if found is None:
+        tried = []
+        for (r, why), (f, _) in zip(roots, candidates):
+            try:
+                inside = sorted(p.name for p in Path(r).iterdir())[:8]
+                seen = f"holds {', '.join(inside) or 'nothing'}"
+            except OSError as e:
+                seen = f"not readable ({e.strerror or e})"
+            tried.append(f"{f} ({why}; {r} {seen})")
+        raise Failed(
+            f"the server wrote {folder_name} at the top of {drive}, not found in: "
+            + "; ".join(tried)
+            + ". Server data folder must be where that drive itself appears on "
+            "this computer"
+        )
+    folder = found
+    ctx.note(f"read from {folder}")
     files = sorted(p.name for p in folder.iterdir())
     ctx.record("files", files[:40])
     problems = []

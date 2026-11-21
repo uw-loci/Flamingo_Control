@@ -56,6 +56,17 @@ def _ask(prompt: str) -> bool:
         return False
 
 
+def _drive_mappings() -> dict:
+    """drive_mappings.json in the current folder, as the app reads it."""
+    import json
+
+    try:
+        data = json.loads(Path("drive_mappings.json").read_text(encoding="utf-8"))
+        return dict(data.get("mappings") or {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         prog="python -m py2flamingo.verification",
@@ -139,6 +150,7 @@ def main(argv=None) -> int:
         sample=args.sample,
         server_save_drive=args.save_drive,
         local_data_root=args.data_root,
+        drive_mappings=_drive_mappings(),
         led_test_percent=args.led_percent,
     )
     only = [s.strip() for s in args.only.split(",")] if args.only else None

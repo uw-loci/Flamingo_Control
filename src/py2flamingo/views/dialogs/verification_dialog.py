@@ -204,9 +204,11 @@ class VerificationDialog(PersistentDialog):
             "e.g. D:\\CTLSM1 (where the server's save drive appears here)"
         )
         self.data_root_edit.setToolTip(
-            "Used by the acquisition data check: the folder on this computer that "
-            "holds what the server saves (its save drive, e.g. /media/deploy/ctlsm1 "
-            "appears here as D:\\CTLSM1). Leave empty to skip that check."
+            "Used by the acquisition data check: where the server's save drive itself "
+            "appears on this computer (e.g. /media/deploy/ctlsm1 as D:\\CTLSM1). The "
+            "workflow writes a verification_<microscope>_<date_time> folder at the "
+            "top of that drive. Empty: the app's drive mapping is used. This is not "
+            "the report folder: reports go to Report folder above."
         )
         data_browse = QPushButton("Browse...")
         data_browse.clicked.connect(self._browse_data_root)
@@ -373,6 +375,14 @@ class VerificationDialog(PersistentDialog):
         if index >= 0:
             self.target_combo.setCurrentIndex(index)
 
+    def _drive_mappings(self) -> Dict[str, str]:
+        """The app's server-path -> local-path mappings (drive_mappings.json)."""
+        config = getattr(self.app, "config_service", None)
+        try:
+            return dict(config.get_drive_mappings()) if config else {}
+        except Exception:  # noqa: BLE001 - a missing mapping only skips a fallback
+            return {}
+
     def _selected_top(self):
         from py2flamingo.verification.model import Tier
 
@@ -445,6 +455,7 @@ class VerificationDialog(PersistentDialog):
             sample=sample,
             local_data_root=self.data_root_edit.text().strip(),
             led_test_percent=float(self.led_spin.value()),
+            drive_mappings=self._drive_mappings(),
         )
         self._settings.setValue(SETTINGS_KEY_DATA_ROOT, options.local_data_root)
         self._settings.setValue(SETTINGS_KEY_LED_PERCENT, self.led_spin.value())

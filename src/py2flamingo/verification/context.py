@@ -239,6 +239,9 @@ class RunOptions:
     # Where the server's save drive appears on this computer (e.g. D:\\CTLSM1 for
     # /media/deploy/ctlsm1), for reading back what a workflow wrote.
     local_data_root: str = ""
+    # The app's server-path -> local-path mappings (drive_mappings.json), used
+    # when local_data_root is empty or does not hold the workflow's folder.
+    drive_mappings: Dict[str, str] = field(default_factory=dict)
     motion_step_mm: float = 0.1
     rotation_step_deg: float = 1.0
     halt_test_distance_mm: float = 1.0

@@ -339,6 +339,43 @@ class TestFaultsAreCaught(VerificationTestCase):
         self.assertIn("soft limits", prepared.rig.envelope.describe())
         self.assertTrue(prepared.rig.envelope.problems("y", lo - 0.5, {"y": lo + 1.0}))
 
+    def test_the_data_check_falls_back_to_the_apps_drive_mapping(self):
+        # CTLSM1, 2026-11-21: Server data folder pointed at a subfolder of the
+        # drive (D:\\CTLSM1\\Logs); the app's drive mapping knew the right one.
+        wrong = Path(self.tmp.name) / "elsewhere"
+        wrong.mkdir()
+        summary, _, by_id = self.run_tiers(local_data_root=str(wrong))
+        drive = None
+        for r in summary.results:
+            if r.check_id == "t0.drives":
+                drive = r.detail.split(",")[0].strip()
+        self.assertIn("not found", by_id["t4.acquisition_files"].detail)
+        self.assertIn("elsewhere", by_id["t4.acquisition_files"].detail)
+        _, _, by_id = self.run_tiers(
+            local_data_root=str(wrong),
+            drive_mappings={drive: str(self.data_root)},
+        )
+        detail = by_id["t4.acquisition_files"].detail
+        self.assertNotIn("not found", detail)
+        self.assertIn("read from", detail)
+
+    def test_a_stack_near_the_upper_limit_starts_lower(self):
+        # z 19.0 with max 19.2: the stop test's 0.5 mm stack would end at 19.5.
+        path = Path("microscope_settings/synthetic_settings.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["stage_limits"]["z"] = {"min": 12.5, "max": 19.2}
+        data["verification_targets"] = []
+        path.write_text(json.dumps(data), encoding="utf-8")
+        _, _, by_id = self.run_tiers()
+        for cid in ("t4.check_stack", "t4.workflow_stop"):
+            self.assertNotIn("leave the envelope", by_id[cid].detail, cid)
+        self.assertEqual(
+            by_id["t4.workflow_stop"].outcome,
+            Outcome.PASS,
+            by_id["t4.workflow_stop"].detail,
+        )
+        self.assertIn("stack starts at z", by_id["t4.workflow_stop"].detail)
+
     def test_a_stage_near_its_maximum_steps_the_other_way(self):
         # z 19.0 with max 19.2: +0.1 would pass the 0.2 margin, -0.1 does not.
         path = Path("microscope_settings/synthetic_settings.json")
