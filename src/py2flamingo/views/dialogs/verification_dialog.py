@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 
 SETTINGS_KEY_PARENT = "verification/report_parent"
 SETTINGS_KEY_SAMPLE = "verification/sample"
-SETTINGS_KEY_DATA_ROOT = "verification/data_root"
 SETTINGS_KEY_LED_PERCENT = "verification/led_percent"
 LOCK_NAME = "Post-update verification"
 
@@ -185,10 +184,15 @@ class VerificationDialog(PersistentDialog):
         default_parent = self._settings.value(
             SETTINGS_KEY_PARENT, "verification", type=str
         )
-        self.folder_edit = QLineEdit(default_parent)
+        # Shown in full: a bare "verification" is relative to the app's folder,
+        # which nobody can see from here.
+        self.folder_edit = QLineEdit(
+            str(Path(default_parent or "verification").resolve())
+        )
         self.folder_edit.setToolTip(
-            "Each run writes its own subfolder here, <microscope>_<date_time>, with "
-            "report.txt, report.json and exchange.log. The last folder is remembered."
+            "Where the reports go. Each run writes its own subfolder here, "
+            "<microscope>_<date_time>, with report.txt, report.json, exchange.log and "
+            "the target image. The last folder is remembered."
         )
         browse = QPushButton("Browse...")
         browse.clicked.connect(self._browse)
@@ -196,25 +200,27 @@ class VerificationDialog(PersistentDialog):
         folder_row.addWidget(browse)
         form.addRow("Report folder:", folder_row)
 
-        data_row = QHBoxLayout()
-        self.data_root_edit = QLineEdit(
-            self._settings.value(SETTINGS_KEY_DATA_ROOT, "", type=str)
+        # Where the workflow's files are read back from: the app's own drive
+        # mapping, the same one post-processing uses. A separate field here was
+        # taken for a log folder on the rig (2026-11-21), so it is shown, not asked.
+        self.data_label = QLabel()
+        self.data_label.setWordWrap(True)
+        self.data_label.setToolTip(
+            "The data check reads the folder the verification workflow writes on the "
+            "server's save drive, through the local folder the app has for that drive "
+            "(set in the Workflow tab's save settings, next to Enable post-processing)."
         )
-        self.data_root_edit.setPlaceholderText(
-            "e.g. D:\\CTLSM1 (where the server's save drive appears here)"
-        )
-        self.data_root_edit.setToolTip(
-            "Used by the acquisition data check: where the server's save drive itself "
-            "appears on this computer (e.g. /media/deploy/ctlsm1 as D:\\CTLSM1). The "
-            "workflow writes a verification_<microscope>_<date_time> folder at the "
-            "top of that drive. Empty: the app's drive mapping is used. This is not "
-            "the report folder: reports go to Report folder above."
-        )
-        data_browse = QPushButton("Browse...")
-        data_browse.clicked.connect(self._browse_data_root)
-        data_row.addWidget(self.data_root_edit, 1)
-        data_row.addWidget(data_browse)
-        form.addRow("Server data folder:", data_row)
+        mappings = self._drive_mappings()
+        if mappings:
+            self.data_label.setText(
+                "; ".join(f"{drive} as {local}" for drive, local in mappings.items())
+            )
+        else:
+            self.data_label.setText(
+                "no local folder for the server's drive: the data check will be "
+                "skipped (set one in the Workflow tab's save settings)"
+            )
+        form.addRow("Workflow data read from:", self.data_label)
 
         from py2flamingo.verification.context import (
             LED_TEST_PERCENT_DEFAULT,
@@ -234,7 +240,11 @@ class VerificationDialog(PersistentDialog):
             "(T3 and T4). The brightness check also uses twice this level. Many LEDs "
             "stay dark below about 25%, so keep it above the level this LED lights at."
         )
-        form.addRow("LED test level:", self.led_spin)
+        self.led_spin.setFixedWidth(90)
+        led_row = QHBoxLayout()
+        led_row.addWidget(self.led_spin)
+        led_row.addStretch(1)
+        form.addRow("LED test level:", led_row)
         layout.addLayout(form)
 
         tiers_row = QHBoxLayout()
@@ -307,7 +317,9 @@ class VerificationDialog(PersistentDialog):
         layout.addLayout(buttons)
 
         self.progress = QProgressBar()
-        self.progress.setFormat("%v of %m checks")
+        # "%v of %m" only once a run sets the number of checks; before that the
+        # bar's default maximum would read "0 of 100".
+        self.progress.setFormat("")
         self.progress.setValue(0)
         layout.addWidget(self.progress)
         self.step_label = QLabel("Ready.")
@@ -402,15 +414,6 @@ class VerificationDialog(PersistentDialog):
                 box.setChecked(False)
             box.blockSignals(False)
 
-    def _browse_data_root(self) -> None:
-        start = self.data_root_edit.text() or os.getcwd()
-        chosen = QFileDialog.getExistingDirectory(
-            self, "Where the server's save drive appears", start
-        )
-        if chosen:
-            self.data_root_edit.setText(chosen)
-            self._settings.setValue(SETTINGS_KEY_DATA_ROOT, chosen)
-
     def _browse(self) -> None:
         start = self.folder_edit.text() or os.getcwd()
         chosen = QFileDialog.getExistingDirectory(
@@ -453,11 +456,9 @@ class VerificationDialog(PersistentDialog):
         sample = self.sample_edit.text().strip()
         options = RunOptions(
             sample=sample,
-            local_data_root=self.data_root_edit.text().strip(),
             led_test_percent=float(self.led_spin.value()),
             drive_mappings=self._drive_mappings(),
         )
-        self._settings.setValue(SETTINGS_KEY_DATA_ROOT, options.local_data_root)
         self._settings.setValue(SETTINGS_KEY_LED_PERCENT, self.led_spin.value())
         if top >= Tier.MOTION and not sample:
             QMessageBox.warning(
@@ -549,6 +550,7 @@ class VerificationDialog(PersistentDialog):
         )
 
     def _on_started(self, i: int, n: int, title: str) -> None:
+        self.progress.setFormat("%v of %m checks")
         self.progress.setMaximum(n)
         self.progress.setValue(i - 1)
         self.step_label.setText(f"{i} of {n}: {title}")

@@ -1732,19 +1732,29 @@ def t4_acquisition_files(ctx: RunContext) -> None:
             ],
         )
     try:
+        import flamingo_stitcher
         from flamingo_stitcher import orientation, pipeline
 
+        version = str(getattr(flamingo_stitcher, "__version__", "unknown"))
+        ctx.record("stitcher_version", version)
         name = orientation.read_microscope_name(folder)
         mag = pipeline.read_objective_magnification(folder)
         ctx.record("stitcher_microscope_name", name)
         ctx.record("stitcher_objective", mag)
+        # 0.14.1 is the first release that reads SystemMetaData.txt (10-06+).
+        upgrade = (
+            f" (flamingo-stitcher {version} installed; 0.14.1 and later read "
+            "SystemMetaData.txt: pip install -r requirements.txt)"
+        )
         if not name:
             problems.append(
-                "the stitcher finds no microscope name (tile orientation and Options profile key on it)"
+                "the stitcher finds no microscope name (tile orientation and Options "
+                "profile key on it)" + upgrade
             )
         if not mag:
             problems.append(
                 "the stitcher finds no objective (pixel size falls back to its default)"
+                + upgrade
             )
     except ImportError:
         ctx.note("flamingo_stitcher not installed: stitcher readers not checked")

@@ -42,12 +42,11 @@ positions first), and its window opens with the highest tier that area needs.
 
 1. Type what is mounted (needed from T2 up).
 2. Pick a target position, or **Current position**.
-   For the data check, fill **Server data folder**: where the server's save drive itself
-   appears on this computer (for example `D:\CTLSM1` for `/media/deploy/ctlsm1`), not a
-   folder inside it. The workflow writes a `verification_<microscope>_<date_time>` folder
-   at the top of that drive. Left empty, or when the folder is not there, the app's drive
-   mapping (`drive_mappings.json`) is tried. This is not where reports go: those are in
-   **Report folder**.
+   **Report folder** is where the reports go (shown as a full path; remembered). To keep
+   them with the instrument's logs, browse to that folder, for example `D:\CTLSM1\Logs`.
+   **Workflow data read from** shows the local folder the app has for the server's save
+   drive (the one set in the Workflow tab's save settings). The data check reads the
+   workflow's `<date>_<time>_verification_...` folder there.
    **LED test level** (default 30%, at most 50%) is the LED level the T3 and T4 checks
    use; the brightness check also uses twice it. Many of the LEDs stay dark below about
    25%. The brightness check measures the LED off, at the test level, at twice it and
