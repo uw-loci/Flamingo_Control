@@ -216,6 +216,6 @@ microscope_settings/*_optics_guard.json
 # the verification reports (one folder per run, with an 8 MB target image),
 # the server's metadata document the app saves at every connect, and the
 # progress ETA cache.
-verification/
+/verification/
 microscope_settings/SystemMetaData.txt
 microscope_settings/progress_timing_cache.json
