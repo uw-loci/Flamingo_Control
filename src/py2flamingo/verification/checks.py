@@ -1422,7 +1422,12 @@ def _workflow_text(
     )
     if end:
         raise Failed(f"stack would leave the envelope: {'; '.join(end)}")
-    return ("\n".join(out) + "\n").encode("utf-8")
+    # Through the rewrite the app's send path applies to every workflow
+    # (MicroscopeCommandService._send_workflow_command), so the server gets
+    # what the app would send: "Exposure time (us)" becomes its key in ms.
+    from py2flamingo.core.workflow_exposure import to_server_exposure
+
+    return to_server_exposure(("\n".join(out) + "\n").encode("utf-8"))
 
 
 def _server_dir(ctx: RunContext) -> str:
@@ -1601,27 +1606,39 @@ def t4_acquisition_files(ctx: RunContext) -> None:
             f"no folder for the server's drive {drive}: fill Server data folder with "
             "where it appears on this computer, or map it in the app"
         )
-    candidates = [(Path(r) / folder_name, why) for r, why in roots]
+    # The server prefixes the folder with its own date and time:
+    # {drive}/{YYYYmmdd_HHMMSS}_{directory} (WFSettings::createExperimentDirectory,
+    # 3.0.0 and later).
+    pattern = f"*_{folder_name}"
+
+    def _match() -> Optional[Path]:
+        hits = []
+        for r, _ in roots:
+            try:
+                hits += [p for p in Path(r).glob(pattern) if p.is_dir()]
+            except OSError:
+                continue
+        with_workflow = [p for p in hits if (p / "Workflow.txt").exists()]
+        return max(with_workflow or hits, default=None)
+
     deadline = time.monotonic() + 30.0
-    found = None
-    while found is None:
-        found = next((f for f, _ in candidates if (f / "Workflow.txt").exists()), None)
-        if found is not None or time.monotonic() >= deadline:
-            break
+    found = _match()
+    while (found is None or not (found / "Workflow.txt").exists()) and (
+        time.monotonic() < deadline
+    ):
         ctx.sleep(1.0)
-    if found is None:
-        found = next((f for f, _ in candidates if f.is_dir()), None)
+        found = _match()
     if found is None:
         tried = []
-        for (r, why), (f, _) in zip(roots, candidates):
+        for r, why in roots:
             try:
                 inside = sorted(p.name for p in Path(r).iterdir())[:8]
                 seen = f"holds {', '.join(inside) or 'nothing'}"
             except OSError as e:
                 seen = f"not readable ({e.strerror or e})"
-            tried.append(f"{f} ({why}; {r} {seen})")
+            tried.append(f"{r} ({why}; {seen})")
         raise Failed(
-            f"the server wrote {folder_name} at the top of {drive}, not found in: "
+            f"no {pattern} folder (the server writes it at the top of {drive}) in: "
             + "; ".join(tried)
             + ". Server data folder must be where that drive itself appears on "
             "this computer"

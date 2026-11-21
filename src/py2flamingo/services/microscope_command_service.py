@@ -405,7 +405,12 @@ class MicroscopeCommandService:
         if not self.connection.is_connected():
             raise RuntimeError("Not connected to microscope")
 
-        workflow_data = cmd.workflow_data
+        # The app writes "Exposure time (us)"; no server reads it, so the
+        # camera kept its previous exposure. Rewritten here, once, to the key
+        # and unit the connected server reads (core/workflow_exposure.py).
+        from py2flamingo.core.workflow_exposure import to_server_exposure
+
+        workflow_data = to_server_exposure(cmd.workflow_data)
         file_size = len(workflow_data)
         command_code = cmd.code
         cmd_name = get_command_name(command_code)

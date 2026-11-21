@@ -877,12 +877,18 @@ class SyntheticMicroscope:
             return
         planes = _workflow_value(text, "Number of planes")
         exposure = None
-        for label in ("Exposure time (ms)", "Exposure time (ns)"):
+        # 3.0.0 reads only "Exposure time (ns)"; later builds read "(ms)" and
+        # still accept "(ns)". The value is ms either way. "(us)", the key the
+        # app keeps internally, is read by no build.
+        labels = (
+            ("Exposure time (ns)",)
+            if self.layout is layouts.REFERENCE
+            else ("Exposure time (ms)", "Exposure time (ns)")
+        )
+        for label in labels:
             exposure = exposure or _workflow_value(text, label)
         if exposure:
-            # The server reads only these labels (value in ms both ways);
-            # "Exposure time (us)", which the client writes, is not one.
-            self.exposure_ms = int(exposure)
+            self.exposure_ms = int(float(str(exposure).replace(",", "")))
         self.workflow_running = True
         self.system_state = SystemCommands.STATE_VALUE_BUSY
         self._workflow_stop.clear()
@@ -911,8 +917,12 @@ class SyntheticMicroscope:
         import os
 
         m = re.search(r"Save image directory\s*=\s*(.+)", text)
+        # The server names the folder {drive}/{YYYYmmdd_HHMMSS}_{directory}
+        # (WFSettings::createExperimentDirectory, 3.0.0 and later).
         folder = os.path.join(
-            self.data_root, (m.group(1).strip() if m else "experiment")
+            self.data_root,
+            time.strftime("%Y%m%d_%H%M%S_")
+            + (m.group(1).strip() if m else "experiment"),
         )
         os.makedirs(folder, exist_ok=True)
         out = text

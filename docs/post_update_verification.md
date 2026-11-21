@@ -134,15 +134,21 @@ verification move may enter.
 
 ## Known results on a correct server
 
-Three checks are expected to fail until their client fixes land, because they measure
+Two checks are expected to fail until their client fixes land, because they measure
 known client issues:
 
 - `t1.roi`: the app sets the camera ROI with the left/top edge only. The server also reads
   the right/bottom edge and, on the 2026-11-13 build, reverts the change (status 2).
-- `t4.workflow`: the app writes the workflow exposure as `Exposure time (us)`. Servers
-  read only `Exposure time (ms)` or `(ns)`, so the camera keeps its previous exposure.
 - `t4.acquisition_files` (servers from 2026-10-06 on): the build writes
   `Left path recording = true`, `ROI width` and a `SystemMetaData.txt` instead of
-  `Left path = ON 1`, `AOI width` and `ScopeSettings.txt`. The app's illumination reader and
-  the stitcher's microscope-name and objective readers know only the old form. On a 3.0.0
-  server the same check passes.
+  `Left path = ON 1`, `AOI width` and `ScopeSettings.txt`. The app's illumination reader
+  knows only the old form (the stitcher reads both from 0.14.1). On a 3.0.0 server the same
+  check passes.
+
+Fixed: the workflow exposure. The app keeps it as `Exposure time (us)`, which no server
+reads, so the camera kept its previous exposure. Since 2026-11-21 the app rewrites it when
+it sends a workflow: `Exposure time (ns)` for 3.0.0, `Exposure time (ms)` for later builds,
+in milliseconds.
+
+The data check looks for the folder the server names `<date>_<time>_verification_...`
+at the top of its save drive.

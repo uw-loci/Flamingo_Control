@@ -20,6 +20,7 @@ import shutil
 import socket
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -41,7 +42,7 @@ REPO = Path(__file__).resolve().parents[1]
 # keys ("Left path = ON 1", not "Left path recording = true"). The stitcher's
 # name and objective readers handle SystemMetaData.txt from flamingo-stitcher
 # 0.14.1 on.
-KNOWN_CLIENT_DEFECTS = {"t1.roi", "t4.workflow", "t4.acquisition_files"}
+KNOWN_CLIENT_DEFECTS = {"t1.roi", "t4.acquisition_files"}
 
 
 def _adjacent_ports():
@@ -163,7 +164,11 @@ class TestFullRun(VerificationTestCase):
         self.assertEqual(by_id["t3.illumination_paths"].outcome, Outcome.ACK_ONLY)
         self.assertEqual(by_id["t0.binning"].outcome, Outcome.PASS)
         self.assertIn("status 2", by_id["t1.roi"].detail)
-        self.assertIn("exposure", by_id["t4.workflow"].detail)
+        # The workflow's exposure reaches the camera (sent as "(ms)", not "(us)").
+        wf = by_id["t4.workflow"]
+        self.assertEqual(wf.outcome, Outcome.PASS, wf.detail)
+        self.assertEqual(wf.values["exposure_after_ms"], wf.values["exposure_asked_ms"])
+        self.assertNotIn("Exposure time (us)", self.scope.workflows[-1])
         files = by_id["t4.acquisition_files"].detail
         self.assertIn("illumination as left=False", files)
         # flamingo-stitcher 0.14.1 reads SystemMetaData.txt: name and objective found.
@@ -224,6 +229,43 @@ class TestOlderBuilds(VerificationTestCase):
             self.assertEqual(
                 by_id[cid].outcome, Outcome.PASS, f"{cid}: {by_id[cid].detail}"
             )
+
+
+class TestThe3_0_0Workflow(VerificationTestCase):
+    layout = sl.REFERENCE
+
+    def test_a_3_0_0_server_gets_the_exposure_under_its_old_label(self):
+        _, _, by_id = self.run_tiers()
+        wf = by_id["t4.workflow"]
+        self.assertNotIn("did not take the workflow's exposure", wf.detail)
+        self.assertEqual(wf.values["exposure_after_ms"], wf.values["exposure_asked_ms"])
+        self.assertIn("Exposure time (ns) = ", self.scope.workflows[-1])
+
+
+class TestTheAppsWorkflowSendPath(VerificationTestCase):
+    layout = sl.LAYOUT_2026_11_13
+
+    def test_the_app_sends_the_exposure_in_the_servers_key(self):
+        from py2flamingo.core.tcp_protocol import CommandCode
+        from py2flamingo.models.command import WorkflowCommand
+
+        text = Path("workflows/ZStack.txt").read_text(encoding="utf-8")
+        self.assertIn("Exposure time (us)", text)
+        try:
+            self.connection.send_command(
+                WorkflowCommand(
+                    code=CommandCode.CMD_WORKFLOW_START,
+                    workflow_data=text.encode("utf-8"),
+                )
+            )
+        except Exception:  # noqa: BLE001 - WORK_FLOW_START has no direct reply
+            pass
+        deadline = time.monotonic() + 5
+        while not self.scope.workflows and time.monotonic() < deadline:
+            time.sleep(0.05)
+        sent = self.scope.workflows[-1]
+        self.assertNotIn("Exposure time (us)", sent)
+        self.assertIn("Exposure time (ms) = ", sent)
 
 
 class TestThe2026_10_06Build(VerificationTestCase):
@@ -349,14 +391,16 @@ class TestFaultsAreCaught(VerificationTestCase):
         for r in summary.results:
             if r.check_id == "t0.drives":
                 drive = r.detail.split(",")[0].strip()
-        self.assertIn("not found", by_id["t4.acquisition_files"].detail)
+        self.assertIn(
+            "folder (the server writes it", by_id["t4.acquisition_files"].detail
+        )
         self.assertIn("elsewhere", by_id["t4.acquisition_files"].detail)
         _, _, by_id = self.run_tiers(
             local_data_root=str(wrong),
             drive_mappings={drive: str(self.data_root)},
         )
         detail = by_id["t4.acquisition_files"].detail
-        self.assertNotIn("not found", detail)
+        self.assertNotIn("folder (the server writes it", detail)
         self.assertIn("read from", detail)
 
     def test_a_stack_near_the_upper_limit_starts_lower(self):
@@ -574,9 +618,10 @@ class TestAreas(VerificationTestCase):
         problems = {c: r.detail for c, r in by_id.items() if r.outcome.is_problem}
         self.assertEqual(problems, {})
 
-    def test_the_data_area_brings_its_workflow_even_though_it_fails(self):
+    def test_the_data_area_brings_the_workflow_it_reads(self):
         _, _, by_id = self.run_tiers(area="data")
-        self.assertEqual(by_id["t4.workflow"].outcome, Outcome.FAIL)  # exposure label
+        self.assertEqual(by_id["t4.workflow"].outcome, Outcome.PASS)
+        # Still fails on the app's illumination reader (11-13 keys).
         self.assertEqual(by_id["t4.acquisition_files"].outcome, Outcome.FAIL)
         self.assertNotIn("t3.led", by_id)
 
