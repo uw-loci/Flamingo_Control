@@ -67,6 +67,16 @@ def _drive_mappings() -> dict:
         return {}
 
 
+def _default_report_folder() -> Path:
+    """Logs on the mapped server drive when it exists, else ./verification
+    (the same default as the window)."""
+    for local in _drive_mappings().values():
+        logs = Path(local) / "Logs"
+        if logs.is_dir():
+            return logs
+    return Path("verification")
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         prog="python -m py2flamingo.verification",
@@ -100,7 +110,11 @@ def main(argv=None) -> int:
         help="target name from verification_targets in the rig's settings json",
     )
     p.add_argument(
-        "--out", type=Path, default=Path("verification"), help="report folder root"
+        "--out",
+        type=Path,
+        default=None,
+        help="report folder (default: Logs on the server's data drive as mapped in "
+        "drive_mappings.json when it exists, else ./verification)",
     )
     p.add_argument(
         "--save-drive",
@@ -229,7 +243,7 @@ def main(argv=None) -> int:
             tiers,
             options,
             target=target,
-            report_root=args.out,
+            report_root=args.out or _default_report_folder(),
             confirmations=confirmations,
             callbacks=RunCallbacks(check_finished=finished),
             abort=abort,

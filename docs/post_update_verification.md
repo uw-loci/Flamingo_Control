@@ -42,8 +42,10 @@ positions first), and its window opens with the highest tier that area needs.
 
 1. Type what is mounted (needed from T2 up).
 2. Pick a target position, or **Current position**.
-   **Report folder** is where the reports go (shown as a full path; remembered). To keep
-   them with the instrument's logs, browse to that folder, for example `D:\CTLSM1\Logs`.
+   **Report folder** is where the reports go, shown as a full path. It starts as the
+   `Logs` folder on the server's data drive as this computer sees it (for example
+   `D:\CTLSM1\Logs`), when that folder exists, and as `verification` in the app's folder
+   otherwise. A folder chosen with **Browse...** is remembered.
    **Workflow data read from** shows the local folder the app has for the server's save
    drive (the one set in the Workflow tab's save settings). The data check reads the
    workflow's `<date>_<time>_verification_...` folder there.

@@ -604,6 +604,48 @@ class TestTheDialog(VerificationTestCase):
         dialog.close()
 
 
+class TestTheReportFolderDefault(unittest.TestCase):
+    """CTLSM1, 2026-11-21: reports were expected in D:\\CTLSM1\\Logs and went to
+    the app folder's 'verification' three runs in a row."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.drive = Path(self.tmp.name) / "CTLSM1"
+        (self.drive / "Logs").mkdir(parents=True)
+
+    def _initial(self, stored):
+        from types import SimpleNamespace
+
+        from py2flamingo.views.dialogs.verification_dialog import VerificationDialog
+
+        fake = SimpleNamespace(
+            _settings=SimpleNamespace(value=lambda key, default="", type=str: stored),
+            _drive_mappings=lambda: {"/media/deploy/ctlsm1": str(self.drive)},
+        )
+        return VerificationDialog._initial_report_folder(fake)
+
+    def test_logs_on_the_server_drive_is_the_default(self):
+        self.assertEqual(self._initial(""), self.drive / "Logs")
+
+    def test_the_old_bare_default_gives_way_to_logs(self):
+        self.assertEqual(self._initial("verification"), self.drive / "Logs")
+
+    def test_a_chosen_folder_is_kept(self):
+        chosen = Path(self.tmp.name) / "elsewhere"
+        self.assertEqual(self._initial(str(chosen)), chosen.resolve())
+
+    def test_without_a_logs_folder_the_app_folder_is_used(self):
+        from py2flamingo.views.dialogs.verification_dialog import (
+            default_report_folder,
+        )
+
+        self.assertEqual(
+            default_report_folder({"/x": str(Path(self.tmp.name) / "none")}),
+            Path("verification").resolve(),
+        )
+
+
 class TestImageMeasures(unittest.TestCase):
     def test_a_known_shift_is_measured(self):
         import numpy as np

@@ -41,6 +41,21 @@ from py2flamingo.services.window_geometry_manager import PersistentDialog
 logger = logging.getLogger(__name__)
 
 SETTINGS_KEY_PARENT = "verification/report_parent"
+# The report folder when nothing better is known: relative to the app folder.
+DEFAULT_REPORT_FOLDER = Path("verification")
+
+
+def default_report_folder(drive_mappings: Dict[str, str]) -> Path:
+    """Logs on the server's data drive as this computer sees it (for example
+    D:\\CTLSM1\\Logs for /media/deploy/ctlsm1), when that folder exists; else
+    the app folder's verification subfolder."""
+    for local in drive_mappings.values():
+        logs = Path(local) / "Logs"
+        if logs.is_dir():
+            return logs
+    return DEFAULT_REPORT_FOLDER.resolve()
+
+
 SETTINGS_KEY_SAMPLE = "verification/sample"
 SETTINGS_KEY_LED_PERCENT = "verification/led_percent"
 LOCK_NAME = "Post-update verification"
@@ -181,18 +196,13 @@ class VerificationDialog(PersistentDialog):
         form.addRow("Target position:", self.target_combo)
 
         folder_row = QHBoxLayout()
-        default_parent = self._settings.value(
-            SETTINGS_KEY_PARENT, "verification", type=str
-        )
-        # Shown in full: a bare "verification" is relative to the app's folder,
-        # which nobody can see from here.
-        self.folder_edit = QLineEdit(
-            str(Path(default_parent or "verification").resolve())
-        )
+        self.folder_edit = QLineEdit(str(self._initial_report_folder()))
         self.folder_edit.setToolTip(
             "Where the reports go. Each run writes its own subfolder here, "
             "<microscope>_<date_time>, with report.txt, report.json, exchange.log and "
-            "the target image. The last folder is remembered."
+            "the target image. Until a folder is chosen, the Logs folder on the "
+            "server's data drive (as this computer sees it) is used when it exists. "
+            "A folder chosen with Browse is remembered."
         )
         browse = QPushButton("Browse...")
         browse.clicked.connect(self._browse)
@@ -386,6 +396,19 @@ class VerificationDialog(PersistentDialog):
         index = self.target_combo.findData(chosen)
         if index >= 0:
             self.target_combo.setCurrentIndex(index)
+
+    def _initial_report_folder(self) -> Path:
+        """The folder chosen before, else Logs on the server's data drive.
+
+        Until 2026-11-21 the default was "verification" in the app's own folder,
+        shown as that bare word; on CTLSM1 the reports were expected next to the
+        instrument's logs (D:\\CTLSM1\\Logs) and went to the app folder three
+        runs in a row. A stored bare "verification" is that old default, not a
+        choice, so it gives way to the Logs folder too."""
+        stored = (self._settings.value(SETTINGS_KEY_PARENT, "", type=str) or "").strip()
+        if stored and stored != str(DEFAULT_REPORT_FOLDER):
+            return Path(stored).resolve()
+        return default_report_folder(self._drive_mappings())
 
     def _drive_mappings(self) -> Dict[str, str]:
         """The app's server-path -> local-path mappings (drive_mappings.json)."""
@@ -585,7 +608,7 @@ class VerificationDialog(PersistentDialog):
         counts = ", ".join(f"{v} {k}" for k, v in info.get("counts", {}).items())
         prefix = "Aborted. " if info.get("aborted") else "Done. "
         self.step_label.setText(
-            f"{prefix}{counts}. Report: {Path(folder) / 'report.txt'}"
+            f"{prefix}{counts}. Report: {(Path(folder) / 'report.txt').resolve()}"
         )
         self.progress.setValue(self.progress.maximum())
 
