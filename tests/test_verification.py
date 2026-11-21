@@ -348,9 +348,13 @@ class TestFaultsAreCaught(VerificationTestCase):
         _, _, by_id = self.run_tiers()
         self.assertEqual(by_id["t4.led_brightness"].outcome, Outcome.PASS)
         self.assertIn("mean_30pct", by_id["t4.led_brightness"].values)
+        # A test level the LED stays dark at costs a note, not a failure: the
+        # check also measures 100%, which lights with or without a sample.
         _, _, by_id = self.run_tiers(led_test_percent=10.0)
-        self.assertEqual(by_id["t4.led_brightness"].outcome, Outcome.FAIL)
-        self.assertIn("below about 25%", by_id["t4.led_brightness"].detail)
+        result = by_id["t4.led_brightness"]
+        self.assertEqual(result.outcome, Outcome.PASS, result.detail)
+        self.assertIn("lights at 100%", result.detail)
+        self.assertIn("mean_100pct", result.values)
 
     def test_an_led_that_lights_only_at_twice_the_test_level(self):
         # CTLSM1, 2026-11-20: off 99.4, 30% 99.5, 60% 3146.

@@ -1231,52 +1231,62 @@ def t4_live_view(ctx: RunContext) -> None:
     ),
 )
 def t4_led_brightness(ctx: RunContext) -> None:
-    """The effect check the LED percent change of 2026-08-22 needed: mean
-    image intensity with the LED off, at the test percent, and at twice it.
-    Needs a sample or target in view, and a test level the LED lights at
-    (many stay dark below about 25%)."""
+    """The effect check the LED percent change of 2026-08-22 needed: mean live
+    image intensity with the LED off, at the test level, at twice it and at
+    100%. No sample is needed: the LED lights the camera through an empty
+    chamber (CTLSM1, 2026-11-20, nothing mounted: off 99.4, 30% 99.5, 60% 3146).
+
+    PASS when 100% is brighter than off and no level is darker than a lower
+    one. The lowest level that lit is kept for the target image and the
+    workflow, so a test level the LED stays dark at (many stay dark below
+    about 25%) costs a note, not a failure."""
     service = _laser_led(ctx)
     pct = ctx.options.led_test_percent
+    levels = sorted({float(pct), min(100.0, 2 * float(pct)), 100.0})
     ctx.on_restore("LED off", service.disable_led_preview)
     _live(ctx)
     service.disable_led_preview()
     ctx.sleep(0.5)
     _camera(ctx).drain_all_frames()
     dark = _mean(_frames(ctx, 5, 10.0))
-    service.set_led_intensity(0, pct)
+    means = []
+    service.set_led_intensity(0, levels[0])
     service.enable_led_preview()
-    ctx.sleep(0.5)
-    _camera(ctx).drain_all_frames()
-    low = _mean(_frames(ctx, 5, 10.0))
-    service.set_led_intensity(0, min(100.0, 2 * pct))
-    ctx.sleep(0.5)
-    _camera(ctx).drain_all_frames()
-    high = _mean(_frames(ctx, 5, 10.0))
+    for level in levels:
+        service.set_led_intensity(0, level)
+        ctx.sleep(0.5)
+        _camera(ctx).drain_all_frames()
+        means.append(_mean(_frames(ctx, 5, 10.0)))
     service.disable_led_preview()
     _stop_live(ctx)
     ctx.record("mean_off", round(dark, 1))
-    ctx.record(f"mean_{pct:g}pct", round(low, 1))
-    ctx.record(f"mean_{2 * pct:g}pct", round(high, 1))
-    lit_low = (low - dark) >= 5
-    lit_high = (high - dark) >= 5 and high > low
-    if lit_low and lit_high:
-        ctx.facts["led_lit_percent"] = pct
-    elif lit_high:
-        # Dark at the test level, lit at twice it (CTLSM1, 2026-11-20: off
-        # 99.4, 30% 99.5, 60% 3146): the LED works; the later LED images use
-        # the level that lit.
-        ctx.facts["led_lit_percent"] = min(100.0, 2 * pct)
-        ctx.note(
-            f"the LED stays dark at {pct:g}% and lights at {min(100.0, 2 * pct):g}%; "
-            "the target image and the workflow use the higher level"
-        )
-    else:
+    for level, mean in zip(levels, means):
+        ctx.record(f"mean_{level:g}pct", round(mean, 1))
+    # Lit: clearly above the dark frame (5 counts, or 2% of it).
+    margin = max(5.0, 0.02 * dark)
+    lit = [level for level, mean in zip(levels, means) if mean - dark >= margin]
+    readings = ", ".join(f"{level:g}% {mean:.1f}" for level, mean in zip(levels, means))
+    if not lit or lit[-1] != 100.0:
         raise Failed(
-            f"the image did not get brighter with the LED at {pct:g}% and "
-            f"{min(100.0, 2 * pct):g}% (is a sample in view? does this LED light "
-            "at that level? many stay dark below about 25%)",
-            "off < low < high",
-            [round(dark, 1), round(low, 1), round(high, 1)],
+            f"the image did not get brighter with the LED at 100% (off {dark:.1f}, "
+            f"{readings}): the LED or its preview does not light the camera",
+            "brighter than off at 100%",
+            [round(dark, 1)] + [round(m, 1) for m in means],
+        )
+    # Each step up must not make the image darker (beyond noise).
+    for (l1, m1), (l2, m2) in zip(zip(levels, means), zip(levels[1:], means[1:])):
+        if m2 < m1 - margin:
+            raise Failed(
+                f"the image got darker going from {l1:g}% to {l2:g}% ({readings})",
+                "brightness rising with the LED level",
+                [round(m, 1) for m in means],
+            )
+    ctx.facts["led_lit_percent"] = lit[0]
+    ctx.note(f"off {dark:.1f}, {readings}")
+    if lit[0] > pct:
+        ctx.note(
+            f"the LED stays dark at {pct:g}% and lights at {lit[0]:g}%; "
+            "the target image and the workflow use that level"
         )
 
 

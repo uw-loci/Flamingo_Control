@@ -50,9 +50,10 @@ positions first), and its window opens with the highest tier that area needs.
    **Report folder**.
    **LED test level** (default 30%, at most 50%) is the LED level the T3 and T4 checks
    use; the brightness check also uses twice it. Many of the LEDs stay dark below about
-   25%, so keep it above the level this LED lights at. If the LED is dark at the test
-   level but lights at twice it, the brightness check passes with a note, and the
-   target image and the workflow use the higher level.
+   25%. The brightness check measures the LED off, at the test level, at twice it and
+   at 100%; no sample is needed, the LED lights the camera through an empty chamber.
+   It passes when 100% is brighter than off, and the target image and the workflow use
+   the lowest level that lit (with a note when that is above the test level).
 3. Tick the highest tier to run. Each tier includes the ones before it:
 
    | Tier | What it does |
