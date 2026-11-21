@@ -598,9 +598,9 @@ def t1_trigger_mode(ctx: RunContext) -> None:
 def t1_roi(ctx: RunContext) -> None:
     """Through CameraService.set_centered_aoi, the path the app uses. The
     server reads the left AND right edge (int32Data0/1) and on the 11-13 build
-    answers status 2 (REVERTED) when it cannot use them. The client sends only
-    int32Data0 (suspected defect: data1 = 0). This check measures what the
-    camera does."""
+    answers status 2 (REVERTED) when it cannot use them. Until 2026-11-21 the
+    app sent only int32Data0 (right edge 0) and the rig reverted every change.
+    This check measures what the camera does."""
     w, h = ctx.facts["image_size"]
     left0, right0, top0, bottom0 = ctx.facts["roi"]
     camera = _camera(ctx)

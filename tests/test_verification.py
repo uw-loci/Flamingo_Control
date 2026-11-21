@@ -42,7 +42,7 @@ REPO = Path(__file__).resolve().parents[1]
 # keys ("Left path = ON 1", not "Left path recording = true"). The stitcher's
 # name and objective readers handle SystemMetaData.txt from flamingo-stitcher
 # 0.14.1 on.
-KNOWN_CLIENT_DEFECTS = {"t1.roi", "t4.acquisition_files"}
+KNOWN_CLIENT_DEFECTS = {"t4.acquisition_files"}
 
 
 def _adjacent_ports():
@@ -163,7 +163,10 @@ class TestFullRun(VerificationTestCase):
         )
         self.assertEqual(by_id["t3.illumination_paths"].outcome, Outcome.ACK_ONLY)
         self.assertEqual(by_id["t0.binning"].outcome, Outcome.PASS)
-        self.assertIn("status 2", by_id["t1.roi"].detail)
+        # Both ROI edges are sent now; the image size follows.
+        roi = by_id["t1.roi"]
+        self.assertEqual(roi.outcome, Outcome.PASS, roi.detail)
+        self.assertNotEqual(roi.values["left_set_int1_sent"], 0)
         # The workflow's exposure reaches the camera (sent as "(ms)", not "(us)").
         wf = by_id["t4.workflow"]
         self.assertEqual(wf.outcome, Outcome.PASS, wf.detail)

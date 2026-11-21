@@ -1,10 +1,11 @@
 """Tests for CameraService centered-square AOI (hardware ROI) setting.
 
-The live AOI is a real PCO hardware ROI. This firmware (per
-oldcodereference/CommandCodes_Reference.txt, which matches our active
-functions/command_list.txt) exposes only LEFT/TOP edges and enforces a symmetric
-ROI, so left+top define a centered square. These tests exercise the edge math and
-the send/confirm flow with a fake command layer (no hardware).
+The live AOI is a real PCO hardware ROI. ROI_LEFT_SET carries the left edge in
+int32Data0 and the right edge in int32Data1, ROI_TOP_SET the top and bottom
+(PCOBase::ROIset, server 3.0.0 and later). Until 2026-11-21 only the first edge
+was sent, so the right edge was 0 and the 11-13 build reverted every change.
+These tests exercise the edge math and the send/confirm flow with a fake command
+layer (no hardware).
 
 Run: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_camera_aoi_roi.py -q
 """
@@ -24,15 +25,15 @@ def _bare_service():
 
 
 def test_full_frame_is_edge_one():
-    assert CameraService._centered_roi_edges(2048, 2048) == (1, 1)
+    assert CameraService._centered_roi_edges(2048, 2048) == (1, 2048)
 
 
 def test_half_frame_centered():
-    assert CameraService._centered_roi_edges(2048, 1024) == (513, 513)
+    assert CameraService._centered_roi_edges(2048, 1024) == (513, 1536)
 
 
 def test_quarter_frame_centered():
-    assert CameraService._centered_roi_edges(2048, 512) == (769, 769)
+    assert CameraService._centered_roi_edges(2048, 512) == (769, 1280)
 
 
 # ---- set flow --------------------------------------------------------------
@@ -44,12 +45,12 @@ def test_out_of_range_rejected():
     assert svc.set_centered_square_aoi(4096, sensor_px=2048)["success"] is False
 
 
-def test_sends_left_then_top_with_edge_in_int32data0(monkeypatch):
+def test_sends_left_then_top_with_both_edges(monkeypatch):
     svc = _bare_service()
     sent = []
 
     def _fake_send(command_code, command_name, params=None, value=0.0):
-        sent.append((command_code, params[3]))
+        sent.append((command_code, params[3], params[4]))
         return {"success": True}
 
     monkeypatch.setattr(svc, "_send_command", _fake_send)
@@ -57,8 +58,8 @@ def test_sends_left_then_top_with_edge_in_int32data0(monkeypatch):
 
     res = svc.set_centered_square_aoi(1024, sensor_px=2048)
 
-    assert sent[0] == (CameraCommandCode.ROI_LEFT_SET, 513)
-    assert sent[1] == (CameraCommandCode.ROI_TOP_SET, 513)
+    assert sent[0] == (CameraCommandCode.ROI_LEFT_SET, 513, 1536)
+    assert sent[1] == (CameraCommandCode.ROI_TOP_SET, 513, 1536)
     assert res["success"] is True
     assert res["applied"] is True
     assert (res["width"], res["height"]) == (1024, 1024)

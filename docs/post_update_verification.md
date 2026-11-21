@@ -134,16 +134,18 @@ verification move may enter.
 
 ## Known results on a correct server
 
-Two checks are expected to fail until their client fixes land, because they measure
-known client issues:
+One check is expected to fail until its client fix lands, because it measures a known
+client issue:
 
-- `t1.roi`: the app sets the camera ROI with the left/top edge only. The server also reads
-  the right/bottom edge and, on the 2026-11-13 build, reverts the change (status 2).
 - `t4.acquisition_files` (servers from 2026-10-06 on): the build writes
   `Left path recording = true`, `ROI width` and a `SystemMetaData.txt` instead of
   `Left path = ON 1`, `AOI width` and `ScopeSettings.txt`. The app's illumination reader
   knows only the old form (the stitcher reads both from 0.14.1). On a 3.0.0 server the same
   check passes.
+
+Fixed: the camera ROI. The app sent only the left/top edge; the server also reads the
+right/bottom edge (int32Data1) and the 2026-11-13 build reverted every change. Since
+2026-11-21 both edges are sent.
 
 Fixed: the workflow exposure. The app keeps it as `Exposure time (us)`, which no server
 reads, so the camera kept its previous exposure. Since 2026-11-21 the app rewrites it when

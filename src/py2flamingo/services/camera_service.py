@@ -336,16 +336,17 @@ class CameraService(MicroscopeCommandService):
 
     @staticmethod
     def _centered_roi_edges(sensor_px: int, side_px: int) -> Tuple[int, int]:
-        """1-indexed left/top inset for a centered square ROI of ``side_px``.
+        """1-indexed first and last pixel of a centered ``side_px`` span.
 
-        The PCO Edge enforces a symmetric ROI, so the left inset also fixes the
-        right edge (and top fixes bottom); only left/top are commanded. For a
-        centered square of side S on a ``sensor_px``-wide sensor the inset is
-        ``(sensor_px - side_px) / 2`` and the 1-indexed edge is ``inset + 1`` (so
-        a full-frame ROI is edge 1).
+        ``(inset + 1, inset + side_px)`` with ``inset = (sensor_px - side_px) // 2``,
+        so the full frame is ``(1, sensor_px)``. The server reads both:
+        ROI_LEFT_SET takes the left edge in int32Data0 and the RIGHT edge in
+        int32Data1 (ROI_TOP_SET: top and bottom), in 3.0.0 and later
+        (PCOBase::ROIset). Sending only the first edge asked for a right edge
+        of 0, which the 2026-11-13 build reverts (status 2).
         """
         inset = (sensor_px - side_px) // 2
-        return inset + 1, inset + 1
+        return inset + 1, inset + side_px
 
     def set_centered_aoi(
         self,
@@ -356,9 +357,9 @@ class CameraService(MicroscopeCommandService):
     ) -> Dict[str, Any]:
         """Set a CENTERED camera ROI (live AOI) of ``width_px`` × ``height_px``.
 
-        The PCO ROI is symmetric per axis, so ROI_LEFT_SET fixes the width
-        (left edge mirrors the right) and ROI_TOP_SET fixes the height (top
-        mirrors bottom) INDEPENDENTLY — width and height need not be equal.
+        ROI_LEFT_SET sets the left and right edges, ROI_TOP_SET the top and
+        bottom, each centered on the sensor, so width and height are
+        independent and need not be equal.
         Re-reads the resulting image size to confirm.
 
         IMPORTANT: the firmware drops the camera's recording state to change the
@@ -380,34 +381,34 @@ class CameraService(MicroscopeCommandService):
                 "error": f"AOI height {height_px} out of range (1..{sensor_h})",
             }
 
-        # Left inset fixes the width; top inset fixes the height (each axis is
-        # centered/symmetric, so the two are independent).
-        left = self._centered_roi_edges(sensor_w, width_px)[0]
-        top = self._centered_roi_edges(sensor_h, height_px)[0]
+        left, right = self._centered_roi_edges(sensor_w, width_px)
+        top, bottom = self._centered_roi_edges(sensor_h, height_px)
         self.logger.info(
             f"Setting centered AOI {width_px}x{height_px} on a "
-            f"{sensor_w}x{sensor_h}px sensor (ROI left={left}, top={top})"
+            f"{sensor_w}x{sensor_h}px sensor (ROI x {left}-{right}, y {top}-{bottom})"
         )
 
-        def _send_edge(code: int, name: str, edge_value: int) -> Dict[str, Any]:
-            # int32Data0 (params[3]) carries the edge value, matching how the
-            # firmware's PCOBase::ROIset reads scmd.int32Data0.
+        def _send_edge(code: int, name: str, first: int, last: int) -> Dict[str, Any]:
+            # PCOBase::ROIset reads int32Data0 (params[3]) as the left/top edge
+            # and int32Data1 (params[4]) as the right/bottom edge.
             return self._send_command(
                 command_code=code,
                 command_name=name,
-                params=[0, 0, 0, int(edge_value), 0, 0, 0],
+                params=[0, 0, 0, int(first), int(last), 0, 0],
                 value=0.0,
             )
 
         left_res = _send_edge(
-            CameraCommandCode.ROI_LEFT_SET, "CAMERA_ROI_LEFT_SET", left
+            CameraCommandCode.ROI_LEFT_SET, "CAMERA_ROI_LEFT_SET", left, right
         )
         if not left_res.get("success"):
             return {
                 "success": False,
                 "error": f"ROI_LEFT_SET failed: {left_res.get('error')}",
             }
-        top_res = _send_edge(CameraCommandCode.ROI_TOP_SET, "CAMERA_ROI_TOP_SET", top)
+        top_res = _send_edge(
+            CameraCommandCode.ROI_TOP_SET, "CAMERA_ROI_TOP_SET", top, bottom
+        )
         if not top_res.get("success"):
             return {
                 "success": False,
