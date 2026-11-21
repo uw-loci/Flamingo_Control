@@ -1,12 +1,15 @@
+# Rendered by Flamingo_Control from the server's system metadata document
+# (server builds from 2026-10-06 on). The document itself is in
+# SystemMetaData.txt next to this file. Edit settings on the server, not here.
 <Filter wheel encoder counts>
-  Filter wheel position 1 = 1780 7
-  Filter wheel position 2 = 2300 6
-  Filter wheel position 3 = 2850 5
-  Filter wheel position 4 = 3333 4
-  Filter wheel position 5 = 1230 3
-  Filter wheel position 6 = 5 2
-  Filter wheel position 7 = 6 1
-  Filter wheel position 8 = 7 0
+  Filter wheel position 1 = 1780
+  Filter wheel position 2 = 2300
+  Filter wheel position 3 = 2850
+  Filter wheel position 4 = 3333
+  Filter wheel position 5 = 1230
+  Filter wheel position 6 = 5
+  Filter wheel position 7 = 6
+  Filter wheel position 8 = 7
   Filter wheel description 1 = 460/50
   Filter wheel description 2 = 525/50
   Filter wheel description 3 = 595LP
@@ -17,7 +20,7 @@
   Filter wheel description 8 = description 8
 </Filter wheel encoder counts>
 <Filter wheel position assignments>
-  Laser 1 = 0
+  Laser 1 = 3
   Laser 2 = 1
   Laser 3 = 2
   Laser 4 = 3
@@ -26,73 +29,42 @@
   Laser 7 = 0
   LED = 4
 </Filter wheel position assignments>
-<Illumination settings>
-  Offset left x-axis = 1400
-  Offset left y-axis = -1
-  Offset right x-axis = 2300
-  Offset right y-axis = -1
-  Amplitude left x-axis = 0
-  Amplitude left y-axis = -1
-  Amplitude right x-axis = 0
-  Amplitude right y-axis = -1
-  Alignment center x-axis = 2000
-  Alignment center y-axis = -1
-  Sample scan frequency (Hz) = 5000
-</Illumination settings>
 <Stage limits>
-  Hard limit max x-axis = 12.300
-  Hard limit max y-axis = 25.000
-  Hard limit max z-axis = 25.000
-  Hard limit max r-axis = 720.000
-  Hard limit min x-axis = 1.000
-  Hard limit min y-axis = 5.000
-  Hard limit min z-axis = 12.500
-  Hard limit min r-axis = -720.000
-  Soft limit max x-axis = 12.300
-  Soft limit max y-axis = 25.000
-  Soft limit max z-axis = 25.000
-  Soft limit max r-axis = 720.000
-  Soft limit min x-axis = 1.000
-  Soft limit min y-axis = 5.000
-  Soft limit min z-axis = 12.500
-  Soft limit min r-axis = -720.000
+  Hard limit max x-axis = 14.999998
+  Hard limit max y-axis = 25
+  Hard limit max z-axis = 25
+  Hard limit max r-axis = 720
+  Hard limit min x-axis = 1
+  Hard limit min y-axis = 5
+  Hard limit min z-axis = 8
+  Hard limit min r-axis = -720
+  Soft limit max x-axis = 14.999998
+  Soft limit max y-axis = 25
+  Soft limit max z-axis = 25
+  Soft limit max r-axis = 720
+  Soft limit min x-axis = 1
+  Soft limit min y-axis = 5
+  Soft limit min z-axis = 11
+  Soft limit min r-axis = -720
   Home x-axis = 8.032
   Home y-axis = 23.898
   Home z-axis = 19.753
   Home r-axis = -217.965
-  Unload x-axis = 1.000
-  Unload y-axis = 5.000
-  Unload z-axis = 12.500
-  Unload r-axis = 0.000
-  Default velocity x-axis = 1.000
-  Default velocity y-axis = 1.000
-  Default velocity z-axis = 1.000
-  Default velocity r-axis = 50.000
+  Unload x-axis = 1
+  Unload y-axis = 5
+  Unload z-axis = 11
+  Unload r-axis = 0
+  Default velocity x-axis = 1
+  Default velocity y-axis = 1
+  Default velocity z-axis = 1
+  Default velocity r-axis = 50
 </Stage limits>
-<Camera overlap settings>
-  Camera 1 overlap percent = 100
-  Camera 1 capture mode (0: full, 1: from front, 2: from back) = 0
-  Camera 2 overlap percent = 100
-  Camera 2 capture mode (0: full, 1: from front, 2: from back) = 0
-</Camera overlap settings>
-<LED settings>
-  LED selection (0 red, 1 green, 2 blue, 3 white) = 0
-  Preview on = 0
-  Recording on = 0
-  Intensity red = 98
-  Intensity green = 100
-  Intensity blue = 76
-  Intensity white = 37
-  UI slider min (match LED DAC) = 0
-  UI slider max (match LED DAC) = 100
-  UI slider factor adjustment = 1
-</LED settings>
 <Type>
   Microscope type = T, X, L, V SPIM
-  Microscope name = n7
-  Microscope address = 10.129.37.22 53717
+  Microscope name = princess
   Microscope builder = Builder
   Objective lens magnification = 6.205
   Tube lens design focal length (mm) = 200
   Tube lens length (mm) = 200
+  Microscope address = 127.0.1.1 53717
 </Type>
