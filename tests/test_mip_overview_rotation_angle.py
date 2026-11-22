@@ -18,7 +18,7 @@ from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from py2flamingo.models.mip_overview import (  # noqa: E402
+from py2flamingo.utils.mip_overview import (  # noqa: E402
     MIPTileResult,
     read_tile_rotation_angle,
 )

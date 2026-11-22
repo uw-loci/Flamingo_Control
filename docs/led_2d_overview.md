@@ -296,7 +296,7 @@ The LED 2D Overview feature consists of 7 main files (~228KB total):
 | `acquisitions/led_2d_overview.py` | 52KB | Scan execution engine |
 | `views/dialogs/overview_thresholder_dialog.py` | 20KB | Auto-selection tool |
 | `views/dialogs/mip_overview_dialog.py` | 28KB | Related overview feature |
-| `models/mip_overview.py` | 8KB | Shared data models |
+| `utils/mip_overview.py` | 8KB | Shared data models |
 
 ### Data Flow
 

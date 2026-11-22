@@ -26,7 +26,7 @@ import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal
 from scipy.ndimage import zoom
 
-from py2flamingo.models.mip_overview import find_tile_folders, parse_coords_from_folder
+from py2flamingo.utils.mip_overview import find_tile_folders, parse_coords_from_folder
 from py2flamingo.utils.tile_workflow_parser import (
     read_illumination_path_from_workflow,
     read_laser_channels_from_workflow,

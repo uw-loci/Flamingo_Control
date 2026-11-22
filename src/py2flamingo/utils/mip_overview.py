@@ -1,8 +1,8 @@
-# src/py2flamingo/models/mip_overview.py
+# src/py2flamingo/utils/mip_overview.py
 """
-Data models for MIP Overview functionality.
+MIP Overview: tile discovery, workflow reads and MIP loading.
 
-This module defines data structures for loading and displaying
+This module defines the data structures and the file readers for loading and displaying
 Maximum Intensity Projection (MIP) tile overviews from saved acquisitions.
 Supports both subfolder-per-tile layout (X{float}_Y{float}/*_MP.tif)
 and flat-layout single-workflow tiles (all MIP TIFFs in one directory).

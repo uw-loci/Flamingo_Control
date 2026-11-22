@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from py2flamingo.models.mip_overview import (
+from py2flamingo.utils.mip_overview import (
     discover_flat_mip_tiles,
     find_mip_companion,
     is_mip_file,

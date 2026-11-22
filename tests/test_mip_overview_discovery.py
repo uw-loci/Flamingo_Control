@@ -8,7 +8,7 @@ just one ``*_MP.tif``. Discovery must find these — not only the bare
 stitcher, which already handles both. These lock the unanchored discovery.
 """
 
-from py2flamingo.models.mip_overview import (
+from py2flamingo.utils.mip_overview import (
     detect_layout_type,
     find_tile_folders,
     parse_coords_from_folder,

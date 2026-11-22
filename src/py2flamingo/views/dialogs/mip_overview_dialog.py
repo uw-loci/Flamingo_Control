@@ -43,7 +43,8 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.models.data.overview_results import TileResult
-from py2flamingo.models.mip_overview import (
+from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.mip_overview import (
     FlatMIPTileInfo,
     MIPOverviewConfig,
     MIPTileResult,
@@ -61,7 +62,6 @@ from py2flamingo.models.mip_overview import (
     read_tile_rotation_angle,
     read_tile_z_range,
 )
-from py2flamingo.services.window_geometry_manager import PersistentDialog
 from py2flamingo.utils.saved_data_version import MIP_SESSION
 from py2flamingo.utils.tile_folder_organizer import infer_local_drive_root
 from py2flamingo.visualization.zarr_2d_session import (

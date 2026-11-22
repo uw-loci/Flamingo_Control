@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from py2flamingo.models.mip_overview import read_tile_z_range
+from py2flamingo.utils.mip_overview import read_tile_z_range
 from py2flamingo.utils.tile_z_range import summarize_acquired_z
 
 
