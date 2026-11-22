@@ -19,6 +19,7 @@ from .connection import (
     ConnectionState,
     ConnectionStatus,
 )
+from .data.workflow import WorkflowModel
 from .image_display import ImageDisplayModel
 from .microscope import MicroscopeModel, MicroscopeState, Position
 from .mip_overview import (
@@ -29,14 +30,6 @@ from .mip_overview import (
     find_tile_folders,
     parse_coords_from_folder,
 )
-from .workflow import (
-    ExperimentSettings,
-    IlluminationSettings,
-    StackSettings,
-    TileSettings,
-    WorkflowModel,
-    WorkflowType,
-)
 
 __all__ = [
     # Microscope
@@ -44,11 +37,6 @@ __all__ = [
     "Position",
     "MicroscopeModel",
     # Workflow
-    "WorkflowType",
-    "IlluminationSettings",
-    "StackSettings",
-    "TileSettings",
-    "ExperimentSettings",
     "WorkflowModel",
     # Connection
     "ConnectionConfig",

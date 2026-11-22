@@ -89,7 +89,7 @@ src/py2flamingo/
 #### Models (`models/`)
 Data structures with minimal logic:
 - `ConnectionModel` - Connection state
-- `WorkflowModel` - Workflow configuration
+- `WorkflowModel` - Whether a workflow the app started is running (`models/data/workflow.py`, with the workflow settings models)
 - `Position` - 3D/4D position data
 - `Command` - Microscope commands
 

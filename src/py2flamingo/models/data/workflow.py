@@ -468,7 +468,7 @@ class Workflow(ValidatedModel):
             stack_dict["Stack option"] = "Tile"
             # Server reads settings 1/2 as X/Y OVERLAP PERCENT (not tile counts)
             # and derives the grid itself — sending counts made it image the
-            # wrong number of tiles. See models/workflow.py for the full note.
+            # wrong number of tiles (WorkflowSettings.cpp getTileX/YOverlapPercent).
             stack_dict["Stack option settings 1"] = self.tile_settings.overlap_percent
             stack_dict["Stack option settings 2"] = self.tile_settings.overlap_percent
         else:
@@ -494,33 +494,40 @@ class Workflow(ValidatedModel):
 
         return workflow
 
-    @classmethod
-    def create_snapshot(
-        cls,
-        position: Position,
-        laser_channel: str = "Laser 3 488 nm",
-        laser_power: float = 5.0,
-    ) -> "Workflow":
-        """Create a simple snapshot workflow.
 
-        Args:
-            position: Position for snapshot
-            laser_channel: Laser to use
-            laser_power: Laser power, percent of the laser's maximum
+@dataclass
+class WorkflowModel:
+    """Whether a workflow the app started is running on the server, and for
+    how long.
 
-        Returns:
-            Configured snapshot workflow
-        """
-        return cls(
-            workflow_type=WorkflowType.SNAPSHOT,
-            name="Snapshot",
-            start_position=position,
-            illumination=IlluminationSettings(
-                laser_channel=laser_channel,
-                laser_power_percent=laser_power,
-                laser_enabled=True,
-            ),
-            experiment_settings=ExperimentSettings(
-                save_data=False, comment="GUI Snapshot"
-            ),
-        )
+    ``WorkflowController`` marks it started when it sends WORKFLOW_START and
+    completed when the workflow ends or is stopped. The settings of the
+    workflow itself are the :class:`Workflow` above (or the Workflow.txt
+    section dict); this holds only the run state.
+    """
+
+    _is_running: bool = field(default=False, init=False, repr=False)
+    _start_time: Optional[datetime] = field(default=None, init=False, repr=False)
+    _end_time: Optional[datetime] = field(default=None, init=False, repr=False)
+
+    def mark_started(self) -> None:
+        """Mark the workflow as started (WORKFLOW_START sent)."""
+        self._is_running = True
+        self._start_time = datetime.now()
+        self._end_time = None
+
+    def mark_completed(self) -> None:
+        """Mark the workflow as finished or stopped."""
+        self._is_running = False
+        self._end_time = datetime.now()
+
+    def is_running(self) -> bool:
+        """True while the workflow is running."""
+        return self._is_running
+
+    def get_execution_time(self) -> Optional[float]:
+        """Seconds since the start (to the end once finished), or None."""
+        if self._start_time is None:
+            return None
+        end_time = self._end_time or datetime.now()
+        return (end_time - self._start_time).total_seconds()

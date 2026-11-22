@@ -37,16 +37,13 @@ def create_models_layer() -> dict:
     from py2flamingo.models import (
         ConnectionModel,
         ImageDisplayModel,
-        Position,
         WorkflowModel,
     )
 
     logger.debug("Creating models layer components...")
     return {
         "connection_model": ConnectionModel(),
-        "workflow_model": WorkflowModel.create_snapshot(
-            position=Position(x=0.0, y=0.0, z=0.0, r=0.0)
-        ),
+        "workflow_model": WorkflowModel(),
         "display_model": ImageDisplayModel(),
     }
 
