@@ -715,7 +715,7 @@ class LED2DOverviewAcquisition(QObject):
     def _start_rotation(self):
         """Start scanning at current rotation angle."""
         if self._cancelled:
-            self._finish_cancelled()
+            self._finish_canceled()
             return
 
         if self._current_rotation_idx >= len(self._rotation_angles):
@@ -1416,14 +1416,14 @@ class LED2DOverviewAcquisition(QObject):
         """The Z span to sweep for this tile."""
         from py2flamingo.utils.adaptive_z_band import (
             full_band,
-            neighbour_extents,
+            neighbor_extents,
             predict_band,
         )
 
         if not self._adaptive_z_enabled():
             return full_band(z_min, z_max)
         return predict_band(
-            neighbour_extents(self._z_extents, x_idx, y_idx),
+            neighbor_extents(self._z_extents, x_idx, y_idx),
             z_min=z_min,
             z_max=z_max,
             margin_mm=float(getattr(self._config, "adaptive_z_margin_mm", 0.5)),
@@ -1628,7 +1628,7 @@ class LED2DOverviewAcquisition(QObject):
             return
 
         if self._cancelled:
-            self._finish_cancelled()
+            self._finish_canceled()
             return
 
         from py2flamingo.services.stage_service import AxisCode, StageService
@@ -1721,7 +1721,7 @@ class LED2DOverviewAcquisition(QObject):
 
         for x_idx, x_pos in enumerate(x_positions):
             if self._cancelled:
-                self._finish_cancelled()
+                self._finish_canceled()
                 return
 
             # Move to X position
@@ -1736,7 +1736,7 @@ class LED2DOverviewAcquisition(QObject):
 
             for y_idx, y_pos in y_range:
                 if self._cancelled:
-                    self._finish_cancelled()
+                    self._finish_canceled()
                     return
 
                 # Move to XY and the Z-stack start, then WAIT for the stage to
@@ -1760,7 +1760,7 @@ class LED2DOverviewAcquisition(QObject):
                     z_sweep_up,
                 )
                 if swept is None:
-                    self._finish_cancelled()
+                    self._finish_canceled()
                     return
                 frames, move_s, sweep_s, z_values = swept
 
@@ -1783,7 +1783,7 @@ class LED2DOverviewAcquisition(QObject):
                     z_max,
                 )
                 if extra is None:
-                    self._finish_cancelled()
+                    self._finish_canceled()
                     return
                 move_s += extra[0]
                 sweep_s += extra[1]
@@ -1826,7 +1826,7 @@ class LED2DOverviewAcquisition(QObject):
                         logger.error(msg)
                         self.scan_error.emit(msg)
                         self._cancelled = True
-                        self._finish_cancelled()
+                        self._finish_canceled()
                         return
                 else:
                     self._empty_tile_streak = 0
@@ -1889,7 +1889,7 @@ class LED2DOverviewAcquisition(QObject):
 
                 # Check for cancellation after processing events
                 if self._cancelled:
-                    self._finish_cancelled()
+                    self._finish_canceled()
                     return
 
         logger.info(f"Fast mode: Captured {len(rotation_result.tiles)} tiles")
@@ -1927,7 +1927,7 @@ class LED2DOverviewAcquisition(QObject):
             return
 
         if self._cancelled:
-            self._finish_cancelled()
+            self._finish_canceled()
             return
 
         if self._current_tile_idx >= len(self._tile_positions):
@@ -2395,7 +2395,7 @@ class LED2DOverviewAcquisition(QObject):
         # Show results window
         self._show_results()
 
-    def _finish_cancelled(self):
+    def _finish_canceled(self):
         """Finish the scan due to cancellation."""
         self._release_run()
 

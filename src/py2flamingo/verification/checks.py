@@ -956,17 +956,17 @@ def t2_halt(ctx: RunContext) -> None:
     if stopped is None:
         raise Failed("no MOTION_STOPPED after HALT")
     at = _position(ctx, axis)
-    travelled = abs(at - start)
-    ctx.record("travelled_mm", round(travelled, 4))
+    traveled = abs(at - start)
+    ctx.record("travelled_mm", round(traveled, 4))
     ctx.record("asked_mm", distance)
-    if travelled >= distance - ctx.options.position_tolerance_mm:
+    if traveled >= distance - ctx.options.position_tolerance_mm:
         raise Failed(
             "the stage reached the target: HALT did not stop it (or the move was "
             "faster than 0.25 s)",
             f"< {distance}",
-            round(travelled, 4),
+            round(traveled, 4),
         )
-    ctx.note(f"stopped after {travelled:.3f} of {distance} mm")
+    ctx.note(f"stopped after {traveled:.3f} of {distance} mm")
     back, _ = _move_and_settle(ctx, axis, start, "back")
     if abs(back - start) > ctx.options.position_tolerance_mm:
         raise Failed("did not get back to the start after the halt test", start, back)

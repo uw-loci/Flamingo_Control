@@ -217,7 +217,7 @@ def full_band(z_min: float, z_max: float) -> ZBand:
 
 
 def predict_band(
-    neighbours: Iterable[ContentExtent],
+    neighbors: Iterable[ContentExtent],
     *,
     z_min: float,
     z_max: float,
@@ -231,7 +231,7 @@ def predict_band(
     exactly the guess this must not make.
     """
     z_min, z_max = float(z_min), float(z_max)
-    withs = [e for e in neighbours if e.has_content]
+    withs = [e for e in neighbors if e.has_content]
     if not withs:
         return full_band(z_min, z_max)
 
@@ -241,9 +241,9 @@ def predict_band(
     # Widen symmetrically to the floor. A band of a plane or two saves little
     # and clips easily.
     if (hi - lo) < float(min_band_mm):
-        centre = (lo + hi) / 2.0
-        lo = centre - float(min_band_mm) / 2.0
-        hi = centre + float(min_band_mm) / 2.0
+        center = (lo + hi) / 2.0
+        lo = center - float(min_band_mm) / 2.0
+        hi = center + float(min_band_mm) / 2.0
 
     lo = max(lo, z_min)
     hi = min(hi, z_max)
@@ -252,7 +252,7 @@ def predict_band(
     return ZBand(z_min=lo, z_max=hi, full=False)
 
 
-def neighbour_extents(
+def neighbor_extents(
     extents: Dict[Tuple[int, int], ContentExtent], x_idx: int, y_idx: int
 ) -> List[ContentExtent]:
     """Extents of the already-scanned tiles adjacent to this one in the grid.

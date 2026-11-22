@@ -279,7 +279,7 @@ class TestBackgroundTilesDoNotWidenTheirNeighbours:
 
 class TestCancellationIsPropagated:
     def test_a_cancelled_sweep_stops_the_tile(self):
-        # _sweep_tile_band returns None rather than calling _finish_cancelled
+        # _sweep_tile_band returns None rather than calling _finish_canceled
         # itself, so the caller stays in charge of unwinding.
         sample = _Sample(lambda ix, iy: (18.0, 19.0))
         wf = _workflow(_config(), sample)
@@ -352,7 +352,7 @@ def _run_scan_loop(monkeypatch, config, sample, grid=(3, 3)):
         None,
     )
     wf._finish_rotation = lambda: None
-    wf._finish_cancelled = lambda: None
+    wf._finish_canceled = lambda: None
 
     def fake_sweep(stage, camera, x_pos, y_pos, band, ascending):
         x_idx = int(round((x_pos - 4.0) / 2.0))

@@ -284,22 +284,22 @@ class AcquisitionPlan:
 
 
 def selection_region_mm(
-    centres_mm: Sequence[float], fov_mm: float
+    centers_mm: Sequence[float], fov_mm: float
 ) -> Tuple[float, float]:
-    """Stage span covered by tiles at `centres_mm`, each `fov_mm` wide.
+    """Stage span covered by tiles at `centers_mm`, each `fov_mm` wide.
 
     Tile positions are CENTRES (the server's own convention — Position A/B are
     corner-tile centers), so the imaged region runs half a field beyond the
     outermost center at each end. Getting this wrong shrinks the acquisition
     region by one field, which quietly clips the edge of the sample.
     """
-    if not centres_mm:
+    if not centers_mm:
         return (0.0, 0.0)
     half = float(fov_mm) / 2.0
-    return (min(centres_mm) - half, max(centres_mm) + half)
+    return (min(centers_mm) - half, max(centers_mm) + half)
 
 
-def measured_step_mm(centres_mm: Sequence[float]) -> Optional[float]:
+def measured_step_mm(centers_mm: Sequence[float]) -> Optional[float]:
     """Smallest distinct gap between tile centers along one axis, or None.
 
     The SMALLEST, not the median: a selection is a subset, so gaps between
@@ -307,7 +307,7 @@ def measured_step_mm(centres_mm: Sequence[float]) -> Optional[float]:
     anywhere in the set gives the true pitch; taking a median would report a
     skipped gap as the step and inflate the field derived from it.
     """
-    values = sorted({round(float(v), 6) for v in centres_mm})
+    values = sorted({round(float(v), 6) for v in centers_mm})
     gaps = [b - a for a, b in zip(values, values[1:]) if b - a > 1e-6]
     return min(gaps) if gaps else None
 
@@ -333,7 +333,7 @@ def field_from_step_mm(
 
 
 def plan_acquisition_from_overview(
-    overview_centres: Sequence[Tuple[float, float]],
+    overview_centers: Sequence[Tuple[float, float]],
     *,
     overview_fov_x_mm: float,
     overview_fov_y_mm: float,
@@ -373,7 +373,7 @@ def plan_acquisition_from_overview(
     partially are kept: covering the selected region needs every tile that
     intersects it.
     """
-    xy = [_tile_xy(t) for t in overview_centres]
+    xy = [_tile_xy(t) for t in overview_centers]
     xs = [x for x, _y in xy]
     ys = [y for _x, y in xy]
     region_x = selection_region_mm(xs, overview_fov_x_mm)
@@ -429,7 +429,7 @@ def plan_acquisition_from_overview(
             y,
             geometry.fov_x_mm,
             geometry.fov_y_mm,
-            overview_centres,
+            overview_centers,
             overview_fov_x_mm,
             overview_fov_y_mm,
         )
@@ -440,7 +440,7 @@ def plan_acquisition_from_overview(
             y,
             geometry.fov_x_mm,
             geometry.fov_y_mm,
-            overview_centres,
+            overview_centers,
             overview_fov_x_mm,
             overview_fov_y_mm,
         )
@@ -460,7 +460,7 @@ def plan_acquisition_from_overview(
     return AcquisitionPlan(
         region_x_mm=region_x,
         region_y_mm=region_y,
-        overview_tiles=len(overview_centres),
+        overview_tiles=len(overview_centers),
         overview_fov_x_mm=float(overview_fov_x_mm),
         overview_fov_y_mm=float(overview_fov_y_mm),
         geometry=geometry,

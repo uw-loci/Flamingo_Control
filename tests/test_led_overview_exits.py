@@ -136,7 +136,7 @@ def test_continuous_scan_error_turns_led_off_and_unlocks():
 def test_cancel_and_complete_still_release_once():
     wf, app = _started()
     wf._show_results = lambda: None
-    wf._finish_cancelled()
+    wf._finish_canceled()
     wf._finish_completed()  # a second finish must not unlock another owner
     _assert_released(wf, app)
 

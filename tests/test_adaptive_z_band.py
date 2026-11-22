@@ -32,7 +32,7 @@ from py2flamingo.utils.adaptive_z_band import (  # noqa: E402
     content_extent,
     describe_saving,
     full_band,
-    neighbour_extents,
+    neighbor_extents,
     predict_band,
     should_resweep,
 )
@@ -213,20 +213,20 @@ class TestNeighboursAreGridAdjacentNotScanAdjacent:
             (2, 2): ContentExtent(z_low=5.0, z_high=6.0),  # x + 1
             (4, 9): ContentExtent(z_low=7.0, z_high=8.0),  # far away
         }
-        found = neighbour_extents(extents, 1, 2)
+        found = neighbor_extents(extents, 1, 2)
         assert len(found) == 3
         assert all(e.has_content for e in found)
 
     def test_an_unscanned_neighbour_contributes_nothing(self):
         # Half the neighbourhood is always ahead of the scan.
-        assert neighbour_extents({(0, 0): ContentExtent()}, 0, 1) == [ContentExtent()]
+        assert neighbor_extents({(0, 0): ContentExtent()}, 0, 1) == [ContentExtent()]
 
     def test_a_diagonal_is_not_a_neighbour(self):
         extents = {(0, 0): ContentExtent(z_low=1.0, z_high=2.0)}
-        assert neighbour_extents(extents, 1, 1) == []
+        assert neighbor_extents(extents, 1, 1) == []
 
     def test_the_first_tile_has_none(self):
-        assert neighbour_extents({}, 0, 0) == []
+        assert neighbor_extents({}, 0, 0) == []
 
 
 class TestGivingUpWhenItDoesNotFit:
