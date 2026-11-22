@@ -290,6 +290,10 @@ blocks.
 ### What is *not* blocked
 
 The **emergency stop** (`halt_motion`) sends HALT directly and is never gated — stopping
-motion must always be possible. Reading the position, connecting, live view, and the
+motion must always be possible. It then latches: every stage move, from the Stage
+Control window, the LED 2D overview or the workflow queue, is refused until the
+operator presses **Clear emergency stop**. If HALT could not be sent (no open
+connection), the Stage Control window says **HALT NOT SENT**; use the instrument's own
+stop then. Reading the position, connecting, live view, and the
 setup dialog itself all work normally; only commanding the stage to a new position is
 refused.
