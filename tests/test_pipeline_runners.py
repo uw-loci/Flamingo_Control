@@ -185,7 +185,7 @@ class TestWorkflowRunner(unittest.TestCase):
         )
         ctx = ExecutionContext(services={"workflow_facade": facade})
         ctx.cancel()  # cancelled before first poll
-        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+        with self.assertRaisesRegex(RuntimeError, "canceled"):
             self._runner().run(n, p, ctx)
         self.assertTrue(facade.stop_called)
 
@@ -508,7 +508,7 @@ class TestForEachRunner(unittest.TestCase):
         runner = self._runner()
         runner.set_scope_resolver(resolver)
         runner.set_executor(MockExecutor())
-        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+        with self.assertRaisesRegex(RuntimeError, "canceled"):
             runner.run(fe, p2, ctx)
 
 
@@ -1138,7 +1138,7 @@ class TestTimedLoopRunner(unittest.TestCase):
         runner = self._runner()
         runner.set_scope_resolver(resolver)
         runner.set_executor(MockExecutor())
-        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+        with self.assertRaisesRegex(RuntimeError, "canceled"):
             runner.run(tl, p, ctx)
 
     def test_missing_executor_raises(self):
@@ -1193,7 +1193,7 @@ class TestTimedLoopRunner(unittest.TestCase):
         runner = self._runner()
         runner.set_scope_resolver(resolver)
         runner.set_executor(CancellingExecutor(outer_ctx))
-        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+        with self.assertRaisesRegex(RuntimeError, "canceled"):
             runner.run(tl, p, outer_ctx)
 
 

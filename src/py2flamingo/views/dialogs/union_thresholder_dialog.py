@@ -220,7 +220,7 @@ class UnionThresholderDialog(PersistentDialog):
         self._overlap_spin.setSuffix(" %")
         self._overlap_spin.setValue(10.0)
         self._overlap_spin.setToolTip(
-            "Percent of a field of view that neighbouring tiles share.\n"
+            "Percent of a field of view that neighboring tiles share.\n"
             "Tiles step by FOV x (1 - overlap), so 0% butts them edge to edge:\n"
             "the stitcher then has nothing to register on and any stage\n"
             "repeatability error shows up as a seam. 10% is a sane default.\n\n"

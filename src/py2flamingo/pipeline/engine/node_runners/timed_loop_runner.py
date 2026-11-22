@@ -77,7 +77,7 @@ class TimedLoopRunner(AbstractNodeRunner):
 
         while indefinite or idx < max_iterations:
             if context.check_cancelled():
-                raise RuntimeError("Pipeline cancelled during TimedLoop")
+                raise RuntimeError("Pipeline canceled during TimedLoop")
 
             iteration_start = time.monotonic()
             elapsed = iteration_start - loop_start
@@ -149,6 +149,6 @@ class TimedLoopRunner(AbstractNodeRunner):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             if context.check_cancelled():
-                raise RuntimeError("Pipeline cancelled during TimedLoop delay")
+                raise RuntimeError("Pipeline canceled during TimedLoop delay")
             remaining = end - time.monotonic()
             time.sleep(min(remaining, 0.5))

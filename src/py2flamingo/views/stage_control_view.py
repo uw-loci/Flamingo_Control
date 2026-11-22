@@ -861,7 +861,7 @@ class StageControlView(QWidget):
                 self.message_label.setText("Moving to target position...")
                 self.message_label.setStyleSheet("color: blue; padding: 6px;")
             else:
-                logger.info("User cancelled Go To Position movement")
+                logger.info("User canceled Go To Position movement")
 
         except Exception as e:
             self.logger.error(f"Failed to move to position: {e}", exc_info=True)

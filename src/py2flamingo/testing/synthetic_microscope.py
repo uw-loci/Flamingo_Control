@@ -589,7 +589,7 @@ class SyntheticMicroscope:
             self._last_buffer = self._last_buffer.encode("utf-8", "replace")
         handler = self._handlers().get(code)
         if handler is None:
-            logger.debug("Synthetic scope: no behaviour for 0x%04X, acking", code)
+            logger.debug("Synthetic scope: no behavior for 0x%04X, acking", code)
             self._reply(client, code)
             return
         handler(client, code, params, value, additional)

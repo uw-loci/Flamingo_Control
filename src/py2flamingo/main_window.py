@@ -1661,7 +1661,7 @@ class MainWindow(QMainWindow):
         self._close_stops_acquisition = False
         if not self._confirm_close_while_running():
             event.ignore()
-            logger.info("Close cancelled: an acquisition is still running")
+            logger.info("Close canceled: an acquisition is still running")
             return
 
         logger.info("Main window closing - cleaning up...")

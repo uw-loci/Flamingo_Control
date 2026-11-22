@@ -62,7 +62,7 @@ def seed_from_example(path: Path, log: Optional[logging.Logger] = None) -> bool:
         # why settings appeared or did not.
         log.info(
             f"{path.name} was missing; seeded it from {example.name}. "
-            f"Edit {path.name} to customise — it is not tracked by git, so your "
+            f"Edit {path.name} to customize — it is not tracked by git, so your "
             f"changes stay local and survive updates."
         )
         return True

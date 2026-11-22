@@ -257,7 +257,7 @@ class MotionTracker:
             while remaining > 0:
                 # Check if wait was canceled
                 if allow_cancel and self._stop_waiting:
-                    self.logger.info("Motion wait cancelled by new command (async)")
+                    self.logger.info("Motion wait canceled by new command (async)")
                     return False
 
                 try:
@@ -322,7 +322,7 @@ class MotionTracker:
             while True:
                 # Check if wait was canceled
                 if allow_cancel and self._stop_waiting:
-                    self.logger.info("Motion wait cancelled by new command")
+                    self.logger.info("Motion wait canceled by new command")
                     return False
                 try:
                     # Read 128-byte message

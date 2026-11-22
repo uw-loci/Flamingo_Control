@@ -465,7 +465,7 @@ class FlamingoApplication(QObject):
                 lambda: svc.notify(
                     "errors",
                     title="Flamingo: workflow queue cancelled",
-                    message="The workflow queue was cancelled before finishing.",
+                    message="The workflow queue was canceled before finishing.",
                     tags="no_entry_sign",
                 )
             )

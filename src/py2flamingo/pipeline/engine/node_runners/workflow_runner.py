@@ -293,7 +293,7 @@ class WorkflowRunner(AbstractNodeRunner):
         while True:
             if context.check_cancelled():
                 workflow_facade.stop_workflow()
-                raise RuntimeError("Pipeline cancelled during workflow execution")
+                raise RuntimeError("Pipeline canceled during workflow execution")
 
             status = workflow_facade.get_workflow_status()
             if status is None:

@@ -372,7 +372,7 @@ class WorkflowView(QWidget):
         self._check_tiling_btn.setMinimumHeight(40)
         self._check_tiling_btn.setToolTip(
             "Show the tile grid the microscope will image for the current "
-            "Position A/B, overlap and FOV — count, centre-to-centre step, "
+            "Position A/B, overlap and FOV — count, center-to-center step, "
             "region covered, and any tile outside the stage hard limits. "
             "Computed locally; nothing is sent to the scope."
         )
@@ -1780,7 +1780,7 @@ def format_tiling_summary_html(
             f"{geom.tiles_x} × {geom.tiles_y} = {geom.total_tiles}",
         ),
         _row(
-            "Step (centre-to-centre)",
+            "Step (center-to-center)",
             f"{geom.step_x_mm:.4f} × {geom.step_y_mm:.4f} mm",
         ),
         _row(

@@ -93,7 +93,7 @@ class PipelineExecutor(QThread):
             # Check cancellation
             if self.isInterruptionRequested() or self._context.check_cancelled():
                 self.log_message.emit("Pipeline cancelled")
-                self.pipeline_error.emit("Pipeline cancelled by user")
+                self.pipeline_error.emit("Pipeline canceled by user")
                 return
 
             node = self._pipeline.get_node(node_id)

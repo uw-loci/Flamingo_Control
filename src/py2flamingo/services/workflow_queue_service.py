@@ -780,7 +780,7 @@ class WorkflowQueueService(QObject):
                 )
 
                 if self._cancel_requested:
-                    logger.info("Queue execution cancelled by user")
+                    logger.info("Queue execution canceled by user")
                     self.queue_cancelled.emit()
                     break
 
@@ -1151,7 +1151,7 @@ class WorkflowQueueService(QObject):
         while True:
             # Check for cancellation (escape mechanism #1)
             if self._cancel_requested:
-                logger.info("[QUEUE] Workflow start wait cancelled by user")
+                logger.info("[QUEUE] Workflow start wait canceled by user")
                 return False
 
             # Check if progress/stack callbacks already confirmed workflow running

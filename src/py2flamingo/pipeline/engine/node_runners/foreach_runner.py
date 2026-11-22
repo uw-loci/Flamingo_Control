@@ -70,7 +70,7 @@ class ForEachRunner(AbstractNodeRunner):
 
         for idx, item in enumerate(collection):
             if context.check_cancelled():
-                raise RuntimeError("Pipeline cancelled during ForEach iteration")
+                raise RuntimeError("Pipeline canceled during ForEach iteration")
 
             logger.info(f"ForEach '{node.name}': iteration {idx + 1}/{total}")
 

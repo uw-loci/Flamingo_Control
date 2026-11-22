@@ -501,19 +501,19 @@ class LED2DOverviewDialog(PersistentDialog):
         # at full range there and then -- but a bad fit costs time, so the user
         # opts in and the log reports what it bought.
         self.adaptive_z_checkbox = QCheckBox(
-            "Narrow each tile's Z sweep to where neighbours found the sample"
+            "Narrow each tile's Z sweep to where neighbors found the sample"
         )
         self.adaptive_z_checkbox.setToolTip(
             "Z travel is about 60% of a tile, and it is set by the RANGE, not\n"
             "the plane count — a capped sweep still crosses the whole box.\n"
-            "This starts each tile from where its scanned neighbours found\n"
+            "This starts each tile from where its scanned neighbors found\n"
             "sample, plus a margin.\n\n"
             "Nothing is lost if the guess is wrong: a tile whose sample runs to\n"
             "the edge of its band is re-swept over the full range immediately,\n"
             "because these Z edges become the laser acquisition's Z range.\n"
             "If too many tiles need that, adaptation switches itself off for\n"
             "the rest of the scan.\n\n"
-            "Fast mode only. Leave off for samples where neighbouring tiles say\n"
+            "Fast mode only. Leave off for samples where neighboring tiles say\n"
             "little about each other — tubes, sparse or discontinuous specimens."
         )
         self.adaptive_z_checkbox.setChecked(False)
@@ -583,7 +583,7 @@ class LED2DOverviewDialog(PersistentDialog):
         self.tile_overlap.setSuffix(" %")
         self.tile_overlap.setValue(10.0)
         self.tile_overlap.setToolTip(
-            "Percent of a field of view that neighbouring OVERVIEW tiles\n"
+            "Percent of a field of view that neighboring OVERVIEW tiles\n"
             "share. Tiles step by FOV × (1 − overlap), so 0% butts them\n"
             "edge-to-edge and any stage error opens a real gap — sample you\n"
             "never see, and a hole in the Z map the acquisition is built from.\n\n"
@@ -1716,7 +1716,7 @@ class LED2DOverviewDialog(PersistentDialog):
             f"Tiles: {tiles_x} x {tiles_y} = {tiles_x * tiles_y} per rotation\n"
             f"Tile overlap: {config.tile_overlap_percent:.1f}%\n"
             + (
-                "Adaptive Z: on — tiles sweep only where neighbours found " "sample\n"
+                "Adaptive Z: on — tiles sweep only where neighbors found " "sample\n"
                 if config.adaptive_z
                 else ""
             )

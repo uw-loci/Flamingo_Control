@@ -453,7 +453,7 @@ class CameraLiveViewer(QWidget):
 
             # User canceled
             if not filename:
-                self.logger.info("Snapshot cancelled by user")
+                self.logger.info("Snapshot canceled by user")
                 return
 
             # Remember directory for next time

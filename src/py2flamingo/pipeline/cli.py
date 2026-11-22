@@ -144,7 +144,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help=(
-            "Timepoint to analyse from a timelapse (default 0). Volume ports "
+            "Timepoint to analyze from a timelapse (default 0). Volume ports "
             "are 3-D, so a 4-D/5-D input is reduced to one point; a reduction "
             "is always logged."
         ),

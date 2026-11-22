@@ -1169,7 +1169,7 @@ class MIPOverviewDialog(PersistentDialog):
         )
         if answer != QMessageBox.Ok:
             logger.info(
-                f"Tile collection cancelled: overview R={planned:.1f}° vs "
+                f"Tile collection canceled: overview R={planned:.1f}° vs "
                 f"stage R={current:.1f}°"
             )
             return False

@@ -122,10 +122,10 @@ def run_stop_hooks() -> List[Tuple[str, Optional[str]]]:
     for name, hook in hooks:
         try:
             hook()
-            logger.warning(f"Emergency stop: cancelled {name}")
+            logger.warning(f"Emergency stop: canceled {name}")
             results.append((name, None))
         except Exception as e:  # noqa: BLE001 - the next hook must still run
-            logger.error(f"Emergency stop: cancelling {name} failed: {e}")
+            logger.error(f"Emergency stop: canceling {name} failed: {e}")
             results.append((name, str(e)))
     return results
 

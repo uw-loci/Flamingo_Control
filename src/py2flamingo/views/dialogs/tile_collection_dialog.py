@@ -859,7 +859,7 @@ class TileCollectionDialog(PersistentDialog):
         self._retile_overlap_spin.setSuffix(" %")
         self._retile_overlap_spin.setValue(self._default_overlap_percent())
         self._retile_overlap_spin.setToolTip(
-            "Percent of a field neighbouring tiles share. The step is "
+            "Percent of a field neighboring tiles share. The step is "
             "FOV x (1 - overlap/100). The stitcher needs real overlap to "
             "register on; below about 5% it cannot."
         )
@@ -2021,7 +2021,7 @@ class TileCollectionDialog(PersistentDialog):
 
                 if warning_result != QMessageBox.Yes:
                     logger.info(
-                        "User cancelled workflow execution due to TIFF size warning - returning to dialog"
+                        "User canceled workflow execution due to TIFF size warning - returning to dialog"
                     )
                     # Don't close the dialog - let user adjust settings and try again
                     # The workflow files were created but we return to let user modify parameters
@@ -2603,7 +2603,7 @@ class TileCollectionDialog(PersistentDialog):
                     QMessageBox.Cancel,
                 )
                 if choice != QMessageBox.Yes:
-                    logger.info("Run cancelled so a local path can be configured")
+                    logger.info("Run canceled so a local path can be configured")
                     return
                 add_to_sample_view = False
 
@@ -3096,7 +3096,7 @@ class TileCollectionDialog(PersistentDialog):
 
             progress.close()  # Close the progress dialog
             # Use None as parent since tile collection dialog is closed
-            cancel_msg = "Workflow queue was cancelled."
+            cancel_msg = "Workflow queue was canceled."
             if reorg.moved:
                 cancel_msg += (
                     f"\n\n{reorg.moved} completed folder(s) were still "

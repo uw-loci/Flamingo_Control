@@ -6392,7 +6392,7 @@ class SampleView(QWidget):
 
         if not self.voxel_storage:
             QMessageBox.warning(
-                self, "No Storage", "Voxel storage not initialised. Open 3D view first."
+                self, "No Storage", "Voxel storage not initialized. Open 3D view first."
             )
             return
 

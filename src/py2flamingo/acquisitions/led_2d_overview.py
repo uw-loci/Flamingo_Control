@@ -1602,7 +1602,7 @@ class LED2DOverviewAcquisition(QObject):
                 f"predicted a band for cost {self._adaptive_predicted_mm:.1f} mm "
                 f"against {(z_max - z_min) * self._adaptive_predicted_tiles:.1f} "
                 f"mm for the full range ({self._adaptive_resweeps} re-sweeps). "
-                f"The neighbour prediction does not fit this sample, so "
+                f"The neighbor prediction does not fit this sample, so "
                 f"adaptation is off for the rest of this scan and every "
                 f"remaining tile sweeps the full range."
             )

@@ -123,7 +123,7 @@ _CONFIG_HELP: Dict[Tuple[NodeType, str], str] = {
         "merged mask, not per channel."
     ),
     (NodeType.THRESHOLD, "default_threshold"): (
-        "Absolute grey level, NOT scaled for bit depth: 100 is about 0.4% of "
+        "Absolute gray level, NOT scaled for bit depth: 100 is about 0.4% of "
         "full scale on 8-bit and 0.15% on 16-bit. Used only when no "
         "per-channel threshold is set below."
     ),
@@ -253,7 +253,7 @@ _OVERVIEW_HELP = {
         "where a LOWER value selects; above 1 selects every tile."
     ),
     "dog_threshold": (
-        "DOG method. Variance of the difference-of-Gaussians image, in grey "
+        "DOG method. Variance of the difference-of-Gaussians image, in gray "
         "levels squared. The default of 0.0 selects EVERY tile."
     ),
     "dog_sigma1": (
@@ -264,25 +264,25 @@ _OVERVIEW_HELP = {
         "DOG method. Outer blur radius in IMAGE PIXELS. Must be larger than " "Sigma 1."
     ),
     "variance_threshold": (
-        "VARIANCE and COMBINED methods. Grey levels SQUARED, so this must be "
+        "VARIANCE and COMBINED methods. Gray levels SQUARED, so this must be "
         "re-tuned for a different bit depth: a value tuned on 8-bit data is "
         "out by about 65536x on 16-bit. Raise to select fewer tiles."
     ),
     "edge_threshold": (
-        "EDGE and COMBINED methods. Variance of a Laplacian, in grey levels "
+        "EDGE and COMBINED methods. Variance of a Laplacian, in gray levels "
         "squared, so this is as much a FOCUS measure as a sample detector - it "
         "responds to defocus. Re-tune for a different bit depth."
     ),
     "intensity_min": (
-        "INTENSITY method. Lowest mean grey level that counts as sample."
+        "INTENSITY method. Lowest mean gray level that counts as sample."
     ),
     "intensity_max": (
-        "INTENSITY method. Highest mean grey level that counts as sample. The "
+        "INTENSITY method. Highest mean gray level that counts as sample. The "
         "default of 255 ASSUMES 8-BIT data and will reject nearly every tile "
         "of a 16-bit overview."
     ),
-    "bp_var_min": "BAND-PASS method. Lowest variance that passes, in grey levels squared.",
-    "bp_var_max": "BAND-PASS method. Highest variance that passes, in grey levels squared.",
+    "bp_var_min": "BAND-PASS method. Lowest variance that passes, in gray levels squared.",
+    "bp_var_max": "BAND-PASS method. Highest variance that passes, in gray levels squared.",
     "bp_entropy_min": "BAND-PASS method. Lowest entropy that passes, in bits (0 to 6).",
     "tube_interior_method": (
         "TUBE DETECT method. Which measure tests the tube interior once the "
@@ -290,7 +290,7 @@ _OVERVIEW_HELP = {
     ),
     "tube_interior_threshold": (
         "TUBE DETECT method. Threshold for the interior test above, so its "
-        "units follow that choice: bits for entropy, grey levels squared for "
+        "units follow that choice: bits for entropy, gray levels squared for "
         "variance."
     ),
     "tube_edge_sensitivity": (

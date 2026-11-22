@@ -1645,7 +1645,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         self._overlap_spin.setSingleStep(1.0)
         self._overlap_spin.setSuffix(" %")
         self._overlap_spin.setToolTip(
-            "Percent of a field neighbouring tiles share.\n"
+            "Percent of a field neighboring tiles share.\n"
             "The stitcher needs real overlap to register on; below about 5%\n"
             "it cannot, and that cannot be fixed after the run."
         )

@@ -590,7 +590,7 @@ class PixelCalibrationService:
             raise RuntimeError(
                 "Not enough stage travel at the current position "
                 f"(X={ox:.3f}, Y={oy:.3f} mm) to run the calibration sweep. "
-                "Move the stage toward the centre of its range and retry."
+                "Move the stage toward the center of its range and retry."
             )
 
         def _goto(offx: float, offy: float) -> Tuple[float, float, np.ndarray]:

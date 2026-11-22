@@ -72,7 +72,7 @@ class OverviewAnalysisRunner(AbstractNodeRunner):
             # shaped (Z, Y, 3) is indistinguishable from an RGB image by shape
             # alone, so say which reading was taken.
             logger.info(
-                "Treating trailing axis of %d as colour channels (shape %s); "
+                "Treating trailing axis of %d as color channels (shape %s); "
                 "if this is a %d-plane volume, pass one plane instead",
                 image.shape[2],
                 image.shape,

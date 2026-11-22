@@ -502,7 +502,7 @@ class PipelineEditorDialog(PersistentDialog):
                 self,
                 "Pipeline running",
                 "A pipeline is still running. Close the editor anyway?\n\n"
-                "The run is not cancelled by closing this window.",
+                "The run is not canceled by closing this window.",
                 QMessageBox.Close | QMessageBox.Cancel,
                 QMessageBox.Cancel,
             )

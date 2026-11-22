@@ -602,7 +602,7 @@ class PerformanceBenchmarkDialog(PersistentDialog):
                 svc.notify(
                     "errors",
                     title="Flamingo: benchmark cancelled",
-                    message="Benchmark was cancelled before finishing.",
+                    message="Benchmark was canceled before finishing.",
                     tags="no_entry_sign",
                 )
         except Exception:
