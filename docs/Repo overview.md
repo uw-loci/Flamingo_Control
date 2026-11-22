@@ -78,7 +78,7 @@ Control of what runs when is handled by a fairly messy set of "events" to let di
 Streamline the workflow to minimize the number of events, while maintaining sufficient flexibility to grow out the code for additional functionality.
 
 ### **Important non-coding files**
-`functions/command_list.txt` contains commands that can be sent to the controller, and their numerical codes. These can be used to send workflows or request data from the system, among other things.
+Command codes are in `src/py2flamingo/core/command_codes.py`; `core/server_layout.py` maps them per server build.
 
 workflows/???.txt workflows are all variations on the workflow file the Flamingo controller expects to conduct some sort of experiment, be it a Zstack, time series, tile, or combination of those.
 

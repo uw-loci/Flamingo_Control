@@ -59,10 +59,6 @@ class QueueManager:
             )
         return self._queues[name]
 
-    def get_queue_nowait(self, name: str) -> Queue:
-        """Alias for get_queue for backward compatibility."""
-        return self.get_queue(name)
-
     def put_nowait(self, queue_name: str, item: Any) -> None:
         """
         Put an item in a queue without blocking.

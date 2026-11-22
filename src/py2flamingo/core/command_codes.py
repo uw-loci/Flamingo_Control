@@ -9,7 +9,7 @@ verified against actual log files from the microscope system.
 
 Usage Example:
     >>> from command_codes import SystemCommands, StageCommands, LaserCommands
-    >>> from protocol_encoder import ProtocolEncoder
+    >>> from py2flamingo.core.tcp_protocol import ProtocolEncoder
     >>>
     >>> encoder = ProtocolEncoder()
     >>>
@@ -258,7 +258,7 @@ class CommandDataBits:
     otherwise the microscope will not send a response and the command will timeout.
 
     Usage Examples:
-        >>> from protocol_encoder import ProtocolEncoder
+        >>> from py2flamingo.core.tcp_protocol import ProtocolEncoder
         >>> from command_codes import StageCommands, CommandDataBits
         >>>
         >>> encoder = ProtocolEncoder()

@@ -7,7 +7,7 @@ answered with an error status, echoed a different command, or sent a truncated
 frame was reported to the user as a successful save.
 
 The protocol puts a status/error code at bytes 8-11 and an end marker at 124-127
-(`core/protocol_encoder.py`). Nothing in the codebase read either until
+(`core/tcp_protocol.py`). Nothing in the codebase read either until
 2026-08-17.
 
 Run: python3 -m pytest tests/test_scope_settings_save_ack.py -q

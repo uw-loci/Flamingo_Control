@@ -295,8 +295,8 @@ Application (py2flamingo/__main__.py)
     │
     ├── Services   (Reusable business logic)
     │   ├── ConfigurationManager (Config discovery)
-    │   ├── ConnectionService    (TCP management)
-    │   └── WorkflowService      (Workflow processing)
+    │   ├── MVCConnectionService (TCP management)
+    │   └── MVCWorkflowService   (Workflow processing)
     │
     └── Core       (Infrastructure)
         ├── TCPConnection     (Low-level sockets)

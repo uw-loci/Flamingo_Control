@@ -34,9 +34,11 @@ The Py2Flamingo test suite ensures that:
 tests/
 ├── __init__.py                     # Makes tests a Python package
 ├── run_tests.py                    # Main test runner
-├── test_tcp_communication.py       # Low-level TCP/IP tests
-├── test_queue_event_management.py  # Threading and sync tests
-├── test_connection_service.py      # Integration tests
+├── test_*.py                       # About 2,400 tests (pytest); about 950 are
+│                                   # unittest.TestCase classes run_tests.py finds
+├── test_tcp_protocol.py            # 128-byte protocol encode/decode
+├── test_queue_event_management.py  # QueueManager / EventManager
+├── test_verification.py            # Post-update checks against the synthetic microscope
 ├── mock_microscope_server.py       # Mock server for manual testing
 └── README.md                       # Quick reference
 ```
@@ -72,9 +74,8 @@ cd tests
 python run_tests.py
 
 # Run specific test module
-python run_tests.py tcp_communication
+python run_tests.py tcp_protocol
 python run_tests.py queue_event_management
-python run_tests.py connection_service
 ```
 
 ### Using unittest directly
@@ -102,32 +103,12 @@ coverage html  # Opens htmlcov/index.html
 
 ## Test Modules
 
-### 1. test_tcp_communication.py
+### 1. test_tcp_protocol.py
 
-Tests the low-level TCP/IP communication layer.
-
-**What it tests:**
-- Socket connection establishment to NUC and live ports
-- Binary command structure formatting
-- Workflow file transmission
-- Connection error handling
-- Proper resource cleanup
-
-**Key test cases:**
-```python
-test_successful_connection()      # Verifies dual socket connection
-test_connection_refused()         # Handles connection errors
-test_connection_timeout()         # Handles network timeouts
-test_send_command_structure()     # Verifies binary protocol
-test_send_workflow()             # Tests workflow file sending
-```
-
-**Example command structure verification:**
-```python
-# The test verifies this binary structure:
-# [Start marker][Command][Status]...[Data][End marker]
-# 0xF321E654    24580    0      ... 10.5  0xFEDC4321
-```
+The 128-byte command structure (`core/tcp_protocol.py`): encoding, decoding, markers and
+field offsets. End-to-end protocol behavior is tested against
+`py2flamingo.testing.synthetic_microscope` (for example `test_verification.py`,
+`test_light_off_is_honest.py`).
 
 ### 2. test_queue_event_management.py
 
@@ -154,24 +135,9 @@ test_event_synchronization()    # Thread coordination
 
 ### 3. test_connection_service.py
 
-Integration tests for the complete connection flow.
-
-**What it tests:**
-- Service initialization
-- Complete connection sequence
-- Thread management
-- Command flow through system
-- Settings retrieval
-- Error recovery
-
-**Key test cases:**
-```python
-test_successful_connection_flow()    # Full connection setup
-test_send_command()                  # Command queuing
-test_send_workflow()                 # Workflow execution
-test_get_microscope_settings()       # Settings retrieval
-test_stage_movement_sequence()       # Position control
-```
+Queue/event hand-off between threads and reading a settings text file with
+`text_to_dict`. `MVCConnectionService` itself is tested in `test_services.py` and the
+synthetic-microscope tests.
 
 ## Mock Server
 
@@ -282,7 +248,7 @@ def test_new_microscope_command(self):
     sent_data = self.mock_socket.send.call_args[0][0]
     
     # Unpack and verify
-    # See test_tcp_communication.py for full example
+    # See test_tcp_protocol.py for the field layout
 ```
 
 ## Continuous Integration
@@ -350,7 +316,7 @@ sys.path.insert(0, '../src')
 ```python
 # Ensure you're patching the right path:
 # Wrong: @patch('socket.socket')
-# Right: @patch('src.py2flamingo.services.communication.tcpip_client.socket.socket')
+# Right: patch where it is looked up, e.g. @patch('py2flamingo.core.tcp_connection.socket.socket')
 ```
 
 **Tests Hanging**

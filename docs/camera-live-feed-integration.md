@@ -186,12 +186,10 @@ QLabel (UI Display)
 First, ensure you have a connection service instance:
 
 ```python
-from py2flamingo.services.connection_service import ConnectionService
 from py2flamingo.services.camera_service import CameraService
 
-# Assuming you have a connection service
-connection = ConnectionService(ip="192.168.1.100", port=53717)
-connection.connect()
+# `connection` is the application's MVCConnectionService
+# (services/component_factory.py builds it; FlamingoApplication.connection_service)
 
 # Create camera service
 camera_service = CameraService(connection)

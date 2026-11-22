@@ -19,7 +19,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 from py2flamingo.core.command_codes import CommandDataBits, StageCommands
 from py2flamingo.models.microscope import Position
-from py2flamingo.services.connection_service import ConnectionService
+from py2flamingo.services.connection_service import MVCConnectionService
 from py2flamingo.services.stage_service import AxisCode, StageService
 
 
@@ -52,7 +52,7 @@ class MovementController(QObject):
 
     def __init__(
         self,
-        connection_service: ConnectionService,
+        connection_service: MVCConnectionService,
         position_controller,
         config_service=None,
     ):

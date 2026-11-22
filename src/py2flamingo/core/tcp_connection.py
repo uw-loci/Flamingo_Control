@@ -64,7 +64,7 @@ class TCPConnection:
 
         # Reactive connection loss — fired when the background reader
         # detects the command socket has been closed (by remote, network,
-        # or fatal socket error). Higher layers (ConnectionService) register
+        # or fatal socket error). Higher layers (MVCConnectionService) register
         # a listener to update UI state and trigger reconnect flows.
         self._connection_lost_listeners: list = []
 

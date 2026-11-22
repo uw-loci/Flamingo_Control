@@ -1,195 +1,21 @@
 # tests/test_connection_service.py
 """
-Integration tests for the connection service.
+Queue/event hand-off between threads (QueueManager, EventManager) and
+reading a settings text file with text_to_dict.
 
-These tests verify the complete connection flow including thread management.
+The tests of the legacy ConnectionService class went with it; the live
+MVCConnectionService is tested in test_services.py, test_light_off_is_honest.py
+and the synthetic-microscope tests.
 """
 
 import os
-import socket
 import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import MagicMock, Mock, call, patch
 
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
-from py2flamingo.services.connection_service import ConnectionService
-from tests.test_utils import NoOpThreadManager
-
-
-class TestConnectionService(unittest.TestCase):
-    """Test the ConnectionService class."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.event_manager = EventManager()
-        self.queue_manager = QueueManager()
-        self.test_ip = "192.168.1.100"
-        self.test_port = 53717
-
-        self.service = ConnectionService(
-            ip=self.test_ip,
-            port=self.test_port,
-            event_manager=self.event_manager,
-            queue_manager=self.queue_manager,
-        )
-
-    def tearDown(self):
-        """Clean up after tests."""
-        if self.service.is_connected():
-            self.service.disconnect()
-
-    @patch("socket.socket")
-    def test_successful_connection_flow(self, mock_socket_class):
-        """Test complete successful connection flow."""
-        import struct
-
-        # Create mock sockets
-        mock_nuc = MagicMock()
-        mock_live = MagicMock()
-        mock_socket_class.side_effect = [mock_nuc, mock_live]
-
-        # connect() validates the server by sending SYSTEM_STATE_GET and reading
-        # a 128-byte response with valid start/end markers. Build that response.
-        START_MARKER = 0xF321E654
-        END_MARKER = 0xFEDC4321
-        valid_response = struct.pack(
-            "I I I I I I I I I I d I 72s I",
-            START_MARKER,
-            0xA007,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0.0,
-            0,
-            b"\x00" * 72,
-            END_MARKER,
-        )
-        mock_nuc.recv.return_value = valid_response
-        mock_nuc.gettimeout.return_value = None
-
-        # Mock thread manager
-        with patch(
-            "py2flamingo.services.connection_service.ThreadManager", NoOpThreadManager
-        ):
-
-            svc = ConnectionService()
-
-            # If ConnectionService holds a socket manager or similar, stub it out:
-            # Not all codebases have this attribute; if not, remove these two lines.
-            if hasattr(svc, "socket_manager"):
-                svc.socket_manager = MagicMock()
-
-            # Clean initial state
-            svc.queue_manager.clear_all()
-            svc.event_manager.clear_all()
-
-            # Connect (whatever signature your service uses)
-            # If your connect() needs ip/ports, pass them here. Otherwise, omit args.
-            try:
-                svc.connect(
-                    "127.0.0.1", 9000
-                )  # adjust if your method signature differs
-            except TypeError:
-                svc.connect()  # fallback if connect() takes no args in your codebase
-
-            # Send a command through the *public* API
-            # Command code & data shape should match your project conventions
-            svc.send_command(0x3000, [0, 0, 0, 1.23])
-
-            # Assert behavior: command and payload are queued & 'send' event is set
-            cmd_q = svc.queue_manager.get_queue_nowait("command")
-            data_q = svc.queue_manager.get_queue_nowait("command_data")
-
-            assert not cmd_q.empty(), "command queue should contain the command code"
-            assert not data_q.empty(), "command_data queue should contain the payload"
-            assert svc.event_manager.get_event(
-                "send"
-            ).is_set(), "'send' event should be set"
-
-    @patch("socket.socket")
-    def test_connection_failure_cleanup(self, mock_socket_class):
-        """Test proper cleanup on connection failure."""
-        # Create mock socket that fails
-        mock_socket = MagicMock()
-        mock_socket.connect.side_effect = ConnectionRefusedError()
-        mock_socket_class.return_value = mock_socket
-
-        # Try to connect
-        result = self.service.connect()
-
-        # Verify failure
-        self.assertFalse(result)
-        self.assertFalse(self.service.is_connected())
-
-        # Verify cleanup
-        mock_socket.close.assert_called()
-        self.assertIsNone(self.service.nuc_client)
-        self.assertIsNone(self.service.live_client)
-
-    def test_send_command(self):
-        """Test sending commands through the service."""
-        # Mock connection
-        self.service._connected = True
-
-        # Send command
-        command = 24580  # STAGE_POSITION_SET
-        data = [1, 0, 0, 10.5]
-        self.service.send_command(command, data)
-
-        # Verify command was queued
-        queued_command = self.queue_manager.get_nowait("command")
-        self.assertEqual(queued_command, command)
-
-        queued_data = self.queue_manager.get_nowait("command_data")
-        self.assertEqual(queued_data, data)
-
-        # Verify send event was set
-        self.assertTrue(self.event_manager.is_set("send"))
-
-    def test_send_command_not_connected(self):
-        """Test error when sending command while not connected."""
-        with self.assertRaises(RuntimeError) as context:
-            self.service.send_command(12345)
-
-        self.assertIn("Not connected", str(context.exception))
-
-    @patch("py2flamingo.utils.file_handlers.text_to_dict")
-    def test_get_microscope_settings(self, mock_text_to_dict):
-        """Test retrieving microscope settings."""
-        # Mock connection
-        self.service._connected = True
-
-        # Mock settings file content
-        mock_settings = {
-            "Type": {
-                "Tube lens design focal length (mm)": "200",
-                "Objective lens magnification": "20",
-            }
-        }
-        mock_text_to_dict.return_value = mock_settings
-
-        # Mock file existence
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("time.sleep"):  # Speed up test
-                # Get settings
-                pixel_size, settings = self.service.get_microscope_settings()
-
-        # Verify command was sent
-        command = self.queue_manager.get_nowait("command")
-        self.assertEqual(command, 4105)  # SCOPE_SETTINGS_LOAD
-
-        # Verify pixel size calculation
-        # pixel_size = 6.5 / (20 * (200/200)) / 1000 = 0.000325
-        self.assertAlmostEqual(pixel_size, 0.000325, places=6)
-        self.assertEqual(settings, mock_settings)
 
 
 class TestThreadIntegration(unittest.TestCase):

@@ -17,7 +17,6 @@ from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.core.tcp_protocol import CommandDataBits
 from py2flamingo.models.microscope import MicroscopeState, Position
-from py2flamingo.services.connection_service import ConnectionService
 
 
 @dataclass
@@ -56,7 +55,7 @@ class PositionController:
         _movement_lock: Lock to prevent concurrent movement commands
     """
 
-    # Command codes from command_list.txt
+    # Server command codes (core/command_codes.py StageCommands)
     COMMAND_CODES_STAGE_POSITION_SET = 24580
     COMMAND_CODES_STAGE_POSITION_GET = 24584
 

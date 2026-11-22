@@ -14,7 +14,6 @@ import unittest
 
 from py2flamingo.core import server_layout as sl
 from py2flamingo.core.metadata_document import legacy_scope_settings_text, parse
-from py2flamingo.core.protocol_encoder import ProtocolEncoder as LegacyEncoder
 from py2flamingo.core.tcp_protocol import ProtocolEncoder
 
 POST_1006 = (
@@ -106,11 +105,9 @@ class TestTheGuard(LayoutTestCase):
         for code in (0x6003, 0x6005, 0x3004, 0x2001, 0xA007):
             sl.check_sendable(code)
 
-    def test_both_encoders_refuse(self):
+    def test_the_encoder_refuses(self):
         with self.assertRaises(sl.CommandUnavailable):
             ProtocolEncoder().encode_command(code=0x1013)
-        with self.assertRaises(sl.CommandUnavailable):
-            LegacyEncoder().encode_command(code=0x1013)
 
     def test_the_lookup_gives_the_new_number(self):
         self.assertEqual(sl.code("COMMON_STORAGE_PATH_SET", fallback=0x1013), 0x100D)

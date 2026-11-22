@@ -13,9 +13,8 @@ python run_tests.py
 
 ### Run specific test module:
 ```bash
-python run_tests.py tcp_communication
+python run_tests.py tcp_protocol
 python run_tests.py queue_event_management
-python run_tests.py connection_service
 ```
 
 ### Run with unittest directly:
@@ -25,26 +24,24 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 
 ## Test Structure
 
+### test_tcp_protocol.py
+The 128-byte command structure (encode/decode, markers, field offsets).
+End-to-end protocol behavior is tested against
+`py2flamingo.testing.synthetic_microscope` (e.g. test_verification.py).
+
 ### test_tcp_communication.py
-Tests the low-level TCP/IP communication with the microscope:
-- Socket connection establishment
-- Command structure formatting
-- Workflow file sending
-- Error handling and cleanup
+Workflow text files: parse (`workflow_to_dict`) and write (`dict_to_workflow`).
 
 ### test_queue_event_management.py
 Tests the threading and synchronization infrastructure:
 - Queue creation and management
 - Event signaling and waiting
 - Thread-safe operations
-- Legacy adapter compatibility
 
 ### test_connection_service.py
-Integration tests for the complete connection flow:
-- Service initialization
-- Thread management
-- Command sending sequences
-- Microscope settings retrieval
+Queue/event hand-off between threads, and reading a settings text file.
+`MVCConnectionService` is tested in test_services.py and the
+synthetic-microscope tests.
 
 ## Mock Microscope Server
 

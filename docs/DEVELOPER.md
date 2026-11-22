@@ -185,7 +185,7 @@ tests/
 ├── test_views.py               # View tests
 ├── test_controllers.py         # Controller tests
 ├── test_services.py            # Service tests
-├── test_tcp_communication.py   # TCP/protocol tests
+├── test_tcp_protocol.py        # TCP/protocol tests
 ├── test_utils.py               # Test utilities
 └── integration/                # Integration tests
 ```

@@ -125,8 +125,8 @@ class CameraCommandCode:
     WORKFLOW_STOP = 12293  # 0x3005
 
     # Camera ROI / AOI (hardware crop on the PCO sensor). Codes per
-    # oldcodereference/CommandCodes_Reference.txt, which matches our active
-    # functions/command_list.txt (IMAGE_SIZE_GET=12327, PIXEL_FIELD=12343).
+    # oldcodereference/CommandCodes_Reference.txt (IMAGE_SIZE_GET=12327,
+    # PIXEL_FIELD=12343).
     # This firmware exposes only LEFT and TOP edges: the PCO Edge enforces a
     # SYMMETRIC ROI, so setting the left inset mirrors the right edge and the top
     # inset mirrors the bottom — together they define a CENTERED square. The
@@ -953,8 +953,6 @@ class CameraService(MicroscopeCommandService):
             # Clear connection service's cached reference(s) too
             if hasattr(self.connection, "_live_socket"):
                 self.connection._live_socket = None
-            if hasattr(self.connection, "live_client"):
-                self.connection.live_client = None
         except Exception as e:
             self.logger.warning(f"Error closing live socket: {e}")
 
@@ -1182,17 +1180,6 @@ class CameraService(MicroscopeCommandService):
                 self.logger.info("Live socket not yet connected — connecting on demand")
                 live_socket = self.connection.connect_live()
             ip = self.connection.tcp_connection._ip
-            self.logger.info(f"Using live socket for image data ({ip}:53718)")
-
-        elif hasattr(self.connection, "live_client"):
-            # ConnectionService path
-            live_socket = self.connection.live_client
-            if live_socket is None:
-                self.logger.info("Live socket not yet connected — connecting on demand")
-                if not self.connection.connect_live():
-                    raise RuntimeError("Failed to connect live socket")
-                live_socket = self.connection.live_client
-            ip = self.connection.ip
             self.logger.info(f"Using live socket for image data ({ip}:53718)")
 
         else:

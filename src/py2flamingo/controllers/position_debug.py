@@ -26,7 +26,7 @@ class PositionDebugHelper:
     COMMAND_CODES_STAGE_POSITION_GET = 24584
 
     # Frame markers bracketing every 128-byte command/response
-    # (see core/protocol_encoder.py). A response is only trustworthy when BOTH
+    # (see core/tcp_protocol.py). A response is only trustworthy when BOTH
     # are right: a good start with a bad end means a truncated or misaligned
     # frame, and the status/command fields between them are then meaningless.
     START_MARKER = 0xF321E654
@@ -565,7 +565,7 @@ class PositionDebugHelper:
                     }
                 if status_code != 0:
                     # Byte 8-11 is documented as "Status/error code"
-                    # (core/protocol_encoder.py). Nothing in this codebase read
+                    # (.claude/rules/tcp-protocol.md). Nothing in this codebase read
                     # it until now, so a rejected save looked like a successful
                     # one. Treated as failure and reported verbatim: if this
                     # scope uses a non-zero status to mean something benign, the
