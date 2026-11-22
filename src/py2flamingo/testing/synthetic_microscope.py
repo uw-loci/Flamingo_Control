@@ -378,6 +378,15 @@ class SyntheticMicroscope:
         #: Lasers present (UI numbers) and their power in percent.
         self.lasers = dict(SYNTHETIC_LASERS)
         self.lasers_on: set = set()
+        #: Laser engines, each the set of UI laser numbers it drives; None is
+        #: one engine with every laser. The server keeps a laser assignment
+        #: list per engine, and before the 2026-11-20 build LASER_DISABLE_ALL
+        #: ran only in the engine that owns the laser int32Data0 names
+        #: (LaserControl::exeCommand), so a line in another engine stayed on.
+        self.laser_engines: Optional[List[set]] = None
+        #: The 2026-11-20 build turns every line of every engine off on
+        #: LASER_DISABLE_ALL, whatever int32Data0 holds.
+        self.disable_all_ignores_index = False
         #: Snapshots requested so far; each live connection sends one frame
         #: per new snapshot (the server sends to every data client it has).
         self._snapshot_seq = 0
@@ -1205,11 +1214,17 @@ class SyntheticMicroscope:
         self._laser_reply(client, 0x2006, laser)
 
     def _on_laser_disable_all(self, client, code, params, value, additional) -> None:
-        # Acts only when int32Data0 names a real laser; 0 does nothing.
+        # Before 2026-11-20: acts only when int32Data0 names a real laser (0
+        # does nothing), and only on the lines of that laser's engine.
         laser = int(params[3]) if len(params) > 3 else 0
-        if laser not in self.lasers:
-            return
-        for each in sorted(self.lasers):
+        if self.disable_all_ignores_index:
+            targets = set(self.lasers)
+        else:
+            if laser not in self.lasers:
+                return
+            engines = self.laser_engines or [set(self.lasers)]
+            targets = set().union(*(e for e in engines if laser in e))
+        for each in sorted(targets):
             self.lasers_on.discard(each)
             self._laser_reply(client, 0x2006, each)
 

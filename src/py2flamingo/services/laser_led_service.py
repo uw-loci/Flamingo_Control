@@ -365,23 +365,37 @@ class LaserLEDService(MicroscopeCommandService):
         self.logger.info(f"Laser {laser_index} ENABLE_PREVIEW sent")
         return True
 
+    def laser_lines_to_disable(self) -> List[int]:
+        """Laser line numbers a "lasers off" must name.
+
+        Every line ControlSettings.txt describes, attached or not; 1-7 (the
+        most any Flamingo server knows) when that file gave none. Servers
+        before the 2026-11-20 build run LASER_DISABLE_ALL only when
+        int32Data0 is the UI number of a laser that engine owns, so a line
+        left out of this list is a line that stays on there.
+        """
+        known = sorted({laser.index for laser in self._lasers})
+        return known or list(range(1, 8))
+
     def disable_all_lasers(self) -> bool:
         """
-        Disable all laser lines individually.
+        Turn every laser line off.
 
-        Sends individual disable command for each laser (1-4) to properly
-        turn off the laser hardware and conserve laser controller lifetime.
+        Sends LASER_DISABLE_ALL once per line in :meth:`laser_lines_to_disable`,
+        with the line number in int32Data0. From the 2026-11-20 server build on,
+        LASER_DISABLE_ALL turns every line off whatever the index; older builds
+        act only when the index names a laser of that engine, so each line is
+        named. Fire-and-forget: the server sends no ack.
 
         Returns:
-            True if all successful, False if any failed
+            True only if every command was sent.
         """
-        self.logger.info("Disabling all lasers")
+        lines = self.laser_lines_to_disable()
+        self.logger.info(f"Disabling all lasers (lines {lines})")
 
         all_success = True
 
-        # Disable each laser individually with laser number in int32Data0
-        # Fire-and-forget mode - don't wait for responses that never come
-        for laser_index in range(1, 5):  # Lasers 1-4
+        for laser_index in lines:
             result = self._send_command(
                 LaserLEDCommandCode.LASER_DISABLE_ALL,
                 f"LASER_DISABLE_ALL (Laser {laser_index})",

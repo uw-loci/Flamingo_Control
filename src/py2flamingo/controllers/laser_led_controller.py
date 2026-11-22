@@ -16,6 +16,33 @@ from PyQt5.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal, py
 from py2flamingo.services.laser_led_service import LaserInfo, LaserLEDService
 
 
+def turn_all_light_sources_off(controller) -> List[str]:
+    """Send every "off": all laser lines, the LED, the illumination path.
+
+    Each step runs even when an earlier one failed, so as much as possible is
+    off. Returns the steps that failed (empty when all were sent); only then is
+    the controller's record of the active source cleared.
+    """
+    service = controller.laser_led_service
+    steps = [("turn the lasers off", service.disable_all_lasers)]
+    if controller.is_led_available():
+        steps.append(("turn the LED off", service.disable_led_preview))
+    steps.append(("disable illumination", service.disable_illumination))
+    failed = []
+    for label, step in steps:
+        try:
+            ok = step()
+        except Exception as e:  # noqa: BLE001 - the next step must still run
+            controller.logger.error(f"Light off: {label} raised {e}")
+            ok = False
+        if not ok:
+            failed.append(label)
+    if not failed:
+        controller._active_source = None
+        controller._active_laser_index = None
+    return failed
+
+
 class LaserEnableWorker(QRunnable):
     """Background worker for async laser enabling operations."""
 
@@ -28,44 +55,69 @@ class LaserEnableWorker(QRunnable):
 
     def run(self):
         """Execute laser enable sequence in background thread."""
+        controller = self.controller
         try:
-            # All blocking hardware operations happen here (off UI thread)
-            controller = self.controller
             laser_led_service = controller.laser_led_service
 
-            # Step 1: Disable all light sources (no signal emission)
-            controller.logger.info(f"[ASYNC] Step 1: Disabling all light sources")
-            laser_led_service.disable_all_lasers()
-            if controller.is_led_available():
-                laser_led_service.disable_led_preview()
-            laser_led_service.disable_illumination()
+            # Step 1: everything off. If that cannot be confirmed, enabling a
+            # laser on top of a source that may still be lit is refused.
+            controller.logger.info("[ASYNC] Step 1: Disabling all light sources")
+            failed = turn_all_light_sources_off(controller)
+            if failed:
+                error_msg = (
+                    f"Laser {self.laser_index} NOT enabled: could not "
+                    f"{', '.join(failed)} first, so another light source may "
+                    f"still be on."
+                )
+                controller.logger.error(f"[ASYNC] {error_msg}")
+                controller.error_occurred.emit(error_msg)
+                return
 
-            # Step 2: Set laser power
+            # Steps 2-4, each CHECKED (as the LED worker's are since
+            # 2026-09-20). Until 2026-11-22 this worker discarded every result
+            # and reported the laser enabled regardless.
             power = controller._laser_powers.get(self.laser_index, 5.0)
-            controller.logger.info(
-                f"[ASYNC] Step 2: Setting laser {self.laser_index} power to {power:.1f}%"
-            )
-            success, actual_power = laser_led_service.set_laser_power(
-                self.laser_index, power
-            )
-            if success:
-                controller._laser_powers[self.laser_index] = actual_power
-
-            # Step 3: Enable laser preview
-            controller.logger.info(
-                f"[ASYNC] Step 3: Enabling laser {self.laser_index} preview"
-            )
-            laser_led_service.enable_laser_preview(self.laser_index)
-
-            # Step 4: Enable illumination
             left_enabled = self.path == "left"
             right_enabled = self.path == "right"
-            controller.logger.info(
-                f"[ASYNC] Step 4: Enabling {self.path.upper()} illumination"
-            )
-            laser_led_service.enable_illumination(
-                left=left_enabled, right=right_enabled
-            )
+
+            def set_power():
+                success, actual_power = laser_led_service.set_laser_power(
+                    self.laser_index, power
+                )
+                if success:
+                    controller._laser_powers[self.laser_index] = actual_power
+                return success
+
+            steps = [
+                (f"set laser {self.laser_index} power to {power:.1f}%", set_power),
+                (
+                    f"enable laser {self.laser_index} preview",
+                    lambda: laser_led_service.enable_laser_preview(self.laser_index),
+                ),
+                (
+                    f"enable {self.path.upper()} illumination",
+                    lambda: laser_led_service.enable_illumination(
+                        left=left_enabled, right=right_enabled
+                    ),
+                ),
+            ]
+            for index, (label, step) in enumerate(steps, start=2):
+                controller.logger.info(f"[ASYNC] Step {index}: {label}")
+                if not step():
+                    error_msg = (
+                        f"Could not {label}. Laser {self.laser_index} is NOT "
+                        f"ready; the lasers were sent off again."
+                    )
+                    controller.logger.error(f"[ASYNC] {error_msg}")
+                    # A preview that half-started must not stay lit.
+                    try:
+                        laser_led_service.disable_all_lasers()
+                    except Exception as off_error:  # noqa: BLE001
+                        controller.logger.error(
+                            f"[ASYNC] lasers off after failed enable: {off_error}"
+                        )
+                    controller.error_occurred.emit(error_msg)
+                    return
 
             # Update state and emit success signal
             controller._active_source = f"laser_{self.laser_index}"
@@ -109,12 +161,18 @@ class LEDEnableWorker(QRunnable):
 
             controller.logger.info(f"[ASYNC] Enabling {color_name} LED")
 
-            # Step 1: Disable all light sources
-            controller.logger.info(f"[ASYNC] Step 1: Disabling all light sources")
-            laser_led_service.disable_all_lasers()
-            if controller.is_led_available():
-                laser_led_service.disable_led_preview()
-            laser_led_service.disable_illumination()
+            # Step 1: everything off, or nothing is enabled.
+            controller.logger.info("[ASYNC] Step 1: Disabling all light sources")
+            failed = turn_all_light_sources_off(controller)
+            if failed:
+                error_msg = (
+                    f"{color_name} LED NOT enabled: could not "
+                    f"{', '.join(failed)} first, so another light source may "
+                    f"still be on."
+                )
+                controller.logger.error(f"[ASYNC] {error_msg}")
+                controller.error_occurred.emit(error_msg)
+                return
 
             # Steps 2-4. Each return value is CHECKED, which it was not until
             # 2026-09-20.
@@ -221,9 +279,15 @@ class LaserLEDController(QObject):
         for laser in self.get_available_lasers():
             self._laser_powers[laser.index] = 5.0
 
-        # Thread pool for async hardware operations (improves UI responsiveness)
-        self._thread_pool = QThreadPool.globalInstance()
-        self._thread_pool.setMaxThreadCount(2)  # Limit concurrent hardware operations
+        # Enable/disable sequences run on their own pool with ONE thread, so
+        # two quick clicks run one after the other. On the shared global pool
+        # (until 2026-11-22) a second sequence's "all off" could land between
+        # the first one's steps.
+        self._thread_pool = QThreadPool()
+        self._thread_pool.setMaxThreadCount(1)
+        # Kept from when this controller owned the global pool: napari's
+        # thread workers run there and have only ever had two threads.
+        QThreadPool.globalInstance().setMaxThreadCount(2)
 
         self.logger.info("LaserLEDController initialized")
 
@@ -444,9 +508,12 @@ class LaserLEDController(QObject):
             self.logger.info(
                 "Step 1: Disabling all light sources (ensures clean state)"
             )
-            self.disable_all_light_sources(
-                emit_signal=False
-            )  # Don't emit - this is internal cleanup
+            failed = self._turn_all_light_sources_off()
+            if failed:
+                raise RuntimeError(
+                    f"could not {', '.join(failed)} first, so another light "
+                    f"source may still be on; laser {laser_index} NOT enabled"
+                )
 
             # Step 2: Set laser power
             power = self._laser_powers.get(laser_index, 5.0)
@@ -531,9 +598,12 @@ class LaserLEDController(QObject):
             self.logger.info(
                 "Step 1: Disabling all light sources (ensures clean state)"
             )
-            self.disable_all_light_sources(
-                emit_signal=False
-            )  # Don't emit - this is internal cleanup
+            failed = self._turn_all_light_sources_off()
+            if failed:
+                raise RuntimeError(
+                    f"could not {', '.join(failed)} first, so another light "
+                    f"source may still be on; {color_name} LED NOT enabled"
+                )
 
             # Step 2: Set intensity for selected color
             intensity = self._led_intensities.get(self._led_color, 50.0)
@@ -618,6 +688,10 @@ class LaserLEDController(QObject):
 
         # Return immediately - UI stays responsive!
 
+    def _turn_all_light_sources_off(self) -> List[str]:
+        """See :func:`turn_all_light_sources_off`."""
+        return turn_all_light_sources_off(self)
+
     def disable_all_light_sources(self, emit_signal: bool = True) -> bool:
         """
         Disable all light sources (lasers and LED).
@@ -627,35 +701,22 @@ class LaserLEDController(QObject):
                         False for internal cleanup during enable sequence)
 
         Returns:
-            True if successful
+            True only if every step was sent. On a partial failure
+            error_occurred is emitted, preview_disabled is not, and the record
+            of the active source is kept, since that source may still be lit.
         """
-        try:
-            self.logger.info("Disabling all light sources")
-
-            # Disable lasers
-            self.laser_led_service.disable_all_lasers()
-
-            # Disable LED if available
-            if self.is_led_available():
-                self.laser_led_service.disable_led_preview()
-
-            # CRITICAL: Disable illumination paths (matches enable sequence)
-            self.laser_led_service.disable_illumination()
-
-            # Update state
-            self._active_source = None
-            self._active_laser_index = None
-
-            if emit_signal:
-                self.preview_disabled.emit()
-            self.logger.info("All light sources disabled")
-            return True
-
-        except Exception as e:
-            error_msg = f"Error disabling light sources: {e}"
+        self.logger.info("Disabling all light sources")
+        failed = self._turn_all_light_sources_off()
+        if failed:
+            error_msg = f"Light sources may still be ON: could not {', '.join(failed)}."
             self.logger.error(error_msg)
             self.error_occurred.emit(error_msg)
             return False
+
+        if emit_signal:
+            self.preview_disabled.emit()
+        self.logger.info("All light sources disabled")
+        return True
 
     def is_preview_active(self) -> bool:
         """Check if any light source is currently in preview mode."""
