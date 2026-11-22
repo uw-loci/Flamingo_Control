@@ -19,7 +19,7 @@ Progress tracking via:
 Architecture:
     WorkflowQueueService
         └── Accepts list of workflow files
-        └── Executes sequentially via WorkflowController
+        └── Executes sequentially via WorkflowController (typed as WorkflowRunner)
         └── Listens for STACK_COMPLETE callback for completion
         └── Emits signals for progress updates
         └── Handles cancellation gracefully
@@ -34,13 +34,37 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
 if TYPE_CHECKING:
-    from ..controllers.workflow_controller import WorkflowController
     from ..services import MVCConnectionService
+
+
+class WorkflowRunner(Protocol):
+    """What the queue calls on the workflow controller it is given.
+
+    In the app this is ``controllers.workflow_controller.WorkflowController``.
+    It is described here instead of imported so that this service does not
+    depend on the controller layer above it (docs/architecture.md). That the
+    queue drives a controller at all, including its private
+    ``_ensure_connected``, is a known inversion: the queue should run
+    workflows through ``MVCWorkflowService`` instead.
+    """
+
+    @property
+    def is_executing(self) -> bool: ...
+
+    def load_workflow(self, file_path: str) -> Tuple[bool, str]: ...
+
+    def start_workflow(self) -> Tuple[bool, str]: ...
+
+    def stop_workflow(self) -> Tuple[bool, str]: ...
+
+    def on_workflow_completed(self) -> None: ...
+
+    def _ensure_connected(self) -> Tuple[bool, str]: ...
 
 
 logger = logging.getLogger(__name__)
@@ -134,7 +158,7 @@ class WorkflowQueueService(QObject):
 
     def __init__(
         self,
-        workflow_controller: "WorkflowController",
+        workflow_controller: WorkflowRunner,
         connection_service: Optional["MVCConnectionService"] = None,
         status_indicator_service=None,
     ):
