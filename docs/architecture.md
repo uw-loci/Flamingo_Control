@@ -122,7 +122,10 @@ and the LED overview all call it. In order, it:
    nothing;
 2. refuses an axis other than 1-4 or a position that is not a finite number;
 3. drops an exact duplicate of the move already in flight
-   (`stage_command_dedup.should_send`; returns False);
+   (`stage_command_dedup.should_send`; returns False). A move stops being in
+   flight on the server's `STAGE_MOTION_STOPPED` (one handler per connection,
+   in `MVCConnectionService`, independent of any `MotionTracker`), on a HALT,
+   and on connect, disconnect or connection loss;
 4. calls `before_send` (PositionController arms its `MotionTracker` here, so a
    fast stop is not missed), then sends `STAGE_POSITION_SET` (0x6004) with the
    axis in `int32Data0` and the target in `doubleData`.
@@ -136,7 +139,7 @@ by `services/motion_tracker.MotionTracker`; when the wait fails the position is
 marked unknown rather than assumed to be the target.
 
 Tests: `tests/test_one_move_path.py`, `tests/test_motion_wait_honest.py`,
-`tests/test_stage_command_dedup.py`, `tests/test_unconfigured_scope_blocks_motion.py`.
+`tests/test_stage_command_dedup.py`, `tests/test_dedup_lifetime.py`, `tests/test_unconfigured_scope_blocks_motion.py`.
 
 ## The safety path
 
@@ -179,7 +182,7 @@ gets a reset in both.
 | Motion block (limits unknown) | `services/stage_motion_gate.py` | `ConfigurationService` on load and reload | both runners: `set_motion_blocked(None)` |
 | Server soft limits | `services/server_stage_limits.py` | `set_from_settings` at connect | both runners: `clear()` |
 | Active server layout | `core/server_layout.py` (`set_active`, `active`) | `MVCConnectionService` after it identifies the server build | the tests that set it restore it (`test_server_layout`, `test_wire_bytes_unchanged`, `test_command_codes_match_the_server`, `test_verification`) |
-| Moves in flight (duplicate suppression) | `services/stage_command_dedup.py` | `StageService.move_to_position`, cleared by the motion-stopped callback | the stage tests call `reset()` |
+| Moves in flight (duplicate suppression) | `services/stage_command_dedup.py` | `StageService.move_to_position`; cleared by the connection's motion-stopped handler, by a sent HALT, and on connect, disconnect and connection loss | both runners: `reset()` |
 | Hardware config cache, camera AOI | `configs/config_loader.py` | first `get_hardware_config()`, `set_camera_aoi` | `invalidate_hardware_config()` where a test changes the files |
 | Default window-geometry manager | `services/window_geometry_manager.py` | `component_factory.create_services_layer` | not reset; tests that need one set their own |
 | Activity probe | `services/safe_state.py` (`set_activity_probe`) | `FlamingoApplication` at startup | not reset; `None` means nothing is running |

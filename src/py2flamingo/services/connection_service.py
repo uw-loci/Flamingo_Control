@@ -15,7 +15,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from py2flamingo import _version
 from py2flamingo.core import server_layout
+from py2flamingo.core.command_codes import StageCommands
 from py2flamingo.core.queue_manager import QueueManager
+from py2flamingo.services import stage_command_dedup
 
 
 def _receive_full_bytes(
@@ -140,6 +142,9 @@ class MVCConnectionService:
 
         # A layout from a previous connection must not guard this one.
         server_layout.clear_active()
+        # Nor may its moves in flight: their stop reports went to the old
+        # socket, so nothing would ever clear them (services/stage_command_dedup).
+        stage_command_dedup.reset()
 
         # Update model to CONNECTING
         self.model.status = ConnectionStatus(
@@ -157,6 +162,7 @@ class MVCConnectionService:
                 config.ip_address, config.port, timeout=config.timeout
             )
             self._live_socket = None  # Connected lazily via connect_live()
+            self._watch_motion_stopped()
 
             # Update model to CONNECTED
             self.model.status = ConnectionStatus(
@@ -202,6 +208,33 @@ class MVCConnectionService:
             )
             raise ConnectionError(error_msg) from e
 
+    def _watch_motion_stopped(self) -> None:
+        """Clear the duplicate-move table on every STAGE_MOTION_STOPPED.
+
+        One handler per connection, registered at connect on the new reader
+        (each connect builds a new reader with an empty callback table), so the
+        table is cleared whether or not anything waits on a MotionTracker. The
+        workflow queue and the LED overview move without a tracker.
+        """
+        try:
+            if self.tcp_connection.has_async_reader:
+                self.tcp_connection.register_callback(
+                    StageCommands.MOTION_STOPPED, self._on_motion_stopped
+                )
+                return
+        except Exception as e:  # noqa: BLE001 - connect must still succeed
+            self.logger.error(f"Could not register the motion-stopped handler: {e}")
+            return
+        self.logger.warning(
+            "No background reader: stage stop reports cannot clear the "
+            "duplicate-move table on this connection"
+        )
+
+    def _on_motion_stopped(self, message) -> None:
+        """The stage stopped (axis 0xFF: whatever was moving), so nothing is
+        in flight any more. Runs on the reader thread."""
+        stage_command_dedup.note_motion_stopped()
+
     def disconnect(self) -> None:
         """
         Close connection to microscope gracefully.
@@ -229,6 +262,7 @@ class MVCConnectionService:
             # Close sockets via TCPConnection
             self.tcp_connection.disconnect()
             server_layout.clear_active()
+            stage_command_dedup.reset()
             from py2flamingo.services import server_stage_limits
 
             server_stage_limits.clear()
@@ -583,6 +617,8 @@ class MVCConnectionService:
 
         self._command_socket = None
         self._live_socket = None
+        # A stop report can no longer arrive for the moves in flight.
+        stage_command_dedup.reset()
 
         # Update model to ERROR state (we don't have a distinct LOST state;
         # last_error message disambiguates from a connect-time error).

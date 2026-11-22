@@ -38,8 +38,18 @@ one copy per control, which is how the tile-step calculation ended up with five.
   the controllers.
 
 **What it deliberately does not do.** It suppresses a command only while an
-identical one for that axis is still in flight. Once the stage reports
-STAGE_MOTION_STOPPED the memory is cleared, so re-commanding the same position
+identical one for that axis is still in flight. The memory is cleared when the
+motion it guards has ended or can no longer be known to be in flight:
+
+* every STAGE_MOTION_STOPPED, by the connection's own handler
+  (``MVCConnectionService._on_motion_stopped``, registered at connect whether
+  or not anything waits on a ``MotionTracker``; the workflow queue moves with
+  no tracker, and until 2026-11-22 its second return-to-origin was dropped);
+* a HALT that left this computer (``safe_state.send_now``);
+* connect, disconnect and connection loss (a stop report sent to the old
+  socket never arrives).
+
+So re-commanding the same position
 later -- after drift, after a failed move, or just because the user asked again
 -- always reaches the hardware. Blocking those would be a worse bug than the one
 being fixed: a stage that ignores a move request is indistinguishable from a
@@ -116,7 +126,7 @@ def suppressed_count() -> int:
 
 
 def reset() -> None:
-    """Forget all state. For tests, and for a fresh connection."""
+    """Forget all state: on connect, disconnect and connection loss, and in tests."""
     global _suppressed_count
     with _lock:
         _in_flight.clear()

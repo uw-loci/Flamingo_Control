@@ -108,6 +108,23 @@ def _move_and_settle(
     return _position(ctx, axis), len(moves)
 
 
+def _restore_axis(ctx: RunContext, axis: str, start: float) -> None:
+    """Put one axis back at ``start`` and wait until it has stopped there.
+
+    Nothing is sent when the axis is already there. A move that is sent is
+    waited for, so its MOTION_STOPPED (axis 0xFF, which names no axis) cannot
+    arrive during the next check's move and end that check's wait early.
+    Until 2026-11-22 these restores were fire-and-forget, and the duplicate
+    suppression dropped most of them only because nothing cleared its table
+    while no MotionTracker was armed."""
+    if abs(_position(ctx, axis) - start) <= _tolerance(ctx, axis):
+        return
+    mark = ctx.tap.mark()
+    _stage(ctx).move_to_position(AXIS[axis], start)
+    if ctx.wait_for("STAGE_MOTION_STOPPED", mark, timeout=120.0) is None:
+        raise Failed(f"{axis}: no MOTION_STOPPED on the way back to {start:.4f}")
+
+
 def _tolerance(ctx: RunContext, axis: str) -> float:
     o = ctx.options
     return o.rotation_tolerance_deg if axis == "r" else o.position_tolerance_mm
@@ -825,7 +842,7 @@ def _axis_round_trip(ctx: RunContext, axis: str) -> None:
     tol = _tolerance(ctx, axis)
     ctx.on_restore(
         f"{axis} back to {start:.4f}",
-        lambda: _stage(ctx).move_to_position(AXIS[axis], start),
+        lambda: _restore_axis(ctx, axis, start),
         moves=True,
     )
     out, n_out = _move_and_settle(ctx, axis, start + step, "out")
@@ -876,7 +893,7 @@ def t2_go_to_target(ctx: RunContext) -> None:
             raise Failed(f"target '{target.name}' refused: {'; '.join(problems)}")
     ctx.on_restore(
         "stage back to the starting position",
-        lambda: [_stage(ctx).move_to_position(AXIS[a], start[a]) for a in AXIS],
+        lambda: [_restore_axis(ctx, a, start[a]) for a in AXIS],
         moves=True,
         at_end=True,
     )
@@ -945,7 +962,7 @@ def t2_halt(ctx: RunContext) -> None:
         raise Skipped(f"no room for a {distance} mm halt test: {'; '.join(problems)}")
     ctx.on_restore(
         f"{axis} back to {start:.4f}",
-        lambda: _stage(ctx).move_to_position(AXIS[axis], start),
+        lambda: _restore_axis(ctx, axis, start),
         moves=True,
     )
     mark = ctx.tap.mark()

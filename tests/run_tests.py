@@ -23,12 +23,17 @@ def _reset_module_state():
     """What tests/conftest.py's autouse fixtures do under pytest. This runner
     (the one CI uses) has no fixtures, so a test that latched the emergency
     stop or stored server soft limits blocked every stage test after it."""
-    from py2flamingo.services import server_stage_limits, stage_motion_gate
+    from py2flamingo.services import (
+        server_stage_limits,
+        stage_command_dedup,
+        stage_motion_gate,
+    )
 
     stage_motion_gate.set_motion_blocked(None)
     stage_motion_gate.clear_emergency_stop()
     stage_motion_gate._stop_hooks.clear()
     server_stage_limits.clear()
+    stage_command_dedup.reset()
 
 
 class _ResettingResult(unittest.TextTestResult):

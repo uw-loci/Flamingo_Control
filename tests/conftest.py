@@ -98,3 +98,15 @@ def _reset_server_stage_limits():
     server_stage_limits.clear()
     yield
     server_stage_limits.clear()
+
+
+@pytest.fixture(autouse=True)
+def _reset_stage_command_dedup():
+    """The moves in flight (services/stage_command_dedup) are module-level
+    state: a test that sent a move and never saw it stop must not make the
+    next test's identical move a dropped duplicate."""
+    from py2flamingo.services import stage_command_dedup
+
+    stage_command_dedup.reset()
+    yield
+    stage_command_dedup.reset()

@@ -145,7 +145,9 @@ class TestItIsWiredIntoBothEmitters:
         assert "should_send" in src
 
     def test_the_motion_stopped_callback_clears_it(self):
-        src = self._src("py2flamingo/services/motion_tracker.py")
+        # The connection's own handler, not a MotionTracker's: the workflow
+        # queue moves with no tracker (tests/test_dedup_lifetime.py drives it).
+        src = self._src("py2flamingo/services/connection_service.py")
         assert "note_motion_stopped" in src
 
     def test_the_emergency_stop_is_not_gated_by_it(self):

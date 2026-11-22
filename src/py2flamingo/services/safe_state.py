@@ -113,7 +113,15 @@ def send_now(connection, code: int, int0: int = 0, name: str = "") -> bool:
     except Exception as e:  # noqa: BLE001
         logger.error(f"{label} NOT sent: could not encode it: {e}")
         return False
-    return send_packet_now(connection, packet, label)
+    sent = send_packet_now(connection, packet, label)
+    if sent and code == STAGE_HALT:
+        # The halted moves are no longer in flight: the same target sent
+        # after the halt must reach the stage (services/stage_command_dedup).
+        # The server need not report a stop for a HALT, so do not wait for one.
+        from py2flamingo.services import stage_command_dedup
+
+        stage_command_dedup.note_motion_stopped()
+    return sent
 
 
 def halt_all_axes(connection) -> bool:
