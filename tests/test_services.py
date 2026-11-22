@@ -193,7 +193,9 @@ class TestMVCConnectionService(unittest.TestCase):
         cmd = Command(code=12292)
         response = self.service.send_command(cmd)
 
-        self.service._command_service.send_command.assert_called_once_with(cmd, 5.0)
+        # 3.0 s, the reply wait every send used before the timeout argument
+        # was honored (it was ignored and fixed at 3.0).
+        self.service._command_service.send_command.assert_called_once_with(cmd, 3.0)
         self.assertEqual(response, expected_response)
 
     def test_send_command_not_connected(self):

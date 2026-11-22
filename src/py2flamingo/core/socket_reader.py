@@ -23,7 +23,17 @@ import socket
 import struct
 import threading
 from enum import IntEnum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Union,
+)
 
 from py2flamingo.core.frames import ParsedMessage, parse_frame
 
@@ -101,11 +111,53 @@ UNSOLICITED_COMMANDS: Set[int] = {
 }
 
 
+class PendingRequest:
+    """One caller waiting for a reply.
+
+    ``codes`` are the reply codes that can answer it; ``predicate``, when
+    given, must also accept the message (POSITION_GET, for example, takes
+    only a reply that echoes its axis in int32Data0). The reply is put on
+    an internal queue; :meth:`get` waits for it.
+    """
+
+    __slots__ = ("codes", "predicate", "_queue")
+
+    def __init__(
+        self,
+        codes: FrozenSet[int],
+        predicate: Optional[Callable[[ParsedMessage], bool]] = None,
+    ):
+        self.codes = codes
+        self.predicate = predicate
+        self._queue: "queue.Queue[ParsedMessage]" = queue.Queue(maxsize=1)
+
+    def accepts(self, message: ParsedMessage) -> bool:
+        if message.command_code not in self.codes:
+            return False
+        if self.predicate is None:
+            return True
+        try:
+            return bool(self.predicate(message))
+        except Exception as e:  # noqa: BLE001 - a bad predicate matches nothing
+            logger.error(
+                f"Reply predicate raised for 0x{message.command_code:04X}: {e}"
+            )
+            return False
+
+    def deliver(self, message: ParsedMessage) -> None:
+        self._queue.put_nowait(message)
+
+    def get(self, timeout: Optional[float] = None) -> ParsedMessage:
+        """Wait for the reply. Raises ``queue.Empty`` on timeout."""
+        return self._queue.get(timeout=timeout)
+
+
 class MessageDispatcher:
     """
     Routes parsed messages to appropriate handlers.
 
-    - Command responses go to pending request queues
+    - A reply goes to the oldest pending request for its code that accepts
+      it (a FIFO per code, each request with an optional match predicate)
     - Unsolicited callbacks go to registered handlers
     - Unknown messages are logged
     """
@@ -113,10 +165,9 @@ class MessageDispatcher:
     def __init__(self):
         self._lock = threading.Lock()
 
-        # Pending requests: command_code -> Queue
-        # When a command is sent, a queue is registered here
-        # The background reader puts responses in the queue
-        self._pending_requests: Dict[int, queue.Queue] = {}
+        # Pending requests: command_code -> requests waiting on it, oldest
+        # first. A request registered for several codes is in each list.
+        self._pending_requests: Dict[int, List[PendingRequest]] = {}
 
         # Callback handlers: command_code -> list of handlers
         self._callback_handlers: Dict[int, List[Callable[[ParsedMessage], None]]] = {}
@@ -132,30 +183,55 @@ class MessageDispatcher:
             "messages_dropped": 0,
         }
 
-    def register_pending_request(self, command_code: int) -> queue.Queue:
+    def register_pending_request(
+        self,
+        command_code: Union[int, Iterable[int]],
+        predicate: Optional[Callable[[ParsedMessage], bool]] = None,
+    ) -> PendingRequest:
         """
-        Register a pending request and return a queue to wait on.
+        Register a pending request and return it to wait on (``.get(timeout)``).
+
+        Several requests may wait on the same code at once: each reply goes
+        to the oldest one that accepts it. Always pass the returned request
+        to :meth:`unregister_pending_request` when done (a timeout leaves it
+        registered otherwise).
 
         Args:
-            command_code: The command code we expect a response for
-
-        Returns:
-            Queue that will receive the response
+            command_code: The reply code expected, or several (any answers)
+            predicate: Optional test the reply must also pass
         """
-        response_queue = queue.Queue(maxsize=1)
+        codes = (
+            frozenset({int(command_code)})
+            if isinstance(command_code, int)
+            else frozenset(int(c) for c in command_code)
+        )
+        request = PendingRequest(codes, predicate)
         with self._lock:
-            # If there's already a pending request for this code, log warning
-            if command_code in self._pending_requests:
-                logger.warning(
-                    f"Overwriting pending request for command 0x{command_code:04X}"
-                )
-            self._pending_requests[command_code] = response_queue
-        return response_queue
+            for code in codes:
+                self._pending_requests.setdefault(code, []).append(request)
+        return request
 
-    def unregister_pending_request(self, command_code: int):
-        """Remove a pending request (for cleanup on timeout)."""
+    def unregister_pending_request(self, request: PendingRequest) -> None:
+        """Remove one pending request (after its reply, or on timeout)."""
         with self._lock:
-            self._pending_requests.pop(command_code, None)
+            self._remove_unlocked(request)
+
+    def _remove_unlocked(self, request: PendingRequest) -> None:
+        for code in request.codes:
+            waiting = self._pending_requests.get(code)
+            if not waiting:
+                continue
+            try:
+                waiting.remove(request)
+            except ValueError:
+                pass
+            if not waiting:
+                del self._pending_requests[code]
+
+    def pending_count(self, command_code: int) -> int:
+        """How many requests wait on ``command_code`` (for tests and logs)."""
+        with self._lock:
+            return len(self._pending_requests.get(command_code, ()))
 
     def register_callback_handler(
         self, command_code: int, handler: Callable[[ParsedMessage], None]
@@ -219,19 +295,22 @@ class MessageDispatcher:
                     f"[RX] Pending requests: {[f'0x{c:04X}' for c in pending_codes]}"
                 )
 
-            # Check if this is a response to a pending request
-            if command_code in self._pending_requests:
-                try:
-                    self._pending_requests[command_code].put_nowait(message)
-                    self._stats["responses_dispatched"] += 1
-                    # Remove from pending after delivering
-                    del self._pending_requests[command_code]
-                    logger.debug(
-                        f"[RX] Dispatched response for 0x{command_code:04X} to waiting caller"
-                    )
-                    return
-                except queue.Full:
-                    logger.error(f"Response queue full for 0x{command_code:04X}")
+            # A reply goes to the OLDEST pending request for its code that
+            # accepts it, and only to that one.
+            for request in self._pending_requests.get(command_code, ()):
+                if request.accepts(message):
+                    self._remove_unlocked(request)
+                    try:
+                        request.deliver(message)
+                        self._stats["responses_dispatched"] += 1
+                        logger.debug(
+                            f"[RX] Dispatched response for 0x{command_code:04X} "
+                            f"to waiting caller"
+                        )
+                        return
+                    except queue.Full:
+                        logger.error(f"Response queue full for 0x{command_code:04X}")
+                    break
 
             # Check if this is an unsolicited callback with handlers
             if command_code in self._callback_handlers:
@@ -735,42 +814,43 @@ class CommandClient:
         return self._reader.is_paused()
 
     def send_command(
-        self, command_bytes: bytes, expected_response_code: int, timeout: float = 3.0
+        self,
+        command_bytes: bytes,
+        expected_response_code: Union[int, Iterable[int]],
+        timeout: float = 3.0,
+        predicate: Optional[Callable[[ParsedMessage], bool]] = None,
     ) -> Optional[ParsedMessage]:
         """
-        Send a command and wait for response.
+        Send a command and wait for its reply.
+
+        The request is registered before the bytes go out, so a fast reply
+        is not missed, and removed afterwards whatever happened.
 
         Args:
-            command_bytes: 128-byte command to send
-            expected_response_code: Command code expected in response
-            timeout: Seconds to wait for response
+            command_bytes: The frame, and any payload that follows it
+            expected_response_code: Reply code expected, or several
+            timeout: Seconds to wait for the reply
+            predicate: Optional test the reply must also pass (see
+                MessageDispatcher.register_pending_request)
 
         Returns:
             ParsedMessage response, or None on timeout
         """
-        # Register for response before sending
-        response_queue = self._dispatcher.register_pending_request(
-            expected_response_code
+        request = self._dispatcher.register_pending_request(
+            expected_response_code, predicate
         )
-
         try:
-            # Send command (serialized to prevent interleaving)
+            # The one send lock (shared with TCPConnection.send_command_bytes)
             with self._send_lock:
                 self._socket.sendall(command_bytes)
-
-            # Wait for response
             try:
-                message = response_queue.get(timeout=timeout)
-                return message
+                return request.get(timeout=timeout)
             except queue.Empty:
-                logger.warning(
-                    f"Timeout waiting for response to 0x{expected_response_code:04X}"
-                )
+                codes = ", ".join(f"0x{c:04X}" for c in sorted(request.codes))
+                logger.warning(f"Timeout waiting for response to {codes}")
                 return None
-
         finally:
-            # Clean up pending request
-            self._dispatcher.unregister_pending_request(expected_response_code)
+            self._dispatcher.unregister_pending_request(request)
 
     def register_callback(
         self, command_code: int, handler: Callable[[ParsedMessage], None]

@@ -45,6 +45,15 @@ class AxisCode:
     ALL = 0xFF
 
 
+def _reply_for_axis(axis: int):
+    """Reply predicate: a POSITION_GET reply for ``axis`` (int32Data0)."""
+
+    def accepts(message) -> bool:
+        return message.int32_data0 == axis
+
+    return accepts
+
+
 class StageService(MicroscopeCommandService):
     """
     Service for stage operations on Flamingo microscope.
@@ -106,6 +115,11 @@ class StageService(MicroscopeCommandService):
             # treats a None return as benign. Keep it at WARNING so it does not
             # escalate to a high-priority push notification every interval.
             benign_timeout=True,
+            # The server echoes the axis in int32Data0 (PIStageBase::positionGet
+            # answers with the request it was given), so only the reply for
+            # this axis answers this query: two threads reading two axes at
+            # once must not swap their positions.
+            predicate=_reply_for_axis(axis),
         )
 
         if not result["success"]:
@@ -218,6 +232,7 @@ class StageService(MicroscopeCommandService):
                                 0,  # params[5] (int32Data2)
                                 # params[6] will be set to TRIGGER_CALL_BACK by _query_command
                             ],
+                            predicate=_reply_for_axis(axis),
                         )
 
                         if retry_result and retry_result.get("success"):

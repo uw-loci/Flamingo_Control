@@ -842,16 +842,23 @@ class MVCConnectionService:
         return self.tcp_connection.send_command_bytes(data, lock_wait=lock_wait)
 
     def send_command_async(
-        self, command_bytes: bytes, expected_response_code: int, timeout: float = 3.0
+        self,
+        command_bytes: bytes,
+        expected_response_code,
+        timeout: float = 3.0,
+        predicate=None,
     ):
-        """Send command via async reader (delegates to tcp_connection)."""
+        """Send a command and wait for its reply through the background reader
+        (delegates to tcp_connection). ``expected_response_code`` may be one
+        code or several; ``predicate`` is an optional extra test on the reply.
+        """
         if self.tcp_connection and hasattr(self.tcp_connection, "send_command_async"):
             return self.tcp_connection.send_command_async(
-                command_bytes, expected_response_code, timeout
+                command_bytes, expected_response_code, timeout, predicate
             )
         return None
 
-    def send_command(self, cmd: "Command", timeout: float = 5.0) -> bytes:
+    def send_command(self, cmd: "Command", timeout: float = 3.0) -> bytes:
         """
         Send encoded command and get response.
 
@@ -861,7 +868,7 @@ class MVCConnectionService:
 
         Args:
             cmd: Command object to send
-            timeout: Response timeout in seconds (default: 5.0)
+            timeout: Response timeout in seconds (default: 3.0)
 
         Returns:
             Response bytes from microscope

@@ -664,19 +664,20 @@ class TCPConnection:
         return None
 
     def send_command_async(
-        self, command_bytes: bytes, expected_response_code: int, timeout: float = 3.0
+        self,
+        command_bytes: bytes,
+        expected_response_code,
+        timeout: float = 3.0,
+        predicate: Optional[Callable[["ParsedMessage"], bool]] = None,
     ) -> Optional["ParsedMessage"]:
         """
-        Send a command and wait for response using async reader.
-
-        This method is only available when async reader is active.
-        It sends the command and waits for the response via the
-        background reader's dispatch queue.
+        Send a command and wait for its reply through the background reader.
 
         Args:
-            command_bytes: 128-byte command to send
-            expected_response_code: Command code expected in response
-            timeout: Seconds to wait for response
+            command_bytes: The frame (and any payload after it)
+            expected_response_code: Reply code expected, or several
+            timeout: Seconds to wait for the reply
+            predicate: Optional test the reply must also pass
 
         Returns:
             ParsedMessage response, or None on timeout
@@ -694,7 +695,7 @@ class TCPConnection:
             )
 
         return self._command_client.send_command(
-            command_bytes, expected_response_code, timeout
+            command_bytes, expected_response_code, timeout, predicate
         )
 
     def register_callback(

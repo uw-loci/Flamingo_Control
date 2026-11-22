@@ -23,6 +23,31 @@ if TYPE_CHECKING:
     from py2flamingo.core.socket_reader import ParsedMessage
 
 
+#: The only commands resent after an automatic reconnect: queries, which
+#: read and change nothing, so sending one twice is harmless. Everything
+#: else (WORKFLOW_START, moves, enables, every SET) is NOT resent: a send
+#: that failed part way may still have reached the server, and repeating a
+#: move or a workflow start is not safe. Those report the failure instead.
+RESEND_AFTER_RECONNECT = frozenset(
+    {
+        0x6008,  # STAGE_POSITION_GET
+        0x600A,  # STAGE_VELOCITY_GET
+        0x300A,  # CAMERA_EXPOSURE_GET
+        0x300E,  # CAMERA_TRIGGER_MODE_GET
+        0x3010,  # CAMERA_ROI_LEFT_GET
+        0x3012,  # CAMERA_ROI_TOP_GET
+        0x3018,  # CAMERA_FPS_GET
+        0x3027,  # CAMERA_IMAGE_SIZE_GET
+        0x302C,  # CAMERA_READ_OUT_TIME_GET
+        0x3037,  # CAMERA_PIXEL_FIELD_OF_VIEW_GET
+        0x2002,  # LASER_LEVEL_GET
+        0xA007,  # SYSTEM_STATE_GET
+    }
+)
+
+DEFAULT_REPLY_TIMEOUT_S = 3.0
+
+
 class MicroscopeCommandService:
     """
     Base class for microscope subsystem services.
@@ -150,6 +175,8 @@ class MicroscopeCommandService:
         params: Optional[List[int]] = None,
         value: float = 0.0,
         benign_timeout: bool = False,
+        timeout: float = DEFAULT_REPLY_TIMEOUT_S,
+        predicate=None,
     ) -> Dict[str, Any]:
         """
         Send a query command and return parsed response.
@@ -166,6 +193,10 @@ class MicroscopeCommandService:
                 position poll while the server is busy with a workflow) and is
                 logged at WARNING rather than ERROR so it does not escalate to a
                 push notification.
+            timeout: Seconds to wait for the reply.
+            predicate: Optional test on the reply (ParsedMessage -> bool):
+                only a reply that passes answers this query. POSITION_GET
+                uses it to take only the reply for its own axis.
 
         Returns:
             Dict with 'success', 'parsed', 'raw_response', etc.
@@ -200,8 +231,9 @@ class MicroscopeCommandService:
                     cmd_bytes,
                     command_code,
                     command_name,
-                    timeout=3.0,
+                    timeout=timeout,
                     benign_timeout=benign_timeout,
+                    predicate=predicate,
                 )
 
             # Fall back to synchronous mode
@@ -212,14 +244,16 @@ class MicroscopeCommandService:
             self._write(cmd_bytes)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
-            ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
+            ack_response = self._receive_full_bytes(
+                command_socket, 128, timeout=timeout
+            )
             parsed = self._parse_response(ack_response)
 
             add_data_bytes = parsed["reserved"]
             if add_data_bytes > 0:
                 self.logger.debug(f"Reading {add_data_bytes} additional bytes...")
                 additional_data = self._receive_full_bytes(
-                    command_socket, add_data_bytes, timeout=3.0
+                    command_socket, add_data_bytes, timeout=timeout
                 )
                 parsed["additional_data"] = additional_data
 
@@ -237,8 +271,10 @@ class MicroscopeCommandService:
                 self.logger.error(f"Timeout waiting for {command_name} response")
             return {"success": False, "error": "timeout"}
         except (OSError, BrokenPipeError, ConnectionResetError) as e:
-            # Stale socket — reconnect + retry once
-            if self._handle_socket_error_retry(command_name, e):
+            # Stale socket: reconnect once. Only a query is resent; any other
+            # command may have reached the server before the error.
+            reconnected = self._handle_socket_error_retry(command_name, e)
+            if reconnected and command_code in RESEND_AFTER_RECONNECT:
                 try:
                     return _do_query()
                 except Exception as retry_e:
@@ -248,6 +284,15 @@ class MicroscopeCommandService:
                         exc_info=True,
                     )
                     return {"success": False, "error": str(retry_e)}
+            if reconnected:
+                self.logger.error(
+                    f"{command_name} NOT resent after the reconnect: only "
+                    f"queries are resent; send it again if it is still wanted"
+                )
+                return {
+                    "success": False,
+                    "error": f"{e} (reconnected; {command_name} was not resent)",
+                }
             return {"success": False, "error": str(e)}
         except Exception as e:
             self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
@@ -262,6 +307,8 @@ class MicroscopeCommandService:
         data: bytes = b"",
         additional_data_size: int = 0,
         wait_for_response: bool = True,
+        timeout: float = DEFAULT_REPLY_TIMEOUT_S,
+        predicate=None,
     ) -> Dict[str, Any]:
         """
         Send an action command (non-query).
@@ -278,6 +325,8 @@ class MicroscopeCommandService:
             additional_data_size: Size of additional data to follow
             wait_for_response: If False, send command without waiting for response
                               (fire-and-forget mode for laser commands that don't ACK)
+            timeout: Seconds to wait for the reply.
+            predicate: Optional test the reply must also pass.
 
         Returns:
             Dict with 'success' and optional 'error'
@@ -320,8 +369,9 @@ class MicroscopeCommandService:
                     cmd_bytes,
                     command_code,
                     command_name,
-                    timeout=3.0,
+                    timeout=timeout,
                     wait_for_response=wait_for_response,
+                    predicate=predicate,
                 )
 
             # Fall back to synchronous mode
@@ -339,14 +389,16 @@ class MicroscopeCommandService:
                 )
                 return {"success": True, "fire_and_forget": True}
 
-            ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
+            ack_response = self._receive_full_bytes(
+                command_socket, 128, timeout=timeout
+            )
             parsed = self._parse_response(ack_response)
 
             add_data_bytes = parsed["reserved"]
             if add_data_bytes > 0:
                 self.logger.debug(f"Reading {add_data_bytes} additional bytes...")
                 additional_data = self._receive_full_bytes(
-                    command_socket, add_data_bytes, timeout=3.0
+                    command_socket, add_data_bytes, timeout=timeout
                 )
                 parsed["additional_data"] = additional_data
 
@@ -362,8 +414,10 @@ class MicroscopeCommandService:
             self.logger.error(f"Timeout waiting for {command_name} response")
             return {"success": False, "error": "timeout"}
         except (OSError, BrokenPipeError, ConnectionResetError) as e:
-            # Stale socket — reconnect + retry once
-            if self._handle_socket_error_retry(command_name, e):
+            # Stale socket: reconnect once. Only a query is resent; any other
+            # command may have reached the server before the error.
+            reconnected = self._handle_socket_error_retry(command_name, e)
+            if reconnected and command_code in RESEND_AFTER_RECONNECT:
                 try:
                     return _do_send()
                 except Exception as retry_e:
@@ -373,6 +427,15 @@ class MicroscopeCommandService:
                         exc_info=True,
                     )
                     return {"success": False, "error": str(retry_e)}
+            if reconnected:
+                self.logger.error(
+                    f"{command_name} NOT resent after the reconnect: only "
+                    f"queries are resent; send it again if it is still wanted"
+                )
+                return {
+                    "success": False,
+                    "error": f"{e} (reconnected; {command_name} was not resent)",
+                }
             return {"success": False, "error": str(e)}
         except Exception as e:
             self.logger.error(f"Error in {command_name}: {e}", exc_info=True)
@@ -685,6 +748,7 @@ class MicroscopeCommandService:
         timeout: float = 3.0,
         wait_for_response: bool = True,
         benign_timeout: bool = False,
+        predicate=None,
     ) -> Dict[str, Any]:
         """
         Send command via async reader and convert response.
@@ -720,9 +784,14 @@ class MicroscopeCommandService:
                 return {"success": True, "fire_and_forget": True}
 
             # Send via async reader and wait for response
-            response = self.connection.send_command_async(
-                cmd_bytes, command_code, timeout=timeout
-            )
+            if predicate is None:
+                response = self.connection.send_command_async(
+                    cmd_bytes, command_code, timeout=timeout
+                )
+            else:
+                response = self.connection.send_command_async(
+                    cmd_bytes, command_code, timeout=timeout, predicate=predicate
+                )
 
             if response is None:
                 if benign_timeout:
@@ -776,7 +845,7 @@ class MicroscopeCommandService:
         command_code: int,
         command_data: Optional[List] = None,
         wait_response: bool = False,
-        timeout: float = 5.0,
+        timeout: float = DEFAULT_REPLY_TIMEOUT_S,
     ) -> Optional[bytes]:
         """
         Legacy compatibility method for direct command sending.
@@ -830,7 +899,12 @@ class MicroscopeCommandService:
         if wait_response:
             # Use existing _send_command for response handling
             result = self._send_command(
-                command_code, cmd_name, params=params, value=value, data=data
+                command_code,
+                cmd_name,
+                params=params,
+                value=value,
+                data=data,
+                timeout=timeout,
             )
             return result["raw_response"] if result["success"] else None
         else:
@@ -871,7 +945,7 @@ class MicroscopeCommandService:
     def send_command(
         self,
         cmd: Union["Command", int],
-        timeout: float = 5.0,
+        timeout: float = DEFAULT_REPLY_TIMEOUT_S,
         command_data: Optional[List] = None,
     ) -> bytes:
         """
@@ -964,6 +1038,7 @@ class MicroscopeCommandService:
                 if isinstance(data, bytes)
                 else data.encode("utf-8") if isinstance(data, str) else b""
             ),
+            timeout=timeout,
         )
 
         if result["success"]:
