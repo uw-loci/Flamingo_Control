@@ -155,21 +155,6 @@ def dict_to_workflow(path, wf_dict):
     safe_write(p, "\n".join(lines) + "\n")
 
 
-def dict_to_text(data: Dict[str, Any]) -> str:
-    def _emit(d: Dict[str, Any], indent: int = 0) -> str:
-        lines = []
-        for k, v in d.items():
-            if isinstance(v, dict):
-                lines.append(f"{' '*indent}<{k}>")
-                lines.append(_emit(v, indent))
-                lines.append(f"{' '*indent}</{k}>")
-            else:
-                lines.append(f"{' '*indent}{k} = {v}")
-        return "\n".join(lines)
-
-    return _emit(data) + ("\n" if data else "")
-
-
 def set_section_values(
     file_path: Union[str, Path], section: str, values: Dict[str, str]
 ) -> None:

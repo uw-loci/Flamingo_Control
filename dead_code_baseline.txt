@@ -3,8 +3,6 @@
 src/py2flamingo/application.py::FlamingoApplication.is_acquisition_in_progress
 src/py2flamingo/configs/config_loader.py::HardwareConfig.max_frame_rate_hz
 src/py2flamingo/models/base.py::BaseModel.from_json
-src/py2flamingo/models/data/image.py::ImageData.create_from_array
-src/py2flamingo/models/data/image.py::ImageStack.num_images
 src/py2flamingo/models/data/sample.py::Sample.create_calibration_sample
 src/py2flamingo/models/hardware/camera.py::Camera.create_default
 src/py2flamingo/models/hardware/filter_wheel.py::FilterWheel.create_default
@@ -13,7 +11,6 @@ src/py2flamingo/models/hardware/objectives.py::Objective.create_default
 src/py2flamingo/models/hardware/stage.py::Position.from_list
 src/py2flamingo/models/hardware/stage.py::StageLimits.from_legacy
 src/py2flamingo/models/microscope.py::Position.from_list
-src/py2flamingo/models/settings.py::MicroscopeSettings.load_from_file
 src/py2flamingo/pipeline/services/pipeline_service.py::PipelineService.threshold_service
 src/py2flamingo/services/tiff_size_validator.py::TiffSizeEstimate.limit_gb
 src/py2flamingo/services/webcam_capture_service.py::WebcamCaptureService.list_available_devices

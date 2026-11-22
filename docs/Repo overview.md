@@ -1,5 +1,9 @@
 # Flamingo_Control (Py2Flamingo)
 
+> This page describes the original prototype GUI (Find sample, multi-angle collection,
+> the functions/ folder). That code has been removed; see README.md for the current
+> application.
+
 Only for use with [Flamingo systems](https://huiskenlab.com/resources/).
 
 ## Requirements
@@ -42,7 +46,7 @@ Finally, there is an option to "Copy position of image" which takes the coordina
 
 Find sample is a first simple test of the system, where:
 1. A starting point is established based on the tip of the sample holder (or close)
-2. Take multiple Z stacks, iterating down the Y axis, and stop when a peak in the fluorescence intensity is found (see calculations.py)
+2. Take multiple Z stacks, iterating down the Y axis, and stop when a peak in the fluorescence intensity is found
 3. Move back to the peak in the Y axis MIPs, and scan through the `Z Search Depth (mm)` along Z, and similarly stop when a peak is detected.
 4. Move to the peak found in the Z direction scan.
 5. Optionally, at this point, use the "Copy position of image" and "Set Home on Mac" buttons to store the position of the sample as Home on the main GUI.

@@ -1,7 +1,7 @@
 """Set Home Position writes the four Home lines and reports success.
 
 Until 2026-11-22 it called ``dict_to_text(settings, path)``; that function
-takes one argument and returns text, so every attempt raised and the Stage
+(since removed as unused) took one argument and returned text, so every attempt raised and the Stage
 Control view always showed "Failed to set home position".
 """
 

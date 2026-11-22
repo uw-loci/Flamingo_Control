@@ -7,19 +7,6 @@ This package contains service classes that provide specific functionality
 such as communication, workflow management, and analysis algorithms.
 """
 
-try:
-    from .workflow_service import WorkflowService
-except Exception:
-    WorkflowService = None
-try:
-    from .sample_search_service import SampleSearchService
-except Exception:
-    SampleSearchService = None
-try:
-    from .ellipse_tracing_service import EllipseTracingService
-except Exception:
-    EllipseTracingService = None
-
 from .acquisition_timing_service import AcquisitionTimingService
 from .configuration_manager import ConfigurationManager, MicroscopeConfiguration
 
@@ -49,22 +36,6 @@ from .workflow_execution_service import WorkflowExecutionService
 from .workflow_queue_service import WorkflowQueueService
 from .workflow_service import MVCWorkflowService
 
-# Legacy services (require numpy/scipy) - import with try/except
-try:
-    from .workflow_service import WorkflowService
-except ImportError:
-    WorkflowService = None
-
-try:
-    from .sample_search_service import SampleSearchService
-except ImportError:
-    SampleSearchService = None
-
-try:
-    from .ellipse_tracing_service import EllipseTracingService
-except ImportError:
-    EllipseTracingService = None
-
 __all__ = [
     # MVC Services (new architecture - always available)
     "MVCConnectionService",
@@ -92,8 +63,4 @@ __all__ = [
     "get_recommended_planes",
     "TiffSizeEstimate",
     "TIFF_4GB_LIMIT",
-    # Legacy services (may be None if numpy/scipy not installed)
-    "WorkflowService",
-    "SampleSearchService",
-    "EllipseTracingService",
 ]
