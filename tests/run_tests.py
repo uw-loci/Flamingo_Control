@@ -19,6 +19,28 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 
+def _reset_module_state():
+    """What tests/conftest.py's autouse fixtures do under pytest. This runner
+    (the one CI uses) has no fixtures, so a test that latched the emergency
+    stop or stored server soft limits blocked every stage test after it."""
+    from py2flamingo.services import server_stage_limits, stage_motion_gate
+
+    stage_motion_gate.set_motion_blocked(None)
+    stage_motion_gate.clear_emergency_stop()
+    stage_motion_gate._stop_hooks.clear()
+    server_stage_limits.clear()
+
+
+class _ResettingResult(unittest.TextTestResult):
+    def startTest(self, test):
+        _reset_module_state()
+        super().startTest(test)
+
+    def stopTest(self, test):
+        super().stopTest(test)
+        _reset_module_state()
+
+
 def run_all_tests():
     """Run all unit tests and return results."""
     # Discover all tests
@@ -27,7 +49,7 @@ def run_all_tests():
     suite = loader.discover(start_dir, pattern="test_*.py")
 
     # Run tests
-    runner = unittest.TextTestRunner(verbosity=2)
+    runner = unittest.TextTestRunner(verbosity=2, resultclass=_ResettingResult)
     result = runner.run(suite)
 
     return result.wasSuccessful()
@@ -38,7 +60,7 @@ def run_specific_test(test_module):
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromName(test_module)
 
-    runner = unittest.TextTestRunner(verbosity=2)
+    runner = unittest.TextTestRunner(verbosity=2, resultclass=_ResettingResult)
     result = runner.run(suite)
 
     return result.wasSuccessful()
