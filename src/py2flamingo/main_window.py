@@ -1739,6 +1739,19 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.error(f"Error stopping camera acquisition: {e}")
 
+        # Lights off whether or not live view was running (a laser switched on
+        # from the Laser panel stayed on before 2026-11-22). The stage is
+        # halted only if a client acquisition is running; while only a server
+        # workflow runs nothing is sent (services/safe_state.leave_safe).
+        try:
+            from py2flamingo.services import safe_state
+
+            connection = getattr(self.app, "connection_service", None)
+            if connection is not None:
+                safe_state.leave_safe(connection, "main window closed")
+        except Exception as e:
+            logger.error(f"Error putting the instrument in a safe state: {e}")
+
         # Close all child windows properly (not just hide)
         # Set a flag to force actual closure instead of hiding
         if self.camera_live_viewer is not None:

@@ -879,6 +879,14 @@ class FlamingoApplication(QObject):
         # Setup all dependencies
         self.setup_dependencies()
 
+        # Leaving the instrument (quit, crash) puts it in a safe state: the
+        # rule is in services/safe_state.leave_safe.
+        from py2flamingo.services import safe_state
+
+        safe_state.set_activity_probe(self.safety_activity)
+        safe_state.install_excepthook(lambda: self.connection_service)
+        self.qt_app.aboutToQuit.connect(self._leave_instrument_safe)
+
         # Ask who is at the microscope before anything can be saved.
         self.prompt_for_user_name()
 
@@ -929,6 +937,37 @@ class FlamingoApplication(QObject):
             )
         except Exception as e:
             self.logger.error(f"Could not prompt for user name: {e}", exc_info=True)
+
+    def safety_activity(self):
+        """What is running, for ``safe_state.leave_safe`` (see there)."""
+        from py2flamingo.services.safe_state import Activity
+
+        queue = getattr(self, "workflow_queue_service", None)
+        client = bool(self._acquisition_in_progress) or bool(
+            queue is not None and queue.is_running
+        )
+        wc = getattr(self, "workflow_controller", None)
+        server = bool(wc is not None and getattr(wc, "is_executing", False))
+        lines: list = []
+        service = getattr(self, "laser_led_service", None)
+        if service is not None:
+            try:
+                lines = list(service.laser_lines_to_disable())
+            except Exception:  # noqa: BLE001 - 1-7 is used then
+                lines = []
+        return Activity(
+            client_acquisition=client, server_workflow=server, laser_lines=lines
+        )
+
+    def _leave_instrument_safe(self) -> None:
+        """aboutToQuit: lights off (and stage halted if a client acquisition runs)."""
+        try:
+            from py2flamingo.services import safe_state
+
+            if self.connection_service is not None:
+                safe_state.leave_safe(self.connection_service, "application quit")
+        except Exception as e:  # noqa: BLE001 - quitting must go on
+            self.logger.error(f"Safe state on quit failed: {e}")
 
     def shutdown(self):
         """Clean up resources before application exit.

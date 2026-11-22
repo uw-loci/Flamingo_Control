@@ -256,6 +256,7 @@ class CameraController(QObject):
             self.logger.warning("Live view not active")
             return True
 
+        stopped = False
         try:
             self.logger.info("Stopping live view...")
 
@@ -269,20 +270,30 @@ class CameraController(QObject):
 
             # Clear frame buffer to prevent stale frames being processed
             self.clear_buffer()
-
-            # Disable all light sources (lasers and LED) when stopping live view
-            if self.laser_led_controller:
-                self.logger.info("Disabling all light sources (live view stopped)")
-                self.laser_led_controller.disable_all_light_sources()
-
-            self.set_state(CameraState.IDLE)
-            return True
+            stopped = True
 
         except Exception as e:
             error_msg = f"Failed to stop live view: {e}"
             self.logger.error(error_msg)
             self.error_occurred.emit(error_msg)
-            return False
+
+        finally:
+            # Lights off even when stopping the stream failed (until
+            # 2026-11-22 an exception above skipped this and left them on).
+            lights_off = True
+            if self.laser_led_controller:
+                self.logger.info("Disabling all light sources (live view stopped)")
+                try:
+                    lights_off = bool(
+                        self.laser_led_controller.disable_all_light_sources()
+                    )
+                except Exception as e:  # noqa: BLE001
+                    self.logger.error(f"Could not turn the light sources off: {e}")
+                    lights_off = False
+
+        if stopped:
+            self.set_state(CameraState.IDLE)
+        return stopped and lights_off
 
     def set_exposure_time(self, exposure_us: int) -> None:
         """

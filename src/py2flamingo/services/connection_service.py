@@ -622,6 +622,10 @@ class MVCConnectionService:
         """
         Close connection to microscope gracefully.
 
+        Before the socket closes, ``safe_state.leave_safe`` turns the lights
+        off (and halts the stage when a client acquisition is running; sends
+        nothing while only a server workflow runs). See that function.
+
         Raises:
             RuntimeError: If not currently connected
         """
@@ -629,6 +633,13 @@ class MVCConnectionService:
 
         if not self.is_connected():
             raise RuntimeError("Not connected to microscope")
+
+        try:
+            from py2flamingo.services import safe_state
+
+            safe_state.leave_safe(self, "disconnect")
+        except Exception as e:  # noqa: BLE001 - disconnect must still happen
+            self.logger.error(f"Safe state before disconnect failed: {e}")
 
         try:
             # Close sockets via TCPConnection
