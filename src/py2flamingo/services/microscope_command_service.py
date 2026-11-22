@@ -67,7 +67,10 @@ class MicroscopeCommandService:
             connection: MVCConnectionService instance providing socket access
         """
         self.connection = connection
-        self.logger = logging.getLogger(self.__class__.__name__)
+        # Named after the subclass's module (py2flamingo.services.stage_service,
+        # ...), as getLogger(__name__) there would be, so the services log
+        # inside the py2flamingo tree.
+        self.logger = logging.getLogger(type(self).__module__)
 
     def _write(self, data: bytes) -> None:
         """Write bytes on the command socket through the one locked writer.
