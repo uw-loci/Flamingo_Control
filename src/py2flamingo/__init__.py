@@ -1,28 +1,7 @@
-# py2flamingo package
-# Minimal initialization during restructuring
+"""Py2Flamingo: control software for Flamingo light-sheet microscopes.
 
-# Keep backward compatibility imports during migration
-try:
-    from .application import Application
-except Exception:  # PyQt may be unavailable in headless tests
-    Application = None
+Importing the package loads nothing else; the application starts from
+``python -m py2flamingo`` (``cli.py`` -> ``application.py``).
+"""
 
 __version__ = "0.6.2"
-
-# Only import what's currently working
-try:
-    from .tcp_client import TCPClient, parse_metadata_file
-except ImportError:
-    TCPClient = None
-    parse_metadata_file = None
-
-try:
-    from .minimal_gui import MinimalFlamingoGUI
-except ImportError:
-    MinimalFlamingoGUI = None
-
-__all__ = [
-    "TCPClient",
-    "parse_metadata_file",
-    "MinimalFlamingoGUI",
-]

@@ -331,7 +331,7 @@ class CommandCode:
     CMD_WORKFLOW_STOP = CameraCommands.WORKFLOW_STOP
     CMD_STAGE_POSITION_GET = StageCommands.POSITION_GET
     # Every other definition of this name -- tcp_protocol.py:47,
-    # tcp_client.py:34, stage_service.py -- is 24580 (0x6004), the code that
+    # stage_service.py -- is 24580 (0x6004), the code that
     # actually moves the stage and is proven on every run. This alias pointed at
     # 0x6005 (the server's POSITION_SET_SLIDER), so the same name meant two
     # different commands depending on which module you read.

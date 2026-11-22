@@ -52,36 +52,11 @@ def load_real_frame(filepath):
 frame = load_real_frame(f"path/to/your/data/z_{z_position:04d}.tif")
 ```
 
-### Option 2: Connect to Live Flamingo TCP Stream
+### Option 2: Live data from the microscope
 
-```python
-from py2flamingo.tcp_client import TCPClient
-
-# Create TCP connection
-client = TCPClient("192.168.1.1", 53717)
-client.connect()
-
-# In your acquisition loop:
-async def acquire_and_visualize():
-    # Get current position and rotation from Flamingo
-    position = await client.get_position()
-    rotation = await client.get_rotation()
-
-    # Acquire frame from camera
-    frame_data = await client.acquire_frame()
-
-    # Create metadata
-    metadata = {
-        'z_position': position['z'],
-        'rotation': {'rx': rotation['rx'], 'ry': rotation['ry'], 'rz': rotation['rz']},
-        'timestamp': time.time(),
-        'pixel_to_micron': 0.65,  # Adjust based on your magnification
-        'active_channels': [0, 1, 2, 3]
-    }
-
-    # Process in visualization
-    window.process_frame(frame_data, metadata)
-```
+Live frames reach the Sample View through the application itself (connect from the
+Connection tab, then open Sample View); there is no separate client to script. The
+standalone `TCPClient` this section used to show has been removed.
 
 ### Option 3: Load from HDF5 Dataset
 

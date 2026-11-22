@@ -137,7 +137,6 @@ Tests the threading and synchronization infrastructure.
 - Queue creation and management
 - Event signaling between threads
 - Thread-safe operations
-- Legacy global object compatibility
 - Memory cleanup
 
 **Key test cases:**
@@ -145,8 +144,6 @@ Tests the threading and synchronization infrastructure.
 test_queue_creation()           # All queues are created
 test_thread_safety()            # Concurrent access works
 test_event_synchronization()    # Thread coordination
-test_legacy_adapter()           # Backward compatibility
-test_singleton_behavior()       # Global objects are singletons
 ```
 
 **Important queues tested:**

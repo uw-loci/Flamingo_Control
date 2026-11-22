@@ -13,7 +13,7 @@ To connect to Elsa requires being at Morgridge on their network (not eduroam), o
 
 Before using this software, be familiar with your own Flamingo microscope, and have a dataset on hand that you have collected on a sample similar to the one you want to image using Py2Flamingo. There will be several files that are produced along with that dataset you will need to set up the software.
 
-Run __init__.py
+Run `python -m py2flamingo` from the `src` folder.
 
 The first step is a series of checks that need to be passed in order to connect and load up the GUI with default values. Requirements include:
 1. A connection to the microscope - Elsa requires being on the Morgridge LAN, Wireless (not eduroam), or connected through a VPN. This step will vary from site to site.
@@ -62,29 +62,11 @@ Commands: Individual instructions, limited, e.g. move X axis position to "value"
 
 Workflows: Also a command, but followed by a text file structured something like a JSON that conducts and entire workflow, e.g. a time series/Zstack with certain cameras, lasers, etc. and handles data storage/distribution.
 
-Main file - __init__.py  
-
-Starts the process by launching the GUI.py (aka Py2FlamingoGUI)
-Some Queue and Event objects are created through global_objects.py at this point, which help handle data transfer and pacing between the threads.
-Which calls FlamingoConnect.py to connect (microscope_connect.py) and collect useful information to populate the GUI. FlamingoConnect also starts four threads (threads.py) to handle communicating with the microscope (tcpip_nuc.py, originally courtesy of Gesine Fiona Müller from the Huisken lab) and data processing.
-
-### **Files related to button commands are directly in the py2flamingo folder, currently.**
--------------------
-
-The "functions" folder contains a few Python files that define useful functions, like connecting to the microscope or creating threads.
-
-`threads.py` handle the threads mentioned above.
-
-`tcpip_nuc.py` directly controls the information sent to the nuc
-
-`calculations.py` has extra functions for processing data, like calculating the most in focus frame of a Z stack.
-
-`text_file_parsing.py` creates and reads workflow and/or metadata files. Workflows are text files saved to the current computer/OS that can be sent to the "nuc" to perform an acquisition.
-They are currently parsed and stored as dictionaries in order to edit particular entries, then re-saved as text files when, for example, you need to change Y position before taking another Z stack.
-
-`microscope_connect.py` binds the sockets and starts the threads to handle communication with the microscope, and closing the connection when finished.
-
-image_display.py currently only handles some image processing so that 16bit images show up nicely in the GUI.
+The application starts from `python -m py2flamingo` (run from `src/`): `__main__.py` calls
+`cli.py`, which builds `FlamingoApplication` (`application.py`). Connection, stage, camera,
+laser and workflow logic live in `services/` and `controllers/`; the windows and dialogs are in
+`views/`. The original GUI.py / FlamingoConnect.py / tcpip_nuc.py chain described in earlier
+versions of this page has been removed.
 
 Control of what runs when is handled by a fairly messy set of "events" to let different threads know when to check a "queue" for the presence of data to process or a command to send. 
 

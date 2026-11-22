@@ -167,14 +167,9 @@ All inter-thread communication uses centralized queues/events:
 - `visualize_event` - Signal update display
 - `processing_event` - Processing in progress
 
-**Access via legacy adapter:**
-```python
-from py2flamingo.core.legacy_adapter import (
-    image_queue,
-    terminate_event,
-    system_idle
-)
-```
+**Access:** `services/component_factory.py` builds one `QueueManager` and one
+`EventManager` at startup; `FlamingoApplication` keeps them (`app.queue_manager`) and
+passes them to the services that need them.
 
 **Never create duplicate Queue/Event instances!**
 

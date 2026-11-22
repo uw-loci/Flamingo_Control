@@ -257,58 +257,5 @@ class TestEventManager(unittest.TestCase):
         self.assertTrue(results[0])
 
 
-class TestLegacyAdapter(unittest.TestCase):
-    """Test the legacy adapter for backward compatibility."""
-
-    def test_legacy_imports(self):
-        """Test that legacy global objects can be imported."""
-        # Import legacy objects
-        from py2flamingo.core.legacy_adapter import (
-            OS,
-            clear_all_events_queues,
-            command_queue,
-            image_queue,
-            send_event,
-            system_idle,
-        )
-
-        # Verify queues exist and are Queue objects
-        self.assertTrue(hasattr(image_queue, "put"))
-        self.assertTrue(hasattr(image_queue, "get"))
-        self.assertTrue(hasattr(command_queue, "put"))
-
-        # Verify events exist and are Event objects
-        self.assertTrue(hasattr(send_event, "set"))
-        self.assertTrue(hasattr(send_event, "wait"))
-        self.assertTrue(hasattr(system_idle, "is_set"))
-
-        # Test clear function
-        image_queue.put("test")
-        send_event.set()
-
-        clear_all_events_queues()
-
-        self.assertTrue(image_queue.empty())
-        self.assertFalse(send_event.is_set())
-        self.assertTrue(system_idle.is_set())  # Should be set after clear
-
-        # Test OS
-        self.assertIn(OS, ["Windows", "Linux", "Darwin"])
-
-    def test_singleton_behavior(self):
-        """Test that multiple imports get the same objects."""
-        # Import twice
-        from py2flamingo.core.legacy_adapter import image_queue as q1
-        from py2flamingo.core.legacy_adapter import image_queue as q2
-
-        # Should be the same object
-        self.assertIs(q1, q2)
-
-        # Test with data
-        q1.put("test_data")
-        result = q2.get()
-        self.assertEqual(result, "test_data")
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,6 @@ import unittest
 from unittest.mock import MagicMock, Mock, call, patch
 
 from py2flamingo.services.connection_service import ConnectionService
-from py2flamingo.tcp_client import TCPClient  # Use main TCPClient, not test version
 
 # from src.py2flamingo.services.connection_service import ConnectionService
 from src.py2flamingo.core.events import EventManager
@@ -14,20 +13,6 @@ from src.py2flamingo.core.queue_manager import QueueManager
 from tests.test_utils import NoOpThreadManager
 
 # from tests.test_utils import NoOpThreadManager
-
-
-class TestTCPClient(unittest.TestCase):
-    """
-    Refactored to target the new public API (ConnectionService) instead of the removed tcpip_client.TCPClient.
-    Assertions are behavioral: queues populated and 'send' event set.
-    """
-
-    def setUp(self):
-        self.test_ip = "127.0.0.1"
-        self.test_port = 53717
-
-        self.event_manager = EventManager()
-        self.queue_manager = QueueManager()
 
 
 class TestMicroscopeIntegration(unittest.TestCase):
