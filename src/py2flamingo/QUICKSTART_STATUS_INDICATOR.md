@@ -3,7 +3,7 @@
 ## What You Get
 
 A color-coded status indicator in the bottom-right of your Flamingo GUI that shows:
-- **Grey**: Disconnected
+- **Gray**: Disconnected
 - **Blue**: Ready (connected and idle)
 - **Red**: Moving (stage motion)
 - **Magenta**: Workflow Running
@@ -33,9 +33,9 @@ Look for the status indicator in the **bottom-right of the status bar**.
 
 ## 3. Test Connection Status
 
-1. **Disconnected (Grey)**: You should see this when the app starts
+1. **Disconnected (Gray)**: You should see this when the app starts
 2. **Connect**: Click connect → should change to **Blue** "Ready"
-3. **Disconnect**: Click disconnect → should change back to **Grey**
+3. **Disconnect**: Click disconnect → should change back to **Gray**
 
 Color transitions are smooth (300ms animation).
 

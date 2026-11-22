@@ -88,7 +88,7 @@ NODE_COLORS: Dict[NodeType, str] = {
     NodeType.OVERVIEW_ANALYSIS: "#8d6e63",  # Brown — earth tone for image analysis
     NodeType.POST_PROCESSING: "#e57373",  # Red — post-acquisition processing
     NodeType.TIMED_LOOP: "#7e57c2",  # Deep purple — time-based iteration
-    NodeType.PYTHON_FUNCTION: "#78909c",  # Blue grey — operator-written code
+    NodeType.PYTHON_FUNCTION: "#78909c",  # Blue gray — operator-written code
 }
 
 
@@ -536,7 +536,7 @@ class Pipeline:
 
         Connections whose source or target node has been deleted are skipped,
         so the graph algorithms describe only nodes that exist. Including a
-        deleted node as a neighbour raised KeyError from the traversal, which
+        deleted node as a neighbor raised KeyError from the traversal, which
         is what ``validate()`` runs first -- see ``_build_in_degree``.
         """
         adj: Dict[str, Set[str]] = {nid: set() for nid in self.nodes}

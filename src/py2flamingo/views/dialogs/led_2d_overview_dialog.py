@@ -90,16 +90,16 @@ class ScanConfiguration:
     # quick tests; the result then has a single view, so tile collection falls
     # back to per-tile / manually-set Z instead of the 90° intersection.
     single_rotation: bool = False
-    # Percent of a FOV that neighbouring tiles share. The grid step is
+    # Percent of a FOV that neighboring tiles share. The grid step is
     # fov * (1 - overlap/100). This was hardcoded to zero ("No overlap - tiles
     # are adjacent"), which leaves nothing for the stitcher to register on and
     # a hairline gap wherever the stage repeats imperfectly. Clamped to the
     # server's own [0, 50] tiling limit.
     tile_overlap_percent: float = 10.0
-    # Narrow each tile's Z sweep to where neighbouring tiles found the sample,
+    # Narrow each tile's Z sweep to where neighboring tiles found the sample,
     # instead of traversing the whole bounding box every time. Z travel is 61%
     # of a tile (measured 2026-08-17), and the plane count does not affect it --
-    # the range does. OFF by default: it predicts from neighbours, which is a
+    # the range does. OFF by default: it predicts from neighbors, which is a
     # guess about sample shape, and samples in tubes or with sparse structure
     # will not fit it. Nothing is lost when it is wrong -- a tile whose sample
     # reaches the edge of its band is re-swept at full range immediately -- but
@@ -495,7 +495,7 @@ class LED2DOverviewDialog(PersistentDialog):
         # thing "Best Focus" is supposed to mean.)
 
         # Adaptive Z. Deliberately below the Z controls it modifies, and
-        # deliberately off: it predicts each tile's Z band from its neighbours,
+        # deliberately off: it predicts each tile's Z band from its neighbors,
         # which is a guess about sample shape. Nothing is lost when the guess is
         # wrong -- a tile whose sample reaches the edge of its band is re-swept
         # at full range there and then -- but a bad fit costs time, so the user
@@ -598,7 +598,7 @@ class LED2DOverviewDialog(PersistentDialog):
         row.addWidget(self.tile_overlap)
 
         # (!!) explainer — same affordance as the (?) helpers in Sample View,
-        # coloured to say "read me before you run this", not "optional detail".
+        # colored to say "read me before you run this", not "optional detail".
         self._overlap_help_btn = QPushButton("!!")
         self._overlap_help_btn.setFixedSize(24, 24)
         self._overlap_help_btn.setCursor(Qt.WhatsThisCursor)
@@ -1125,7 +1125,7 @@ class LED2DOverviewDialog(PersistentDialog):
             return None
 
     def _tile_step_mm(self) -> Optional[float]:
-        """Centre-to-centre tile pitch, or None if the FOV is unknown.
+        """Centre-to-center tile pitch, or None if the FOV is unknown.
 
         The single source of the step for every count/preview in this dialog,
         so none of them can drift from what the workflow actually scans.

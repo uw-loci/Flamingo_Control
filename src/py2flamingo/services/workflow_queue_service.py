@@ -85,7 +85,7 @@ class WorkflowQueueService(QObject):
         workflow_progress: Emitted with image progress (acquired, expected)
         queue_completed: Emitted when all workflows complete
         queue_summary: Emitted just before queue_completed (succeeded, failed)
-        queue_cancelled: Emitted if queue is cancelled, and when it stops on
+        queue_cancelled: Emitted if queue is canceled, and when it stops on
             its own after a failure (queue_failed says why)
         queue_failed: Emitted when the queue stops itself (message)
         progress_updated: Emitted with progress info (current, total, message)
@@ -1136,7 +1136,7 @@ class WorkflowQueueService(QObject):
 
         Returns:
             True if workflow confirmed started (system became busy)
-            False if cancelled, timeout, or system remained idle
+            False if canceled, timeout, or system remained idle
 
         Escape mechanisms:
             - Cancellation: User can cancel via self._cancel_requested

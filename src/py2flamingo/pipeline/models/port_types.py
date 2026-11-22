@@ -81,8 +81,8 @@ PORT_COLORS: dict[PortType, str] = {
     PortType.SCALAR: "#ce93d8",  # Purple
     PortType.BOOLEAN: "#fff176",  # Yellow
     PortType.STRING: "#a5d6a7",  # Light green
-    PortType.FILE_PATH: "#90a4ae",  # Blue grey
-    PortType.TRIGGER: "#e0e0e0",  # Light grey
+    PortType.FILE_PATH: "#90a4ae",  # Blue gray
+    PortType.TRIGGER: "#e0e0e0",  # Light gray
     PortType.ANY: "#ffffff",  # White
 }
 

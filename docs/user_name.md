@@ -81,4 +81,4 @@ anywhere.
 
 `acquisition_root()` is the single place the acquisition folder path is built.
 If the user name should affect a new path, call that helper rather than
-composing the path again, and add the behaviour to the list above.
+composing the path again, and add the behavior to the list above.

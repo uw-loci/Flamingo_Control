@@ -133,12 +133,12 @@ logger = logging.getLogger(__name__)
 
 
 def acquired_center_xyz_um(metadata: dict, shape_zyx, voxel_zyx):
-    """Stage-frame centre (x, y, z) µm of a stitched volume, or None.
+    """Stage-frame center (x, y, z) µm of a stitched volume, or None.
 
     Returns None when the file does not describe its own coordinate frame, in
-    which case the caller should fall back to centring the data in the chamber
+    which case the caller should fall back to centering the data in the chamber
     — guessing a position from an undescribed frame is how a volume ends up
-    mirrored and metres from where it belongs.
+    mirrored and meters from where it belongs.
 
     The frame descriptor (``world_frame``, stitcher v0.9.20+) matters because
     tile placement can NEGATE world X or Y: a mosaic spanning stage X
@@ -157,7 +157,7 @@ def acquired_center_xyz_um(metadata: dict, shape_zyx, voxel_zyx):
     except (TypeError, ValueError, IndexError):
         return None
 
-    # Centre in the WORLD frame the stitcher wrote...
+    # Center in the WORLD frame the stitcher wrote...
     cx, cy, cz = o_x + ext_x / 2.0, o_y + ext_y / 2.0, o_z + ext_z / 2.0
     # ...then back to stage coordinates.
     if frame.get("x_axis_negated"):
@@ -198,7 +198,7 @@ def _stitched_channel_slot(ch_id) -> int:
     The viewer already has side-aware slots for exactly this: 0-3 are the
     left-side lasers, 4-7 the same lasers on the right path, 8 the LED. So
     ``3_I0`` -> 3 and ``3_I1`` -> 7, matching ``_raw_file_key``'s
-    ``channel + 4 * illum``. Anything unrecognised falls back to 0 rather than
+    ``channel + 4 * illum``. Anything unrecognized falls back to 0 rather than
     dropping the channel — a mis-slotted volume is visible and fixable, a
     silently discarded one is neither.
     """
@@ -1722,7 +1722,7 @@ class SampleView(QWidget):
         # Movement signals
         if self.movement_controller:
             self.movement_controller.position_changed.connect(self._on_position_changed)
-            # Grey out position controls while the stage is moving so the user
+            # Gray out position controls while the stage is moving so the user
             # can't queue commands that would be ignored (and snap the slider
             # back). motion_started/stopped carry the axis name; we ignore it.
             self.movement_controller.motion_started.connect(
@@ -3686,11 +3686,11 @@ class SampleView(QWidget):
         # has to be chosen, not read off. The choice is the stage position of
         # the volume's own geometric CENTRE: origin + extent/2. That is the
         # position at which the middle of the mosaic sat at the focal point, so
-        # driving the stage back there re-centres the volume in the chamber,
+        # driving the stage back there re-centers the volume in the chamber,
         # matching what was painted live. Every other tile follows from the
         # rigid-body delta.
         #
-        # This has to be the same point the volume is centred on below, or the
+        # This has to be the same point the volume is centered on below, or the
         # data is drawn in one place and anchored to another. `origin_um` read
         # literally is not always a stage coordinate: tile placement can negate
         # stage X, so the reported file carries origin_um.x = -8350 for a mosaic
@@ -3711,7 +3711,7 @@ class SampleView(QWidget):
             stitch_center_z_mm = (o_z0 + sh0[0] * v_z0 / 2) / 1000
 
         # The rotation the sample was physically at. Falling back to the
-        # viewer's CURRENT rotation (the old behaviour) draws a volume acquired
+        # viewer's CURRENT rotation (the old behavior) draws a volume acquired
         # at -147 deg as though it were acquired at whatever the stage happens
         # to read now — i.e. straight on.
         acq_r = acquired_angle_deg(metadata)
@@ -3775,10 +3775,10 @@ class SampleView(QWidget):
             # `pos - ref`). "Where it was acquired" is expressed by the
             # reference stage position, not by an absolute chamber coordinate:
             # return the stage to the acquisition position and the volume sits
-            # centred, exactly as the live tiles did; move away and it slides
+            # centered, exactly as the live tiles did; move away and it slides
             # rigidly, clipping at the chamber edge.
             #
-            # Feeding the acquired stage centre in here instead double-counts
+            # Feeding the acquired stage center in here instead double-counts
             # the offset. It also treats a stage coordinate as a chamber one —
             # for a mosaic acquired at stage Y 18.8 mm that puts 93% of the
             # volume outside a 14 mm chamber before the stage has moved at all.
@@ -5707,7 +5707,7 @@ class SampleView(QWidget):
         """Enable position controls only when idle, connected and unlocked.
 
         Position sliders/edits are enabled only when all three hold: connected,
-        not acquisition-locked, and not mid-motion. Centralising this keeps the
+        not acquisition-locked, and not mid-motion. Centralizing this keeps the
         three independent sources (connection, acquisition lock, stage motion)
         from clobbering each other.
         """
@@ -5738,7 +5738,7 @@ class SampleView(QWidget):
             group.setStyleSheet("")
 
     def _on_stage_motion_started(self, axis_name: str = "") -> None:
-        """Stage started moving — grey out position controls."""
+        """Stage started moving — gray out position controls."""
         self._stage_moving = True
         self._apply_stage_control_state()
 

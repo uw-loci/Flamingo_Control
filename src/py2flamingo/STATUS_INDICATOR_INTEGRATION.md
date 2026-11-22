@@ -28,7 +28,7 @@ The status indicator system consists of three main components:
 
 | Status | Color | Code | Description |
 |--------|-------|------|-------------|
-| DISCONNECTED | Grey | `(128, 128, 128)` | Not connected to microscope |
+| DISCONNECTED | Gray | `(128, 128, 128)` | Not connected to microscope |
 | IDLE | Steel Blue | `(70, 130, 180)` | Connected and ready |
 | MOVING | Red | `(220, 50, 50)` | Stage motion in progress |
 | WORKFLOW_RUNNING | Magenta | `(200, 50, 200)` | Acquisition workflow active |
@@ -182,7 +182,7 @@ if self.status_indicator_widget is not None:
    ```
 
 2. **Verify initial state:**
-   - Status indicator should show Grey with "Disconnected" text
+   - Status indicator should show Gray with "Disconnected" text
    - Tooltip should say "System Status: Disconnected"
 
 3. **Test connection:**
@@ -202,7 +202,7 @@ if self.status_indicator_widget is not None:
 
 6. **Test disconnection:**
    - Disconnect from microscope
-   - Status should return to Grey with "Disconnected" text
+   - Status should return to Gray with "Disconnected" text
 
 ### Programmatic Testing
 

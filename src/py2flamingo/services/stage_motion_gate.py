@@ -4,7 +4,7 @@
 missing or unusable, ``MicroscopeSettingsService`` substitutes placeholder
 limits of 0-26 mm on every axis — and those are WIDER than any real Flamingo:
 n7's X axis stops at 12.31 mm, Liara's at 5.0. So the fallback does not merely
-fail to protect the stage, it authorises travel the instrument cannot make.
+fail to protect the stage, it authorizes travel the instrument cannot make.
 
 Every guard that keyed off ``is_configured`` lived in a dialog. Nothing in the
 movement path consulted it, so an unconfigured scope moved happily against

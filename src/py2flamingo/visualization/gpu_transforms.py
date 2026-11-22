@@ -445,7 +445,7 @@ def label_auto(
             None → the scipy/cupy default, which is 6-connectivity (faces only); pass np.ones((3,3,3)) for full 26-connectivity.
 
     Returns:
-        (labels, num_features) — labelled array and count of objects.
+        (labels, num_features) — labeled array and count of objects.
     """
     if is_gpu_beneficial(mask):
         try:

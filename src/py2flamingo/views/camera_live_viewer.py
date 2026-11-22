@@ -451,7 +451,7 @@ class CameraLiveViewer(QWidget):
                 options=QFileDialog.DontConfirmOverwrite,  # We handle auto-increment, so no overwrite prompt
             )
 
-            # User cancelled
+            # User canceled
             if not filename:
                 self.logger.info("Snapshot cancelled by user")
                 return

@@ -20,7 +20,7 @@ the client uses, so the synthetic scope cannot drift from the real one.
 ever be reachable from another machine, and nothing here should ever be
 mistaken for an instrument.
 
-What it models, because these are the behaviours that have actually caused
+What it models, because these are the behaviors that have actually caused
 faults:
 
 * **Motion takes time.** ``POSITION_SET`` returns immediately and the
@@ -625,7 +625,7 @@ class SyntheticMicroscope:
             # The server moves for all three position-set codes: the client
             # sends POSITION_SET (0x6004); the vendor GUI's slider and text
             # box send 0x6005 and 0x6006. A client once sent the slider code,
-            # and a scope that modelled only one would have acked its moves
+            # and a scope that modeled only one would have acked its moves
             # and moved nothing.
             StageCommands.POSITION_SET: self._on_move,
             StageCommands.POSITION_SET_SLIDER: self._on_move,
@@ -643,7 +643,7 @@ class SyntheticMicroscope:
             LEDCommands.DISABLE: self._on_led_disable,
             CameraCommands.LIVE_VIEW_START: self._on_live_start,
             CameraCommands.LIVE_VIEW_STOP: self._on_live_stop,
-            # Modelled on the server source (claude-reports design
+            # Modeled on the server source (claude-reports design
             # server-command-reply-reference.md): which code answers, what is
             # in which field, and what is never answered at all.
             0x3006: self._on_snapshot,
@@ -679,7 +679,7 @@ class SyntheticMicroscope:
             ),
         }
 
-    # -------------------------------------------------------------- behaviours
+    # -------------------------------------------------------------- behaviors
 
     def _reply(
         self,

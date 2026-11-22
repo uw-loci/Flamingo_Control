@@ -254,7 +254,7 @@ def parse_tile_folder(folder: Path) -> Optional[DiskTileInfo]:
     if not parsed:
         raise FileNotFoundError(f"No .raw files in {folder.name}")
 
-    # This loader visualises ONE (timepoint, view, rotation). If the folder
+    # This loader visualizes ONE (timepoint, view, rotation). If the folder
     # holds more than one — a time series, multiple views, or multiple
     # rotations — load the first group and WARN rather than silently collapsing
     # them onto each other.

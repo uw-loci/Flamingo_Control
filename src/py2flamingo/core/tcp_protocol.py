@@ -197,7 +197,7 @@ class ProtocolEncoder:
                 # Summary at INFO, full dump at DEBUG.
                 #
                 # int32Data1 is in here because for the illumination commands it
-                # is the whole payload: LED_SET puts the colour in int32Data0 and
+                # is the whole payload: LED_SET puts the color in int32Data0 and
                 # the intensity in int32Data1, and `value` is always 0.0. Without
                 # it the line reads "data0=0 value=0.0" for every intensity from
                 # 0% to 99% -- which is exactly what the 2026-08-27 log showed

@@ -338,7 +338,7 @@ def _ensure_qapplication():
     because ``QApplication([])`` otherwise tries to open an X11 connection and
     aborts the process -- which made the *headless* entry point unusable over
     SSH, in CI, and to an agent, the three places it exists for. An explicit
-    ``QT_QPA_PLATFORM`` in the environment is honoured, so a caller that does
+    ``QT_QPA_PLATFORM`` in the environment is honored, so a caller that does
     have a display and wants it keeps it.
     """
     import os

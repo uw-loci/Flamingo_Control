@@ -289,8 +289,8 @@ def selection_region_mm(
     """Stage span covered by tiles at `centres_mm`, each `fov_mm` wide.
 
     Tile positions are CENTRES (the server's own convention — Position A/B are
-    corner-tile centres), so the imaged region runs half a field beyond the
-    outermost centre at each end. Getting this wrong shrinks the acquisition
+    corner-tile centers), so the imaged region runs half a field beyond the
+    outermost center at each end. Getting this wrong shrinks the acquisition
     region by one field, which quietly clips the edge of the sample.
     """
     if not centres_mm:
@@ -300,7 +300,7 @@ def selection_region_mm(
 
 
 def measured_step_mm(centres_mm: Sequence[float]) -> Optional[float]:
-    """Smallest distinct gap between tile centres along one axis, or None.
+    """Smallest distinct gap between tile centers along one axis, or None.
 
     The SMALLEST, not the median: a selection is a subset, so gaps between
     tiles the user skipped are multiples of the real step. One adjacent pair
@@ -350,11 +350,11 @@ def plan_acquisition_from_overview(
     The overview and the acquisition do not see the same field of view. LED
     transmission fills the whole sensor; the light sheet does not fill it
     vertically, so the acquisition field is smaller and generally NOT square.
-    Re-imaging at the overview's tile centres therefore leaves gaps wherever the
+    Re-imaging at the overview's tile centers therefore leaves gaps wherever the
     acquisition field is smaller than the overview's — the tiles were spaced for
     a field the laser cannot illuminate.
 
-    So the overview's tile centres are used only to bound a REGION, and the
+    So the overview's tile centers are used only to bound a REGION, and the
     acquisition grid is generated fresh over that region from its own field and
     its own overlap. This is also the coupling that let a requested 20% overlap
     reach the stage as 0.25%: the overview grid was a one-way door into
@@ -381,13 +381,13 @@ def plan_acquisition_from_overview(
 
     # compute_tile_geometry takes corner-tile CENTRES, and it extends the ROI by
     # half a field beyond each. The region above is already an edge-to-edge
-    # span, so hand it back the centres that reproduce it.
+    # span, so hand it back the centers that reproduce it.
     half_x = float(acquisition_fov_x_mm) / 2.0
     half_y = float(acquisition_fov_y_mm) / 2.0
     start_x, end_x = region_x[0] + half_x, region_x[1] - half_x
     start_y, end_y = region_y[0] + half_y, region_y[1] - half_y
     # A region narrower than one acquisition field collapses to a single tile at
-    # its centre rather than an inverted span.
+    # its center rather than an inverted span.
     if end_x < start_x:
         start_x = end_x = (region_x[0] + region_x[1]) / 2.0
     if end_y < start_y:

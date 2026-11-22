@@ -37,7 +37,7 @@ class WorkflowState(Enum):
     EXECUTING = "executing"  # Acquiring images
     PAUSED = "paused"  # Temporarily halted
     COMPLETED = "completed"  # Successfully finished
-    CANCELLED = "cancelled"  # User cancelled
+    CANCELLED = "cancelled"  # User canceled
     ERROR = "error"  # Error occurred
 
 

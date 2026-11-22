@@ -34,7 +34,7 @@ _LASER_SLOTS = [
 ]
 
 # Workflow types whose Z scan defines the plane spacing (others report 1.0 um,
-# matching the historical Workflow-tab behaviour).
+# matching the historical Workflow-tab behavior).
 _Z_SCANNING_TYPES = (
     WorkflowType.ZSTACK,
     WorkflowType.TILE,

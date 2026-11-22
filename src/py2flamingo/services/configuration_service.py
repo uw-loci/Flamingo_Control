@@ -131,7 +131,7 @@ class ConfigurationService:
 
         The placeholder limits that stand in for a missing settings file are
         WIDER than any real instrument, so an unconfigured scope is not merely
-        unprotected — it is authorised to travel where the stage cannot go.
+        unprotected — it is authorized to travel where the stage cannot go.
         Nothing in the movement path consulted ``is_configured``, so this is
         where that becomes an actual refusal rather than a log line.
         """
@@ -664,7 +664,7 @@ class ConfigurationService:
 
         Args:
             key: Preference name, e.g. ``"save_format"`` or ``"aoi_width"``
-            value: JSON-serialisable value to store
+            value: JSON-serializable value to store
         """
         prefs = self.get_workflow_prefs()
         if prefs.get(key) == value:

@@ -388,7 +388,7 @@ class TileProcessingWorker(QObject):
 
                 # Only Z delta varies per frame. Storage offset = -(M @ delta):
                 # storage is the negation of the display rigid-shift, so a tile
-                # lands centred at its capture position.
+                # lands centered at its capture position.
                 delta_z = (z_position - ref["z"]) if ref is not None else 0.0
                 tile_disp = -(
                     M @ np.array([delta_x * 1000.0, delta_y * 1000.0, delta_z * 1000.0])

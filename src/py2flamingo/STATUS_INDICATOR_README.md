@@ -36,7 +36,7 @@ A comprehensive global status indicator system has been implemented for the Flam
 - Tooltip shows current status
 
 **Status Colors:**
-- **Grey** `(128, 128, 128)`: Disconnected
+- **Gray** `(128, 128, 128)`: Disconnected
 - **Steel Blue** `(70, 130, 180)`: Ready/Idle
 - **Red** `(220, 50, 50)`: Moving
 - **Magenta** `(200, 50, 200)`: Workflow Running

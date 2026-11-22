@@ -7,7 +7,7 @@ still spans the full range. Reducing the RANGE is the only thing that does.
 
 Most of that range is empty. A bounding box is drawn around the whole sample,
 but any one tile sees a slice of it, and outside that slice the stage is
-travelling through nothing. Where a tile's neighbours found their sample is a
+traveling through nothing. Where a tile's neighbors found their sample is a
 good prediction of where this tile's sample will be, so the sweep can start
 narrow and widen only when it has to.
 
@@ -19,7 +19,7 @@ re-swept over the full range instead. :func:`should_resweep` is the whole safety
 argument, and it is why this can be turned on without knowing the sample shape.
 
 The failure mode it cannot rule out is a sample this heuristic simply does not
-fit — a tube, a sparse or discontinuous specimen, anything where neighbouring
+fit — a tube, a sparse or discontinuous specimen, anything where neighboring
 tiles say nothing useful about each other. :func:`adaptation_is_not_paying`
 detects that from the re-sweep rate and gives up, so the worst case is bounded
 near the non-adaptive cost rather than well above it.
@@ -148,7 +148,7 @@ def content_extent(
         return ContentExtent()
     if scan_peak_score and peak < float(scan_peak_score) * background_fraction:
         # Nothing here. Contributing a full-depth extent would widen every
-        # neighbour's band and quietly undo the whole optimisation.
+        # neighbour's band and quietly undo the whole optimization.
         return ContentExtent()
 
     cut = peak * threshold_fraction
@@ -224,10 +224,10 @@ def predict_band(
     margin_mm: float = DEFAULT_MARGIN_MM,
     min_band_mm: float = DEFAULT_MIN_BAND_MM,
 ) -> ZBand:
-    """The band to sweep next, from where neighbouring tiles found their sample.
+    """The band to sweep next, from where neighboring tiles found their sample.
 
     Falls back to the full range whenever there is nothing to go on -- no
-    neighbours, or none of them with content. Narrowing on no evidence is
+    neighbors, or none of them with content. Narrowing on no evidence is
     exactly the guess this must not make.
     """
     z_min, z_max = float(z_min), float(z_max)
@@ -258,7 +258,7 @@ def neighbour_extents(
     """Extents of the already-scanned tiles adjacent to this one in the grid.
 
     Grid adjacency rather than scan order: the serpentine's previous tile is a
-    neighbour everywhere except at a column turn, where it is a whole column
+    neighbor everywhere except at a column turn, where it is a whole column
     away and predicts nothing.
     """
     out = []

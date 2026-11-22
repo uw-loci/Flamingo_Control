@@ -213,7 +213,7 @@ Configuration must not be tracked in git directly — it holds machine-specific 
 (IPs, drive letters), and a tracked copy that the app rewrites leaves the working tree
 permanently dirty, which is what made `git describe --dirty` useless. The pattern
 instead is a tracked `<name>.example.json` that `utils/seed_config.py` copies when the
-real file is absent. Seeding never overwrites, so a customised machine is untouched by
+real file is absent. Seeding never overwrites, so a customized machine is untouched by
 updates.
 
 **Before deleting or untracking any file here, read it** — `git show HEAD:<path>`.
@@ -247,7 +247,7 @@ limits (`<Stage limits>`, `Soft limit min/max`), because the server applies no l
 to a position command itself: on each bound the narrower of the two applies. When it is missing, `MicroscopeSettingsService` substitutes placeholder limits
 of **0–26 mm on every axis** — and those are *wider* than any real Flamingo: n7's X axis
 stops at 12.31 mm, Liara's at 5.0. So the fallback does not merely fail to protect the
-stage, it authorises travel the instrument cannot make, into the objective or the
+stage, it authorizes travel the instrument cannot make, into the objective or the
 chamber wall. Moving on a fabricated limit is worse than not moving.
 
 ### What to do

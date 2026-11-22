@@ -23,7 +23,7 @@ class GlobalStatus(Enum):
     Global system status states.
 
     These map to visual indicator colors:
-    - DISCONNECTED: Grey
+    - DISCONNECTED: Gray
     - IDLE: Blue (ready/waiting)
     - MOVING: Red (stage motion in progress)
     - WORKFLOW_RUNNING: Magenta (acquisition workflow active)

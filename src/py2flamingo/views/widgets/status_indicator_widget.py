@@ -23,7 +23,7 @@ class StatusIndicatorWidget(QWidget):
     Visual status indicator widget.
 
     Displays system status with:
-    - Color-coded indicator (Blue=Ready, Amber=Moving, Purple=Workflow, Grey=Disconnected)
+    - Color-coded indicator (Blue=Ready, Amber=Moving, Purple=Workflow, Gray=Disconnected)
     - Status text label
     - Smooth color transitions
     - Tooltip with detailed status
@@ -34,7 +34,7 @@ class StatusIndicatorWidget(QWidget):
 
     # Color mapping for each status (colorblind-friendly)
     STATUS_COLORS = {
-        GlobalStatus.DISCONNECTED: QColor(NEUTRAL_COLOR),  # Grey
+        GlobalStatus.DISCONNECTED: QColor(NEUTRAL_COLOR),  # Gray
         GlobalStatus.IDLE: QColor(SUCCESS_COLOR),  # Blue
         GlobalStatus.MOVING: QColor(WARNING_COLOR),  # Amber/Gold
         GlobalStatus.WORKFLOW_RUNNING: QColor("#a56eff"),  # Purple

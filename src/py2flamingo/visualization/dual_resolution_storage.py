@@ -887,7 +887,7 @@ class DualResolutionVoxelStorage:
     def raw_from_display(self, channel_id: int, value: float) -> float:
         """Undo the 8-bit rescale: displayed value -> original counts.
 
-        Exact in 16-bit mode. In 8-bit mode the result is quantised to the
+        Exact in 16-bit mode. In 8-bit mode the result is quantized to the
         channel's scale factor — it reports what the raw count was to within
         one display step, not a value that survived unchanged.
         """
@@ -1091,7 +1091,7 @@ class DualResolutionVoxelStorage:
             # Scatter straight to display resolution. Equivalent to densifying
             # the region and calling _block_reduce (which takes the block MAX,
             # and edge-padding a partial block replicates values already in it),
-            # but it never materialises the storage-resolution array — that is
+            # but it never materializes the storage-resolution array — that is
             # ratio^3 = 1000x larger for the default 5µm/50µm pair.
             downsampled = self._scatter_to_display_blocks(
                 z_idx, y_idx, x_idx, snapshot_values, min_coords, region_shape, ratio
@@ -1343,7 +1343,7 @@ class DualResolutionVoxelStorage:
     def get_memory_usage(self) -> Dict[str, float]:
         """Report memory usage statistics.
 
-        These are the bytes actually held, not an idealised
+        These are the bytes actually held, not an idealized
         bytes-per-voxel figure. The old version multiplied the voxel count by
         7 (uint16 + float32 + uint8) while the data lived in tuple-keyed dicts
         costing ~270 bytes a voxel, so it under-reported by ~39x — which is

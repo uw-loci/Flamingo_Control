@@ -59,7 +59,7 @@ class VolumeScanAcquisition(QObject):
         scan_progress: Emitted with (current_position, total_positions, percent)
         scan_position: Emitted with (x, y, z_start, z_end) for each paint
         scan_completed: Emitted when scan finishes successfully
-        scan_cancelled: Emitted if scan is cancelled
+        scan_cancelled: Emitted if scan is canceled
         scan_error: Emitted with error message on failure
     """
 

@@ -216,7 +216,7 @@ class MicroscopeSettingsService:
             # the placeholder limits substituted below are WIDER than the real
             # instrument (0-26 mm on X against N7's 1.0-12.31), and every guard
             # that protects the stage keys off is_configured. Leaving it True
-            # here silently authorises moves the stage cannot make, which is
+            # here silently authorizes moves the stage cannot make, which is
             # the exact hazard _get_default_settings' own docstring warns about.
             self.is_configured = False
             print(f"[MicroscopeSettingsService] ✗ Error loading settings file: {e}")
@@ -234,7 +234,7 @@ class MicroscopeSettingsService:
         These limits are NOT safe, despite the old docstring saying so. They are
         a guess made in code, and on N7 the guess is WIDER than the instrument:
         0-26 mm on X against a real envelope of 1.0-12.31. A permissive
-        fabricated limit is worse than none, because it silently authorises
+        fabricated limit is worse than none, because it silently authorizes
         moves the stage cannot make.
 
         Kept only so the app can start and reach the setup dialog. ``is_configured``

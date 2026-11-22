@@ -827,7 +827,7 @@ class TileCollectionDialog(PersistentDialog):
 
         The overview and the acquisition do not see the same field. LED
         transmission fills the sensor; the light sheet does not fill it
-        vertically, so re-imaging at the overview's tile centres leaves gaps
+        vertically, so re-imaging at the overview's tile centers leaves gaps
         wherever the sheet cannot illuminate what the LED could see. This is
         also the coupling that let a requested 20% overlap reach the stage as
         0.25%: the overview grid was a one-way door into acquisition, and
@@ -1347,7 +1347,7 @@ class TileCollectionDialog(PersistentDialog):
 
         Two states:
 
-        * **Per tile, from the data** -- the existing behaviour. With two views
+        * **Per tile, from the data** -- the existing behavior. With two views
           90° apart that is the rotation-geometry intersection (each tile gets
           its own depth); with a single view it is the Z range recorded in that
           tile's own acquisition metadata.
@@ -2269,7 +2269,7 @@ class TileCollectionDialog(PersistentDialog):
         """Move the server's flat tile folders into the nested layout.
 
         Every execution path calls this once the run is over (completed,
-        cancelled, or fallback-timed), because the flat layout the server is
+        canceled, or fallback-timed), because the flat layout the server is
         forced to produce is not what MIP Overview or the stitcher read.
 
         Failures are contained: this is invoked from Qt slots, where an
@@ -2327,7 +2327,7 @@ class TileCollectionDialog(PersistentDialog):
             base = getattr(self, "_base_save_directory", "") or ""
             mapping = getattr(self, "_tile_folder_mapping", {}) or {}
             date_folder = next(iter(mapping.values()))[0] if mapping else ""
-            # The reorganised root is the parent of the X..._Y... folders. If
+            # The reorganized root is the parent of the X..._Y... folders. If
             # reorganization did not run, the tiles are still flat on the
             # server and there is no single folder to describe — say so in the
             # log rather than dropping the manifest somewhere misleading.
@@ -3088,7 +3088,7 @@ class TileCollectionDialog(PersistentDialog):
             if add_to_sample_view and hasattr(self._app, "workflow_controller"):
                 self._app.workflow_controller._suppress_tile_clear = False
 
-            # Notify Sample View that tile workflows are complete (even if cancelled)
+            # Notify Sample View that tile workflows are complete (even if canceled)
             if add_to_sample_view:
                 sample_view = self._get_sample_view_instance()
                 if sample_view and hasattr(sample_view, "finish_tile_workflows"):

@@ -317,7 +317,7 @@ Provides two-point position input with mode-dependent field visibility.
 | X Position | SpinBox -50.0 to 50.0 mm | Mode-dependent |
 | Y Position | SpinBox -50.0 to 50.0 mm | Mode-dependent |
 | Z Position | SpinBox 0.0 to 30.0 mm | Always editable |
-| R Position | SpinBox 0.0 to 360.0° | Always greyed |
+| R Position | SpinBox 0.0 to 360.0° | Always grayed |
 | Use Current | Button | Button |
 | Load Saved | ComboBox (presets) | ComboBox (presets) |
 
@@ -668,15 +668,15 @@ regions. Instead of entering abstract parameters (number of planes, step size), 
 
 | Field | Position A | Position B (varies by mode) |
 |-------|------------|----------------------------|
-| X (mm) | Always editable | Editable (Tiling), Greyed (Z-Stack) |
-| Y (mm) | Always editable | Editable (Tiling), Greyed (Z-Stack) |
+| X (mm) | Always editable | Editable (Tiling), Grayed (Z-Stack) |
+| Y (mm) | Always editable | Editable (Tiling), Grayed (Z-Stack) |
 | Z (mm) | Always editable | Always editable |
-| R (deg) | Always editable | Greyed (all modes) |
+| R (deg) | Always editable | Grayed (all modes) |
 
 **Modes:**
 - **Snapshot**: Position B hidden
-- **Z-Stack**: Position B shows Z only (X, Y, R greyed out)
-- **Tiling**: Position B shows X, Y, Z (R greyed out)
+- **Z-Stack**: Position B shows Z only (X, Y, R grayed out)
+- **Tiling**: Position B shows X, Y, Z (R grayed out)
 
 ### Position Sources
 

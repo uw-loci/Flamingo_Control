@@ -245,7 +245,7 @@ class PositionPresetService(QObject):
 
         Loads each preset independently and ignores unknown fields. It used to
         build them in one dict comprehension with ``PositionPreset(**data)``, so
-        a single unrecognised key — anything a newer version had added — raised
+        a single unrecognized key — anything a newer version had added — raised
         TypeError, hit the blanket except, and left ``self._presets`` empty. The
         next save then wrote that empty set back over the file: **every named
         position gone, permanently, with only a log line.** These are stage

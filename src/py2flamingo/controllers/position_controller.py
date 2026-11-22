@@ -25,7 +25,7 @@ class EmergencyStopResult:
 
     halt_sent: bool
     workflow_stop_sent: bool
-    #: (name, error) per cancelled client operation; error None = cancelled.
+    #: (name, error) per canceled client operation; error None = canceled.
     cancelled: List[Tuple[str, Optional[str]]] = field(default_factory=list)
 
 
@@ -1118,7 +1118,7 @@ class PositionController:
         Wait for motion complete in a background thread and query actual position from hardware.
 
         Implements C++-style command replacement: if a new movement command arrives while
-        waiting for a previous motion, the old wait is cancelled and replaced with the new one.
+        waiting for a previous motion, the old wait is canceled and replaced with the new one.
 
         Args:
             target_position: Expected target position (for fallback if query fails)

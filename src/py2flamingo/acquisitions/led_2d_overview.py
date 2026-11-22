@@ -50,7 +50,7 @@ class LED2DOverviewAcquisition(QObject):
         tile_completed: (rotation_idx: int, tile_idx: int, total_tiles: int)
         rotation_completed: (rotation_idx: int, RotationResult)
         scan_completed: (results: List[RotationResult])
-        scan_cancelled: Emitted if cancelled
+        scan_cancelled: Emitted if canceled
         scan_error: (error_message: str)
     """
 
@@ -123,7 +123,7 @@ class LED2DOverviewAcquisition(QObject):
         self._empty_tile_streak = 0
 
         # Adaptive Z state. `_z_extents` maps (x_idx, y_idx) -> ContentExtent so
-        # a tile can be predicted from its GRID neighbours rather than from
+        # a tile can be predicted from its GRID neighbors rather than from
         # whichever tile the serpentine happened to visit last -- at a column
         # turn that one is a whole column away and predicts nothing.
         self._z_extents = {}
@@ -132,7 +132,7 @@ class LED2DOverviewAcquisition(QObject):
         self._adaptive_resweeps = 0
         self._adaptive_depths_mm = []
         # Only tiles where a band was actually PREDICTED, and what they cost.
-        # A tile that swept the full range because no neighbour had anything to
+        # A tile that swept the full range because no neighbor had anything to
         # say is not evidence that prediction fails -- it is evidence of
         # nothing, and counting it is how a scan starting on the empty margin of
         # its bounding box switched adaptation off before ever reaching the
@@ -223,7 +223,7 @@ class LED2DOverviewAcquisition(QObject):
         return max(OVERLAP_PERCENT_MIN, min(OVERLAP_PERCENT_MAX, value))
 
     def _tile_step_mm(self) -> Optional[float]:
-        """Centre-to-centre tile pitch. The ONE place this is computed.
+        """Centre-to-center tile pitch. The ONE place this is computed.
 
         The step was previously worked out separately where positions are
         generated and where the tile total is estimated. Both lines were
@@ -1091,7 +1091,7 @@ class LED2DOverviewAcquisition(QObject):
 
         try:
             self._motion_tracker_cache = tracker
-        except Exception:  # noqa: BLE001 - caching is an optimisation, not a step
+        except Exception:  # noqa: BLE001 - caching is an optimization, not a step
             pass
         return tracker
 
@@ -1111,7 +1111,7 @@ class LED2DOverviewAcquisition(QObject):
         if tracker is not None:
             # allow_cancel=False: the scan is the only thing driving the stage
             # (the UI's stage controls are locked for the duration of an
-            # acquisition), and a cancelled wait here would return immediately
+            # acquisition), and a canceled wait here would return immediately
             # and hand back a mid-travel frame.
             return tracker.wait_for_motion_complete(
                 timeout=timeout_s, allow_cancel=False
@@ -1364,7 +1364,7 @@ class LED2DOverviewAcquisition(QObject):
             positions = [z_min]
         if max_planes and len(positions) > max_planes:
             if max_planes == 1:
-                # Centre plane: least worst-case defocus, and symmetric, so the
+                # Center plane: least worst-case defocus, and symmetric, so the
                 # serpentine has nothing to alternate between.
                 positions = [positions[len(positions) // 2]]
             else:
@@ -1383,7 +1383,7 @@ class LED2DOverviewAcquisition(QObject):
         of the range. The caller used to compute ``z_min if ascending else
         z_max`` separately, which is only correct while the sweep happens to
         begin at an end of the box. With a single plane it does not: the sweep
-        is the centre, so alternate tiles were sent to z_max and then straight
+        is the center, so alternate tiles were sent to z_max and then straight
         back down to capture — 20 mm of travel on the measured 10 mm box, making
         the fastest-looking setting on the spinbox the slowest thing the scan
         could do.
@@ -1435,7 +1435,7 @@ class LED2DOverviewAcquisition(QObject):
         """Move onto the tile and sweep ``band``.
 
         Returns ``(frames, move_s, sweep_s, z_values)``, or ``None`` if the scan
-        was cancelled part-way. Extracted so an adaptive re-sweep runs the
+        was canceled part-way. Extracted so an adaptive re-sweep runs the
         identical path rather than a second copy of it -- two copies of the
         sweep is exactly how the tile-step calculation ended up shipping a 0.25%
         overlap.
@@ -1529,7 +1529,7 @@ class LED2DOverviewAcquisition(QObject):
         """Record this tile's Z extent, re-sweeping in full if the band clipped it.
 
         Returns ``(band, frames, (move_s, sweep_s, z_values))``; the third element
-        is ``None`` when the scan was cancelled mid-re-sweep, and
+        is ``None`` when the scan was canceled mid-re-sweep, and
         ``(0.0, 0.0, None)`` when no re-sweep was needed.
         """
         from py2flamingo.utils.adaptive_z_band import (
@@ -1748,7 +1748,7 @@ class LED2DOverviewAcquisition(QObject):
                 # projection. X was commanded at the top of the column loop, Y and
                 # Z just now — wait for all three.
                 # Where this tile's sample is expected to be. The full range
-                # unless adaptive Z is on AND scanned neighbours give evidence.
+                # unless adaptive Z is on AND scanned neighbors give evidence.
                 band = self._band_for_tile(x_idx, y_idx, z_min, z_max)
 
                 swept = self._sweep_tile_band(

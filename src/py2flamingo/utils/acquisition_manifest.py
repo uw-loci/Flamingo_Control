@@ -132,7 +132,7 @@ def overlap_check(
     if requested_percent is None:
         return out
 
-    # A percentage point of slack absorbs the 0.01 mm quantisation the tile
+    # A percentage point of slack absorbs the 0.01 mm quantization the tile
     # folder names impose on stage positions.
     if abs(achieved - float(requested_percent)) > 1.0:
         out["MISMATCH"] = (

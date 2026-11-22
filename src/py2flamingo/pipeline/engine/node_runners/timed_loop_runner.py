@@ -2,7 +2,7 @@
 TimedLoopRunner — repeats body subgraph N times with configurable delay.
 
 Config:
-    iterations: int — number of iterations (0 = indefinite until cancelled)
+    iterations: int — number of iterations (0 = indefinite until canceled)
     interval_seconds: float — delay between iterations
     timing_mode: str — "clock_aligned" or "sequential"
         clock_aligned: start each iteration at fixed intervals relative to

@@ -915,7 +915,7 @@ class StepChamberOverlay:
         Position arguments are in stage mm; the holder shaft runs along
         stage Y (vertical). Conservative approximation: the minimum signed
         distance across all primitive surfaces. The nub at the tip is not
-        modelled separately — the shaft dominates the binding constraint
+        modeled separately — the shaft dominates the binding constraint
         and the nub is too small to alter the worst-case.
         """
         # Convert stage point to STEP-frame point so we can intersect with

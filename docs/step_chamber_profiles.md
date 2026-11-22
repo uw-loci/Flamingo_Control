@@ -141,7 +141,7 @@ step_to_stage_transform:
 
 ### Calibrating the offsets
 
-The offsets are chosen so the **cavity centre** lands on the **focal plane**:
+The offsets are chosen so the **cavity center** lands on the **focal plane**:
 
 1. Find the cavity centroid in CAD frame = the midpoints of the
    `chamber_cavity` feature's `bounds_step` x/y/z.
@@ -163,7 +163,7 @@ focal plane `(6.655, 7.0, 19.25)`, permutation as above:
 | `stage_z` | `19.25 − (−187.95)` | `207.20` |
 
 This makes data acquired against the tip-test reference land at the cavity
-centre with no migration. If the chamber renders far off-screen after a swap,
+center with no migration. If the chamber renders far off-screen after a swap,
 the offsets are wrong — recheck this step.
 
 ---
@@ -177,11 +177,11 @@ it as one or more napari layers.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `role` | **yes** | Identifier for the part. Some roles get special handling — see [§7](#7-recognised-roles). |
+| `role` | **yes** | Identifier for the part. Some roles get special handling — see [§7](#7-recognized-roles). |
 | `type` | **yes** | `aabb` (axis-aligned box) or `cylinder`. |
 | `layer_name` | to render | The napari layer name. **Omit it and the feature is treated as an internal helper and not drawn** (e.g. the cavity volume used only for hole-punching). |
 | `visible_default` | no | `true` / `false` — whether the layer starts visible. |
-| `color` | no | Hex colour, e.g. `"#00FF88"`. |
+| `color` | no | Hex color, e.g. `"#00FF88"`. |
 | `opacity` | no | `0.0`–`1.0`. |
 | `napari_kind` | no | `surface` or `shapes`. Informational; the renderer is chosen by `type`. |
 
@@ -217,7 +217,7 @@ it as one or more napari layers.
 | Field | Meaning |
 |---|---|
 | `axis` | `[x, y, z]` unit vector for the cylinder's axis, in CAD frame. |
-| `center_step` | `[x, y, z]` centre point, CAD-frame mm. |
+| `center_step` | `[x, y, z]` center point, CAD-frame mm. |
 | `radius_mm` | Bore radius. |
 | `x_extent_step` / `y_extent_step` / `z_extent_step` | Optional `[start, end]` giving the cylinder's length along its axis. If absent, a 12 mm default is used. |
 
@@ -232,9 +232,9 @@ it as one or more napari layers.
 
 ---
 
-## 7. Recognised roles
+## 7. Recognized roles
 
-Most `role` values are free identifiers, but these are recognised specially —
+Most `role` values are free identifiers, but these are recognized specially —
 the viewer's per-feature visibility checkboxes key on them, and `chamber_cavity`
 gets a dedicated multi-layer render (interior walls + back + bottom):
 

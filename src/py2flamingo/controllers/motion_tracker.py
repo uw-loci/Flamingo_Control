@@ -198,14 +198,14 @@ class MotionTracker:
         This method blocks until either:
         - Motion-stopped callback (0x6010) is received with status=1
         - Timeout expires
-        - Wait is cancelled by new motion command (if allow_cancel=True)
+        - Wait is canceled by new motion command (if allow_cancel=True)
 
         Args:
             timeout: Maximum time to wait in seconds (default: 30s)
-            allow_cancel: Whether this wait can be cancelled by new commands
+            allow_cancel: Whether this wait can be canceled by new commands
 
         Returns:
-            True if motion completed successfully, False if timeout or cancelled
+            True if motion completed successfully, False if timeout or canceled
 
         Raises:
             RuntimeError: If socket error occurs
@@ -229,7 +229,7 @@ class MotionTracker:
 
         Args:
             timeout: Maximum time to wait in seconds
-            allow_cancel: Whether this wait can be cancelled
+            allow_cancel: Whether this wait can be canceled
 
         Returns:
             True if motion completed successfully
@@ -255,7 +255,7 @@ class MotionTracker:
             poll_interval = 0.1  # Check cancel flag every 100ms
 
             while remaining > 0:
-                # Check if wait was cancelled
+                # Check if wait was canceled
                 if allow_cancel and self._stop_waiting:
                     self.logger.info("Motion wait cancelled by new command (async)")
                     return False
@@ -302,7 +302,7 @@ class MotionTracker:
 
         Args:
             timeout: Maximum time to wait in seconds
-            allow_cancel: Whether this wait can be cancelled
+            allow_cancel: Whether this wait can be canceled
 
         Returns:
             True if motion completed successfully
@@ -320,7 +320,7 @@ class MotionTracker:
 
             # Keep reading messages until we get motion-stopped
             while True:
-                # Check if wait was cancelled
+                # Check if wait was canceled
                 if allow_cancel and self._stop_waiting:
                     self.logger.info("Motion wait cancelled by new command")
                     return False

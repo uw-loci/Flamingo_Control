@@ -172,7 +172,7 @@ line number pins which copy is the culprit.
 
 The whole streaming pipeline succeeded — the fused volume is already on
 disk as `fused.dat`. Only the **pyramid builder** OOM'd, because it
-materialised a whole downsample level in RAM as float64 (`.mean()` before
+materialized a whole downsample level in RAM as float64 (`.mean()` before
 `.astype`). The tell is the error shape: **half the fused Y/X, dtype
 float64**, e.g. `(1662, 7424, 5120)` for a `(1662, 14849, 10241)` fuse =
 471 GiB. This is *not* a full-resolution limit.

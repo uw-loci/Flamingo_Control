@@ -105,7 +105,7 @@ class ConfigurationManager:
                 config = MicroscopeConfiguration.from_dict(config_data)
                 self._configurations[config.name] = config
 
-            # Only honour a remembered name that still names a real profile --
+            # Only honor a remembered name that still names a real profile --
             # a profile can be deleted, or the file hand-edited, between runs.
             last_used = data.get("last_used")
             if last_used in self._configurations:

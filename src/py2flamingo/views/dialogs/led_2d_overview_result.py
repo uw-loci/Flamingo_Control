@@ -742,7 +742,7 @@ class ImagePanel(QWidget):
     def set_target_frames(self, frames) -> None:
         """Rectangles to draw over the overview, in STAGE mm.
 
-        ``frames`` is a sequence of ``(x_mm, y_mm, w_mm, h_mm)`` centred on each
+        ``frames`` is a sequence of ``(x_mm, y_mm, w_mm, h_mm)`` centered on each
         planned acquisition tile. Pass an empty sequence to clear.
         """
         self._target_frames = list(frames or [])

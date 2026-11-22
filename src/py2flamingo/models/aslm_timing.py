@@ -263,7 +263,7 @@ def from_light_sheet_settings(
 
     The vendor GUI and the wire protocol both work in line time and exposure
     lines, not in exposure. This converts once, in the one place that knows the
-    relationship, so no caller has to remember that the field labelled
+    relationship, so no caller has to remember that the field labeled
     "Exposure Time (ns)" is the line time.
     """
     line_time_us = float(line_time_ns) / 1000.0

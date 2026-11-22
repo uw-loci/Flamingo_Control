@@ -150,7 +150,7 @@ def generate_tile_profile(
         rotation_angles: List of rotation angles in degrees (default [0])
         tip_position: (tip_x_mm, tip_z_mm) for rotation center. Required if
                       rotation_angles contains non-zero values.
-        overlap_percent: Percent of a FOV that neighbouring tiles share. Tiles
+        overlap_percent: Percent of a FOV that neighboring tiles share. Tiles
                       step by FOV x (1 - overlap/100), so 0 butts them edge to
                       edge and leaves the stitcher nothing to register on.
 

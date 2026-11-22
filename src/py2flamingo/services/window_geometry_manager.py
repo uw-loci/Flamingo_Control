@@ -376,7 +376,7 @@ class PersistentDialog(QDialog):
 class PersistentWidget(QWidget):
     """QWidget subclass with automatic geometry persistence.
 
-    Same behaviour as ``PersistentDialog`` but for top-level QWidget
+    Same behavior as ``PersistentDialog`` but for top-level QWidget
     windows (e.g. result viewers that use QWidget instead of QDialog).
 
     Example::

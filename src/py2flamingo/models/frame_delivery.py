@@ -47,7 +47,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Sequence
 
-# Below this, period estimates are dominated by the millisecond quantisation of
+# Below this, period estimates are dominated by the millisecond quantization of
 # the server timestamp and by whatever the display thread was doing.
 MIN_FRAMES_FOR_ESTIMATE = 10
 
@@ -196,7 +196,7 @@ def measure(arrivals: Sequence[FrameArrival]) -> Optional[DeliveryStats]:
     """Reduce a capture to the periods that matter.
 
     Uses the span between the first and last frame rather than an average of
-    per-frame deltas: the server timestamp is quantised to a millisecond, and
+    per-frame deltas: the server timestamp is quantized to a millisecond, and
     over a hundred frames the span divides that error by a hundred.
     """
     if len(arrivals) < MIN_FRAMES_FOR_ESTIMATE:
@@ -333,7 +333,7 @@ def analyze(
 # whole experiment of the wrong thing.
 # --------------------------------------------------------------------------- #
 
-# Readout time comes back quantised, and the derived line time inherits that,
+# Readout time comes back quantized, and the derived line time inherits that,
 # so an exact match is not expected even when the setting took perfectly.
 LINE_TIME_TOLERANCE = 0.02
 

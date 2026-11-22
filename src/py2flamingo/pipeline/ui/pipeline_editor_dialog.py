@@ -352,7 +352,7 @@ class PipelineEditorDialog(PersistentDialog):
         self.stop_requested.emit()
         self._log("Stop requested")
 
-    #: Status word and colour per outcome. "Ready" is the idle state; a run
+    #: Status word and color per outcome. "Ready" is the idle state; a run
     #: that ended must not land back on it, because a green "Ready" after a
     #: failed acquisition is indistinguishable from a clean finish.
     _STATUS_STYLES = {

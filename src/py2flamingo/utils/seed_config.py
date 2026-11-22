@@ -19,7 +19,7 @@ Configuration still should not be tracked directly: it holds machine-specific
 values, and a tracked copy is what made every rig report a dirty tree. So the
 repo carries a ``<name>.example.json`` instead, and the loader copies it the
 first time the real file is absent. A fresh clone then starts with a working
-default rather than silently with nothing, and a machine that has customised its
+default rather than silently with nothing, and a machine that has customized its
 copy is never overwritten -- seeding happens only when the file does not exist.
 """
 

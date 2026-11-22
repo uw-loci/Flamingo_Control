@@ -142,7 +142,7 @@ After clicking **Start Scan**:
 5. Second rotation tiles are captured
 6. Results window opens automatically
 
-**Motion behaviour (fast mode):**
+**Motion behavior (fast mode):**
 - The stage is **settled** (position confirmed) before each tile's Z sweep
   begins, so frames are never grabbed mid-move. This costs a little time per
   tile but prevents duplicated/ghosted structure between tiles.

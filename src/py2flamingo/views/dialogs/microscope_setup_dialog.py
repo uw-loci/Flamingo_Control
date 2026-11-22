@@ -4,7 +4,7 @@ Until now there was no setup path at all. An unknown microscope fell straight
 through ``MicroscopeSettingsService._get_default_settings`` to placeholder stage
 limits of 0-26 mm on every axis -- and on N7 the real envelope is x 1.0-12.31,
 so the *fabricated* limit was WIDER than the instrument. A permissive invented
-limit is worse than a missing one: it silently authorises moves the stage cannot
+limit is worse than a missing one: it silently authorizes moves the stage cannot
 make.
 
 This dialog produces ``microscope_settings/{name}_settings.json`` for whichever

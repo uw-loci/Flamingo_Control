@@ -76,7 +76,7 @@ class PixelCalibrationService:
     def _prep(frame: np.ndarray, crop: int) -> np.ndarray:
         """Center-crop to a square, float-convert, and apply a Hann window.
 
-        The window suppresses edge artefacts that otherwise bias FFT-based
+        The window suppresses edge artifacts that otherwise bias FFT-based
         phase correlation. Multi-plane frames are averaged to 2-D.
         """
         arr = np.asarray(frame)
@@ -189,7 +189,7 @@ class PixelCalibrationService:
 
     @classmethod
     def _center_patch(cls, frame: np.ndarray, side: int) -> np.ndarray:
-        """Raw (un-windowed) centred ``side``x``side`` crop of ``frame``."""
+        """Raw (un-windowed) centered ``side``x``side`` crop of ``frame``."""
         arr = cls._to_2d(frame)
         h, w = arr.shape
         half = side // 2
@@ -210,7 +210,7 @@ class PixelCalibrationService:
         overlap by much less than ~half, so a single big stage move gives a noisy
         pixel shift even though its long lever arm *should* give the most precise
         pixel size. MicroManager's trick (``AutomaticCalibrationThread``) is to
-        **predict** the displacement, crop the moved frame in a small box centred
+        **predict** the displacement, crop the moved frame in a small box centered
         on the *predicted* feature location, and cross-correlate only that box
         against the reference patch — so every correlation measures a near-zero
         *residual* in the accurate sub-pixel regime, no matter how far the stage
@@ -446,7 +446,7 @@ class PixelCalibrationService:
     ) -> PixelCalibration:
         """Drive an automated, two-stage calibration sweep and fit the result.
 
-        Modelled on MicroManager's ``AutomaticCalibrationThread``: a **rough
+        Modeled on MicroManager's ``AutomaticCalibrationThread``: a **rough
         pass** of small, symmetric, directly-correlated moves gives a first
         stage->pixel map, then a **refined pass** drives the image content far
         out toward the frame edges and measures each shift by *feature tracking*
@@ -480,7 +480,7 @@ class PixelCalibrationService:
                 from its start position (max excursion), guess-proof. Caps the
                 rough move (so a stale, too-large initial pixel guess can't
                 over-size it) and scales down any refined move that would exceed
-                it — so the content never travels more than this from centre. The
+                it — so the content never travels more than this from center. The
                 sweep never crosses more than a fraction of one field of view
                 anyway; this bounds the pathological case. ``None`` = no absolute
                 cap (limits/frame bounds still apply).

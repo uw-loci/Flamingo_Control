@@ -44,8 +44,8 @@ class DualPositionPanel(QWidget):
 
     Modes:
     - snapshot: Position B hidden
-    - zstack: Position B shows only Z (X, Y, R greyed)
-    - tiling: Position B shows X, Y, Z (R greyed)
+    - zstack: Position B shows only Z (X, Y, R grayed)
+    - tiling: Position B shows X, Y, Z (R grayed)
 
     Signals:
         position_a_changed: Emitted when Position A values change
@@ -281,7 +281,7 @@ class DualPositionPanel(QWidget):
             self._group_b.setVisible(False)
 
         elif mode == "zstack":
-            # Show Point B, but only Z is editable (X, Y, R greyed)
+            # Show Point B, but only Z is editable (X, Y, R grayed)
             self._group_b.setVisible(True)
             self._x_b.setEnabled(False)
             self._y_b.setEnabled(False)
@@ -295,7 +295,7 @@ class DualPositionPanel(QWidget):
             self._r_b.setValue(self._r_a.value())
 
         elif mode == "tiling":
-            # Show Point B with X, Y, Z editable (R greyed)
+            # Show Point B with X, Y, Z editable (R grayed)
             self._group_b.setVisible(True)
             self._x_b.setEnabled(True)
             self._y_b.setEnabled(True)

@@ -1081,7 +1081,7 @@ class MainWindow(QMainWindow):
         )
 
         if not folder:
-            return  # User cancelled
+            return  # User canceled
 
         # Save the selected folder's parent for next time
         if self.app and hasattr(self.app, "config_service") and self.app.config_service:

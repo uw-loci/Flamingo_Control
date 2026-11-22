@@ -276,7 +276,7 @@ def install_excepthook(get_connection: Callable[[], object]) -> Callable:
     Under PyQt5 an exception that escapes a slot aborts the process with no
     cleanup when no hook is installed. This hook logs the exception, runs
     :func:`leave_safe` (with the same rule as a close; a running client
-    acquisition is also cancelled through the emergency-stop hooks), then
+    acquisition is also canceled through the emergency-stop hooks), then
     calls the hook that was installed before. Because a hook is installed,
     PyQt no longer aborts: the application keeps running with the light off.
 

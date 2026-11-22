@@ -163,7 +163,7 @@ class PipelineController(QObject):
         try:
             # Through the per-microscope overlay, not the raw YAML: the base
             # `stage_control` ranges are one instrument's chamber, and a scope
-            # travelling outside them has its tiles rejected as out-of-bounds.
+            # traveling outside them has its tiles rejected as out-of-bounds.
             from py2flamingo.visualization.voxel_storage_factory import (
                 resolve_visualization_config,
             )
