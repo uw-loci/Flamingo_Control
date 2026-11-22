@@ -150,14 +150,6 @@ class TestNoMicroscopeNameSurvivesInCode:
     def test_main_window_does_not_default_to_a_named_instrument(self):
         assert 'microscope_name = "n7"' not in self._src("main_window.py")
 
-    def test_migration_does_not_hardcode_a_list_of_instruments(self):
-        """Comments may quote the removed list; code may not contain it."""
-        body = self._src("services/config_migration_service.py")
-        code = "\n".join(
-            line for line in body.splitlines() if not line.strip().startswith("#")
-        )
-        assert '["n7", "zion", "localhost"]' not in code
-
 
 class TestTheControllerRefusesToGuess:
     def test_go_to_reference_returns_false_with_nothing_configured(self):

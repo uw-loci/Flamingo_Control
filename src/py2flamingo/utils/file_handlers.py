@@ -200,20 +200,6 @@ def set_section_values(
     safe_write(p, newline.join(out) + newline, newline="")
 
 
-def dict_comment(wf_dict: Dict[str, Any], comment: str) -> Dict[str, Any]:
-    """Set a human-readable comment on a workflow dict (in-place + return)."""
-    wf_dict["Comment"] = comment
-    return wf_dict
-
-
-def dict_save_directory(
-    wf_dict: Dict[str, Any], directory: Union[str, Path]
-) -> Dict[str, Any]:
-    """Set the save directory on a workflow dict (in-place + return)."""
-    wf_dict["Save Directory"] = str(directory)
-    return wf_dict
-
-
 # ------------------------------
 # Helpers for nested dict workflows
 # ------------------------------

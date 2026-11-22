@@ -13,8 +13,6 @@ from .configuration_manager import ConfigurationManager, MicroscopeConfiguration
 # MVC Refactoring - New Services (use these for new MVC architecture)
 # Import these first as they have no numpy/scipy dependencies
 from .connection_service import MVCConnectionService
-from .image_acquisition_service import ImageAcquisitionService
-from .initialization_service import InitializationData, MicroscopeInitializationService
 from .status_indicator_service import GlobalStatus, StatusIndicatorService
 from .status_service import StatusService
 from .tiff_size_validator import (
@@ -32,7 +30,6 @@ from .window_geometry_manager import (
     WindowGeometryManager,
     set_default_geometry_manager,
 )
-from .workflow_execution_service import WorkflowExecutionService
 from .workflow_queue_service import WorkflowQueueService
 from .workflow_service import MVCWorkflowService
 
@@ -50,10 +47,6 @@ __all__ = [
     "PersistentDialog",
     "PersistentWidget",
     "set_default_geometry_manager",
-    "WorkflowExecutionService",
-    "MicroscopeInitializationService",
-    "InitializationData",
-    "ImageAcquisitionService",
     "AcquisitionTimingService",
     "WorkflowQueueService",
     # TIFF size validation

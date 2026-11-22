@@ -74,7 +74,7 @@ file.** `drive_mappings.json` likewise holds a dict of mappings.
 | `progress_timing_cache.json` | Learned per-phase timings for ETA | 1 | yes | ETA re-learns. Harmless |
 | `stitching_timing_cache.json` | Same, for stitching | 1 | no | Harmless |
 | `webcam_calibration.json` | Webcam↔stage affine per rotation angle | 1 | no | Webcam overview uncalibrated |
-| `ControlSettings.txt` | Read by the config-migration service | 1 | yes | Migration skips it |
+| `ControlSettings.txt` | Laser lines, max powers and attached devices (`services/laser_led_service.py`) | 1 | yes | Warns; no lasers are listed |
 | `FlamingoMetaData_test.txt` | No code reference: its parser (`utils/metadata_parser`) and tests were removed as unused | 1 | yes | — |
 | `LowResTSPIM.txt` | No code reference; likely a stored instrument profile | 1 | yes | — |
 | `localhost_settings.json` | A `{name}_settings.json` for a scope named `localhost` | N | yes | Only matters if you connect as `localhost` |

@@ -508,7 +508,6 @@ class MVCConnectionService:
         self._live_socket: Optional[socket.socket] = None
 
         # Callback listener for unsolicited messages (motion-stopped, etc.)
-        self._callback_listener: Optional["CallbackListener"] = None
         self._socket_lock = (
             threading.Lock()
         )  # Coordinate send_command and callback listener

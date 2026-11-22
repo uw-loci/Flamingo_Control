@@ -138,7 +138,7 @@ self.movement_controller.motion_stopped.connect(
 
 #### Option C: Hook into STAGE_MOTION_STOPPED callbacks
 
-Listen to the callback listener for STAGE_MOTION_STOPPED (0x6010 / 24592) messages:
+Register a handler for STAGE_MOTION_STOPPED (0x6010 / 24592) messages:
 
 ```python
 # In connection_service.py or application.py:
@@ -146,12 +146,11 @@ def _on_stage_motion_stopped(self, response):
     """Handle motion stopped callback from microscope."""
     self.status_indicator_service.on_motion_stopped()
 
-# Register handler:
-if self.connection_service._callback_listener:
-    self.connection_service._callback_listener.register_handler(
-        24592,  # STAGE_MOTION_STOPPED
-        self._on_stage_motion_stopped
-    )
+# Register handler (MVCConnectionService.register_callback):
+self.connection_service.register_callback(
+    24592,  # STAGE_MOTION_STOPPED
+    self._on_stage_motion_stopped
+)
 ```
 
 **Challenge:** Detecting motion START is harder with this approach. You'd need to:
