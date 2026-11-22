@@ -173,7 +173,7 @@ State that lives in a module rather than an object, who sets it, and who resets
 it in the tests. A test that leaves one of these set changes the result of every
 later test, so each is reset around every test, under both runners:
 `tests/conftest.py` (pytest, autouse fixtures) and `tests/run_tests.py`
-(`_reset_module_state`, the unittest runner CI uses). New module-level state
+(`_reset_module_state`, the unittest runner kept for local use; CI runs pytest). New module-level state
 gets a reset in both.
 
 | State | Module | Set by | Reset in tests |

@@ -9,6 +9,9 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    # The suite takes about 5 minutes locally; a hung test must not hold the
+    # runner for the default 6 hours.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -52,5 +55,13 @@ jobs:
           pip install -r requirements-dev.txt
           pip install -e .
 
-      - name: Run pipeline tests
-        run: python tests/run_tests.py
+      # The whole suite under pytest: the pytest-style tests and the
+      # unittest.TestCase classes that tests/run_tests.py runs (every one of
+      # them is collected here too). Until 2026-11-22 CI ran run_tests.py,
+      # which finds only the TestCase classes, about 1000 of 2500 tests.
+      # tests/integration is left out: its tests start tests/mock_server.py
+      # from a hard-coded developer path and need fixtures it does not
+      # define; run_tests.py never collected them either, so no test that CI
+      # ran before is dropped.
+      - name: Run tests
+        run: python -m pytest tests -q --ignore=tests/integration -p no:cacheprovider

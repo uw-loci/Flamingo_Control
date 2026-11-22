@@ -9,6 +9,7 @@ coverage>=7.0.0
 
 # Mock and testing utilities  
 pytest-mock>=3.10.0
+pytest-qt>=4.2.0  # the qtbot fixture (tests/test_gui_grid_layout.py, test_workflow_estimates.py)
 responses>=0.22.0
 
 # Code quality

@@ -5,7 +5,12 @@ This directory contains unit tests for the Py2Flamingo microscope control softwa
 
 ## Running Tests
 
-### Run all tests:
+### Run the whole suite (what CI runs), from the repository root:
+```bash
+QT_QPA_PLATFORM=offscreen python -m pytest tests -q --ignore=tests/integration -p no:cacheprovider
+```
+
+### Run the unittest.TestCase tests only:
 ```bash
 cd tests
 python run_tests.py

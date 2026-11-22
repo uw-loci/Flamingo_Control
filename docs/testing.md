@@ -23,7 +23,7 @@ The Py2Flamingo test suite ensures that:
 
 **Key Features:**
 - ✅ No hardware required - all external dependencies are mocked
-- ✅ Fast execution - typical run time < 5 seconds
+- ✅ Run time: about 5 minutes for the whole suite (pytest)
 - ✅ Comprehensive coverage - tests core functionality
 - ✅ CI/CD ready - can run in automated pipelines
 
@@ -34,8 +34,9 @@ The Py2Flamingo test suite ensures that:
 tests/
 ├── __init__.py                     # Makes tests a Python package
 ├── run_tests.py                    # Main test runner
-├── test_*.py                       # About 2,400 tests (pytest); about 950 are
-│                                   # unittest.TestCase classes run_tests.py finds
+├── test_*.py                       # About 2,500 tests (pytest, what CI runs);
+│                                   # about 1,000 are unittest.TestCase classes,
+│                                   # the only ones run_tests.py finds
 ├── test_tcp_protocol.py            # 128-byte protocol encode/decode
 ├── test_queue_event_management.py  # QueueManager / EventManager
 ├── test_verification.py            # Post-update checks against the synthetic microscope
@@ -84,10 +85,10 @@ python run_tests.py queue_event_management
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-### Using pytest (if installed)
+### Using pytest (the whole suite; what CI runs)
 ```bash
-# From project root
-pytest tests/ -v
+# From project root: the command .github/workflows/tests.yml runs
+QT_QPA_PLATFORM=offscreen python -m pytest tests -q --ignore=tests/integration -p no:cacheprovider
 
 # With coverage
 pytest tests/ --cov=src/py2flamingo --cov-report=html
@@ -253,44 +254,22 @@ def test_new_microscope_command(self):
 
 ## Continuous Integration
 
-The tests are designed for CI/CD pipelines:
+`.github/workflows/tests.yml` runs on every push and pull request to `main`,
+on Ubuntu with Python 3.11 and `QT_QPA_PLATFORM=offscreen`. It installs
+`requirements.txt`, `requirements-dev.txt` and the package, then runs the whole
+suite with pytest:
 
-### GitHub Actions Example
-```yaml
-name: Tests
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v2
-    
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.9'
-    
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-        pip install -r requirements-dev.txt
-    
-    - name: Run tests
-      run: |
-        cd tests
-        python run_tests.py
-    
-    - name: Generate coverage report
-      run: |
-        coverage run -m unittest discover -s tests
-        coverage xml
-    
-    - name: Upload coverage
-      uses: codecov/codecov-action@v1
+```bash
+python -m pytest tests -q --ignore=tests/integration -p no:cacheprovider
 ```
+
+`tests/integration` is left out: its tests start `tests/mock_server.py` from a
+hard-coded developer path and use fixtures they do not define. Until
+2026-11-22 CI ran `python tests/run_tests.py`, which finds only the
+`unittest.TestCase` classes (about 1,000 of 2,500 tests); every test it ran is
+also collected by the pytest command. `run_tests.py` still works for local use,
+and module-level state is reset under both runners (`tests/conftest.py` and
+`run_tests.py`'s `_reset_module_state`).
 
 ## Troubleshooting
 
