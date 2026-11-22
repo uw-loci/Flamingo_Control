@@ -172,7 +172,7 @@ def build_tile_illumination_source(
         if getattr(illum, "laser_enabled", False) and getattr(
             illum, "laser_channel", None
         ):
-            enabled[illum.laser_channel] = illum.laser_power_mw
+            enabled[illum.laser_channel] = illum.laser_power_percent
         if getattr(illum, "led_enabled", False):
             led = illum
 

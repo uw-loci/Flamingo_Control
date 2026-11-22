@@ -790,7 +790,7 @@ class WorkflowView(QWidget):
         else:
             illumination = IlluminationSettings(
                 laser_channel=None,
-                laser_power_mw=0.0,
+                laser_power_percent=0.0,
                 laser_enabled=False,
                 led_channel=None,
                 led_intensity_percent=0.0,

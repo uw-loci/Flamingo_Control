@@ -20,7 +20,6 @@ from ..models.data.workflow import (
     WorkflowType,
 )
 from ..models.frame_delivery import check_sweep_feasible
-from ..models.hardware.laser import PowerLimits
 from ..models.hardware.stage import Position, StageLimits
 
 logger = logging.getLogger(__name__)
@@ -65,7 +64,6 @@ class HardwareConstraints:
     """Hardware constraints for validation."""
 
     stage_limits: Optional[StageLimits] = None
-    laser_power_limits: Optional[PowerLimits] = None
     available_lasers: List[str] = None
     available_filters: List[int] = None
     max_exposure_ms: float = 10000.0
@@ -136,13 +134,6 @@ class WorkflowValidator:
 
         if not self.constraints.available_filters:
             self.constraints.available_filters = list(range(1, 7))
-
-        if not self.constraints.laser_power_limits:
-            from ..models.hardware.laser import PowerLimits
-
-            self.constraints.laser_power_limits = PowerLimits(
-                min_mw=0, max_mw=100, safe_max_mw=50
-            )
 
     # ==================== Main Validation ====================
 
@@ -311,27 +302,12 @@ class WorkflowValidator:
                     f"Available: {', '.join(self.constraints.available_lasers)}"
                 )
 
-            if illum.laser_power_mw < 0:
+            # The power is a percent of the laser's maximum (the panel's
+            # 0-100 % spinbox, written as the server's percent field).
+            if not (0.0 <= illum.laser_power_percent <= 100.0):
                 result.add_error(
-                    f"Laser power cannot be negative: {illum.laser_power_mw} mW"
+                    f"Laser power must be 0-100%: {illum.laser_power_percent}%"
                 )
-
-            if self.constraints.laser_power_limits:
-                limits = self.constraints.laser_power_limits
-                if not limits.is_valid_power(
-                    illum.laser_power_mw, use_safe_limit=False
-                ):
-                    result.add_error(
-                        f"Laser power {illum.laser_power_mw} mW outside limits "
-                        f"({limits.min_mw}-{limits.max_mw} mW)"
-                    )
-                elif not limits.is_valid_power(
-                    illum.laser_power_mw, use_safe_limit=True
-                ):
-                    result.add_warning(
-                        f"Laser power {illum.laser_power_mw} mW exceeds safe limit "
-                        f"({limits.safe_max_mw} mW)"
-                    )
 
         # Validate LED settings
         if illum.led_enabled:
@@ -629,7 +605,7 @@ class WorkflowValidator:
 
         # Check for photobleaching risk
         if workflow.illumination and workflow.illumination.laser_enabled:
-            power = workflow.illumination.laser_power_mw
+            power = workflow.illumination.laser_power_percent
             if workflow.time_lapse_settings:
                 num_exposures = workflow.time_lapse_settings.num_timepoints
                 if power > 10 and num_exposures > 100:

@@ -27,7 +27,7 @@ from py2flamingo.utils.workflow_serialization import (
 def _illum(channel=None, power=0.0, laser_on=False, led_on=False, led=0.0):
     return SimpleNamespace(
         laser_channel=channel,
-        laser_power_mw=power,
+        laser_power_percent=power,
         laser_enabled=laser_on,
         led_enabled=led_on,
         led_intensity_percent=led,

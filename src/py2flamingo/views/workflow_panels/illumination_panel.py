@@ -334,7 +334,7 @@ class IlluminationPanel(QWidget):
                 settings_list.append(
                     IlluminationSettings(
                         laser_channel=workflow_key,
-                        laser_power_mw=power,
+                        laser_power_percent=power,
                         laser_enabled=True,
                         led_channel=None,
                         led_intensity_percent=0.0,
@@ -347,7 +347,7 @@ class IlluminationPanel(QWidget):
             settings_list.append(
                 IlluminationSettings(
                     laser_channel=None,
-                    laser_power_mw=0.0,
+                    laser_power_percent=0.0,
                     laser_enabled=False,
                     led_channel="LED_RGB_Board",
                     led_intensity_percent=self._led_intensity.value(),
@@ -424,7 +424,7 @@ class IlluminationPanel(QWidget):
                 for i, (_, workflow_key, _) in enumerate(self._laser_channels):
                     if workflow_key == setting.laser_channel:
                         self._laser_rows[i].set_enabled(True)
-                        self._laser_rows[i].set_power(setting.laser_power_mw)
+                        self._laser_rows[i].set_power(setting.laser_power_percent)
                         break
 
             elif setting.led_enabled and setting.led_channel:

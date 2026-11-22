@@ -54,7 +54,7 @@ class IlluminationSettings(ValidatedModel):
     """Illumination configuration for workflow."""
 
     laser_channel: Optional[str] = None
-    laser_power_mw: float = 0.0
+    laser_power_percent: float = 0.0
     laser_enabled: bool = False
     led_channel: Optional[str] = None
     led_intensity_percent: float = 0.0
@@ -65,9 +65,9 @@ class IlluminationSettings(ValidatedModel):
 
     def validate(self) -> None:
         """Validate illumination settings."""
-        if self.laser_power_mw < 0:
+        if not (0 <= self.laser_power_percent <= 100):
             raise ValidationError(
-                f"Laser power cannot be negative: {self.laser_power_mw} mW"
+                f"Laser power must be 0-100%: {self.laser_power_percent}%"
             )
 
         if not (0 <= self.led_intensity_percent <= 100):
@@ -89,7 +89,7 @@ class IlluminationSettings(ValidatedModel):
         # Laser settings
         if self.laser_channel:
             laser_on = 1 if self.laser_enabled else 0
-            settings[self.laser_channel] = f"{self.laser_power_mw:.2f} {laser_on}"
+            settings[self.laser_channel] = f"{self.laser_power_percent:.2f} {laser_on}"
 
         # LED settings
         if self.led_channel:
@@ -504,7 +504,7 @@ class Workflow(ValidatedModel):
         Args:
             position: Position for snapshot
             laser_channel: Laser to use
-            laser_power: Laser power in mW
+            laser_power: Laser power, percent of the laser's maximum
 
         Returns:
             Configured snapshot workflow
@@ -515,7 +515,7 @@ class Workflow(ValidatedModel):
             start_position=position,
             illumination=IlluminationSettings(
                 laser_channel=laser_channel,
-                laser_power_mw=laser_power,
+                laser_power_percent=laser_power,
                 laser_enabled=True,
             ),
             experiment_settings=ExperimentSettings(
