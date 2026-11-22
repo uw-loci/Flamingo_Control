@@ -747,7 +747,7 @@ def export_overview_with_labels(
     flat_tile_infos: Optional[List[FlatMIPTileInfo]] = None,
     downsample_size: int = 256,
     max_dim: int = 4096,
-    overlap_pct: float = 0.05,
+    overlap_fraction: float = 0.05,
 ) -> None:
     """Export a stitched overview with grid lines and coordinate labels.
 
@@ -764,7 +764,7 @@ def export_overview_with_labels(
         flat_tile_infos: Flat tile info objects (for multi-channel re-read)
         downsample_size: Target tile size in pixels (default 256)
         max_dim: Maximum mosaic dimension before reducing tile size
-        overlap_pct: Fractional overlap between tiles (default 0.05)
+        overlap_fraction: Overlap between tiles as a fraction, 0-1 (default 0.05)
     """
     import tifffile
     from PIL import Image, ImageDraw, ImageFont
@@ -774,7 +774,7 @@ def export_overview_with_labels(
     tiles_y = config.tiles_y
 
     # Calculate stride and mosaic dimensions
-    overlap_px = int(downsample_size * overlap_pct)
+    overlap_px = int(downsample_size * overlap_fraction)
     stride = downsample_size - overlap_px
     mosaic_w = stride * (tiles_x - 1) + downsample_size
     mosaic_h = stride * (tiles_y - 1) + downsample_size
@@ -782,14 +782,14 @@ def export_overview_with_labels(
     # Reduce tile size if mosaic too large
     if mosaic_w > max_dim or mosaic_h > max_dim:
         downsample_size = 128
-        overlap_px = int(downsample_size * overlap_pct)
+        overlap_px = int(downsample_size * overlap_fraction)
         stride = downsample_size - overlap_px
         mosaic_w = stride * (tiles_x - 1) + downsample_size
         mosaic_h = stride * (tiles_y - 1) + downsample_size
 
     logger.info(
         f"Export overview: tile_size={downsample_size}, "
-        f"mosaic={mosaic_w}x{mosaic_h}, overlap={overlap_pct*100:.0f}%"
+        f"mosaic={mosaic_w}x{mosaic_h}, overlap={overlap_fraction*100:.0f}%"
     )
 
     # Determine channels to export

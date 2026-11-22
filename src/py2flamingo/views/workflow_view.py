@@ -1429,7 +1429,7 @@ class WorkflowView(QWidget):
             illumination=illumination,
             illumination_options=illumination_options,
             stack=stack,
-            plane_spacing_um=self._zstack_panel._z_step.value(),
+            plane_spacing_um=self._zstack_panel._z_step_um.value(),
             tiling=tiling,
             timelapse=timelapse,
             multiangle=multiangle,

@@ -406,7 +406,7 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
         illum_dict = self._illumination_panel.get_workflow_illumination_dict()
         illum_opts = self._illumination_panel.get_workflow_illumination_options_dict()
 
-        z_step_um = self._zstack_panel._z_step.value()
+        z_step_um = self._zstack_panel._z_step_um.value()
 
         # Build Experiment Settings
         experiment = {

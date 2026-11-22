@@ -412,17 +412,17 @@ def t0_camera_size(ctx: RunContext) -> None:
     ctx.record("sensor_pixel_um", round(reply.value, 4))
     if not (8 <= w <= 8192 and 8 <= h <= 8192):
         raise Failed(f"implausible image size {w}x{h}")
-    fov = ctx.exchange("CAMERA_PIXEL_FIELD_OF_VIEW_GET")
-    ctx.record("mm_per_pixel", fov.value)
-    ctx.facts["mm_per_pixel"] = fov.value
-    if fov.value <= 0:
+    pixel_size_reply = ctx.exchange("CAMERA_PIXEL_FIELD_OF_VIEW_GET")
+    ctx.record("mm_per_pixel", pixel_size_reply.value)
+    ctx.facts["mm_per_pixel"] = pixel_size_reply.value
+    if pixel_size_reply.value <= 0:
         raise Failed(
             "pixel size at the sample not available (-1: the server's objective or "
             "tube lens metadata is missing)",
             "> 0",
-            fov.value,
+            pixel_size_reply.value,
         )
-    ctx.note(f"{w}x{h}, {fov.value * 1000:.4f} µm/px at the sample")
+    ctx.note(f"{w}x{h}, {pixel_size_reply.value * 1000:.4f} µm/px at the sample")
 
 
 @check(
@@ -722,7 +722,7 @@ def t1_binning(ctx: RunContext) -> None:
     b0 = ctx.facts.get("binning", (1, 1))
     w0, h0 = ctx.facts["image_size"]
     left0, right0, top0, bottom0 = ctx.facts["roi"]
-    fov0 = ctx.facts.get("mm_per_pixel", 0.0)
+    pixel_size_mm_before = ctx.facts.get("mm_per_pixel", 0.0)
     test = (2, 2) if tuple(b0) == (1, 1) else (1, 1)
 
     def restore():
@@ -742,11 +742,11 @@ def t1_binning(ctx: RunContext) -> None:
     )
     got = ctx.exchange("CAMERA_BINNING_GET")
     size = ctx.exchange("CAMERA_IMAGE_SIZE_GET")
-    fov = ctx.exchange("CAMERA_PIXEL_FIELD_OF_VIEW_GET")
+    pixel_size_reply = ctx.exchange("CAMERA_PIXEL_FIELD_OF_VIEW_GET")
     ctx.record("set_status", reply.status)
     ctx.record("binning_after", [got.int0, got.int1])
     ctx.record("image_size_after", [size.int0, size.int1])
-    ctx.record("mm_per_pixel_after", fov.value)
+    ctx.record("mm_per_pixel_after", pixel_size_reply.value)
     if reply.status == 2 or (got.int0, got.int1) != test:
         raise Failed(
             "binning not taken (status 2: the camera kept its binning)",
@@ -762,8 +762,13 @@ def t1_binning(ctx: RunContext) -> None:
         problems.append(
             f"width {size.int0} at {test[0]}x binning, expected {expected_w} (full frame)"
         )
-    if fov0 > 0 and abs(fov.value / fov0 - factor) > 0.02:
-        problems.append(f"pixel size {fov.value:.6g} mm, expected {fov0 * factor:.6g}")
+    if (
+        pixel_size_mm_before > 0
+        and abs(pixel_size_reply.value / pixel_size_mm_before - factor) > 0.02
+    ):
+        problems.append(
+            f"pixel size {pixel_size_reply.value:.6g} mm, expected {pixel_size_mm_before * factor:.6g}"
+        )
     if problems:
         raise Failed("; ".join(problems))
 
@@ -1373,7 +1378,7 @@ def _workflow_text(
     if not drive:
         raise Skipped("no save drive")
     ctx.facts["workflow_drive"] = drive
-    led_pct = _led_percent(ctx)
+    led_percent = _led_percent(ctx)
     values = {
         "Experiment Settings": {
             "Plane spacing (um)": f"{step_um}",
@@ -1423,7 +1428,7 @@ def _workflow_text(
                 if key.startswith("Laser"):
                     raw = f"{indent}{key} = 0.00 0"
                 elif key.startswith("LED_RGB_Board"):
-                    raw = f"{indent}{key} = {led_pct:.2f} 1"
+                    raw = f"{indent}{key} = {led_percent:.2f} 1"
         out.append(raw)
     end = (
         ctx.envelope.problems("z", pos["z"] + planes * step_um / 1000, pos)

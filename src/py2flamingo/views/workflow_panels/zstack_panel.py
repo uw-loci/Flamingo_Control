@@ -189,14 +189,14 @@ class ZStackPanel(QWidget):
 
         # Z step size (in micrometers, stored as mm in workflow)
         grid.addWidget(QLabel("Z Step:"), 2, 0)
-        self._z_step = QDoubleSpinBox()
-        self._z_step.setRange(0.1, 100.0)
-        self._z_step.setValue(2.5)  # Default 2.5 um
-        self._z_step.setDecimals(2)
-        self._z_step.setSingleStep(0.1)
-        self._z_step.setSuffix(" um")
-        self._z_step.valueChanged.connect(self._on_settings_changed)
-        grid.addWidget(self._z_step, 2, 1)
+        self._z_step_um = QDoubleSpinBox()
+        self._z_step_um.setRange(0.1, 100.0)
+        self._z_step_um.setValue(2.5)  # Default 2.5 um
+        self._z_step_um.setDecimals(2)
+        self._z_step_um.setSingleStep(0.1)
+        self._z_step_um.setSuffix(" um")
+        self._z_step_um.valueChanged.connect(self._on_settings_changed)
+        grid.addWidget(self._z_step_um, 2, 1)
 
         # Frame rate display (read-only, set by CameraPanel)
         grid.addWidget(QLabel("Frame Rate:"), 3, 0)
@@ -344,7 +344,7 @@ class ZStackPanel(QWidget):
         """Handle any settings change."""
         # If in tile mode with auto num_planes, recalculate when Z step changes
         if self._auto_num_planes and self._z_range_mm is not None:
-            z_step_mm = self._z_step.value() / 1000.0
+            z_step_mm = self._z_step_um.value() / 1000.0
             if z_step_mm > 0:
                 # Match the microscope (C++) convention: planes = round(range /
                 # step), i.e. range = planes * step (no fencepost +1).
@@ -395,7 +395,7 @@ class ZStackPanel(QWidget):
 
         # If auto num planes is enabled, recalculate num_planes
         if self._auto_num_planes:
-            z_step_mm = self._z_step.value() / 1000.0
+            z_step_mm = self._z_step_um.value() / 1000.0
             if z_step_mm > 0:
                 # Formula: Num_planes = round(Z_range / Z_step)  (C++ convention)
                 # Match the microscope (C++) convention: planes = round(range /
@@ -430,7 +430,7 @@ class ZStackPanel(QWidget):
 
             # Recalculate num_planes from Z range and Z step
             if self._z_range_mm is not None:
-                z_step_mm = self._z_step.value() / 1000.0
+                z_step_mm = self._z_step_um.value() / 1000.0
                 if z_step_mm > 0:
                     # Match the microscope (C++) convention:
                     # planes = round(range / step), range = planes * step.
@@ -453,7 +453,7 @@ class ZStackPanel(QWidget):
             return
 
         # Calculate Z velocity
-        z_step_mm = self._z_step.value() / 1000.0  # µm to mm
+        z_step_mm = self._z_step_um.value() / 1000.0  # µm to mm
         z_velocity = z_step_mm * self._frame_rate
 
         # Check against limits and show warning if clamped
@@ -506,7 +506,7 @@ class ZStackPanel(QWidget):
     def _update_calculations(self) -> None:
         """Update calculated values (Z range, time estimate)."""
         num_planes = self._num_planes.value()
-        z_step_um = self._z_step.value()
+        z_step_um = self._z_step_um.value()
         z_velocity = self._z_velocity.value()
 
         # Calculate or display Z range
@@ -572,7 +572,7 @@ class ZStackPanel(QWidget):
 
         return StackSettings(
             num_planes=self._num_planes.value(),
-            z_step_um=self._z_step.value(),
+            z_step_um=self._z_step_um.value(),
             z_velocity_mm_s=self._z_velocity.value(),
             bidirectional=bidirectional,
             return_to_start=self._return_to_start.isChecked(),
@@ -586,7 +586,7 @@ class ZStackPanel(QWidget):
             Dictionary for workflow file Stack Settings section
         """
         num_planes = self._num_planes.value()
-        z_step_um = self._z_step.value()
+        z_step_um = self._z_step_um.value()
         z_step_mm = z_step_um / 1000.0
         # Match the microscope (C++) convention: range = planes * step (so
         # planes = round(range / step) is its exact inverse). Real rig files
@@ -623,7 +623,7 @@ class ZStackPanel(QWidget):
             settings: StackSettings to apply
         """
         self._num_planes.setValue(settings.num_planes)
-        self._z_step.setValue(settings.z_step_um)
+        self._z_step_um.setValue(settings.z_step_um)
         self._z_velocity.setValue(settings.z_velocity_mm_s)
 
         # Set stack option based on bidirectional flag (for backward compatibility)
@@ -646,17 +646,19 @@ class ZStackPanel(QWidget):
         # Prefer the explicit plane spacing; else derive step = range / planes
         # (the C++ convention, range = planes * step).
         if exp_dict.get("Plane spacing (um)") is not None:
-            z_step_um = number(exp_dict.get("Plane spacing (um)"), self._z_step.value())
+            z_step_um = number(
+                exp_dict.get("Plane spacing (um)"), self._z_step_um.value()
+            )
         else:
             z_range_um = number(stack_dict.get("Change in Z axis (mm)"), 0.0) * 1000.0
             z_step_um = (
-                z_range_um / num_planes if num_planes > 0 else self._z_step.value()
+                z_range_um / num_planes if num_planes > 0 else self._z_step_um.value()
             )
 
         self._updating = True
         try:
             if z_step_um > 0:
-                self._z_step.setValue(z_step_um)
+                self._z_step_um.setValue(z_step_um)
             vel = number(
                 stack_dict.get("Z stage velocity (mm/s)"), self._z_velocity.value()
             )
@@ -708,7 +710,7 @@ class ZStackPanel(QWidget):
 
         # If auto num_planes is enabled, recalculate
         if self._auto_num_planes:
-            z_step_mm = self._z_step.value() / 1000.0
+            z_step_mm = self._z_step_um.value() / 1000.0
             if z_step_mm > 0:
                 # C++ convention: planes = round(range / step).
                 num_planes = max(1, round(z_range_mm / z_step_mm))
@@ -823,7 +825,7 @@ class ZStackPanel(QWidget):
             Dictionary with UI-specific state
         """
         return {
-            "z_step_um": self._z_step.value(),
+            "z_step_um": self._z_step_um.value(),
             "num_planes": self._num_planes.value(),
             "z_velocity_mm_s": self._z_velocity.value(),
             "auto_velocity": self._auto_velocity.isChecked(),
@@ -847,7 +849,7 @@ class ZStackPanel(QWidget):
         self._updating = True
 
         if "z_step_um" in state:
-            self._z_step.setValue(state["z_step_um"])
+            self._z_step_um.setValue(state["z_step_um"])
 
         if "num_planes" in state:
             self._num_planes.setValue(state["num_planes"])
@@ -930,7 +932,7 @@ class ZStackPanel(QWidget):
         self._z_range_mm = z_range_mm
 
         # Calculate number of planes
-        z_step_mm = self._z_step.value() / 1000.0  # um to mm
+        z_step_mm = self._z_step_um.value() / 1000.0  # um to mm
         if z_step_mm > 0:
             num_planes = max(1, math.ceil(z_range_mm / z_step_mm) + 1)
 
@@ -943,5 +945,5 @@ class ZStackPanel(QWidget):
 
         self._logger.debug(
             f"Z range from positions: {z_range_mm:.3f} mm, "
-            f"{self._num_planes.value()} planes at {self._z_step.value():.1f} um step"
+            f"{self._num_planes.value()} planes at {self._z_step_um.value():.1f} um step"
         )

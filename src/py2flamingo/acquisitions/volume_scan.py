@@ -209,9 +209,9 @@ class VolumeScanAcquisition(QObject):
             z_start, z_end = self.config.z_max, self.config.z_min
 
         # Emit progress
-        progress_pct = (self._current_position_idx / len(self._positions)) * 100
+        progress_percent = (self._current_position_idx / len(self._positions)) * 100
         self.scan_progress.emit(
-            self._current_position_idx + 1, len(self._positions), progress_pct
+            self._current_position_idx + 1, len(self._positions), progress_percent
         )
 
         logger.info(

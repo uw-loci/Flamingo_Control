@@ -745,8 +745,8 @@ class WorkflowController(QObject):
         # Validate camera settings
         if "Camera Settings" in workflow_dict:
             camera = workflow_dict["Camera Settings"]
-            exposure = float(camera.get("Exposure time (us)", 0))
-            if exposure <= 0:
+            exposure_us = float(camera.get("Exposure time (us)", 0))
+            if exposure_us <= 0:
                 errors.append("Exposure time must be positive")
 
         # Validate illumination

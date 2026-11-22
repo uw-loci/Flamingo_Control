@@ -424,9 +424,9 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # Frame rate and exposure. The frame rate and the Z velocity set how fast
     # the stage sweeps (the server reads both), so neither has a default.
     frame_rate = float(_required(exp, "Experiment Settings", "Frame rate (f/s)"))
-    exposure_time = exp.get("Exposure time (us)", 10000)
+    exposure_us = exp.get("Exposure time (us)", 10000)
     lines.append(f"    Frame rate (f/s) = {frame_rate:.1f}")
-    lines.append(f"    Exposure time (us) = {int(exposure_time)}")
+    lines.append(f"    Exposure time (us) = {int(exposure_us)}")
 
     # Time-lapse settings
     duration = exp.get("Duration (dd:hh:mm:ss)", "00:00:00:01")
@@ -478,12 +478,12 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     lines.append("    <Camera Settings>")
     cam = workflow_dict.get("Camera Settings", {})
 
-    cam_exposure = cam.get("Exposure time (us)", 10000)
+    camera_exposure_us = cam.get("Exposure time (us)", 10000)
     cam_framerate = cam.get("Frame rate (f/s)", 100.0)
     aoi_width = cam.get("AOI width", 2048)
     aoi_height = cam.get("AOI height", 2048)
 
-    lines.append(f"    Exposure time (us) = {int(cam_exposure)}")
+    lines.append(f"    Exposure time (us) = {int(camera_exposure_us)}")
     lines.append(f"    Frame rate (f/s) = {cam_framerate:.1f}")
     lines.append(f"    AOI width = {aoi_width}")
     lines.append(f"    AOI height = {aoi_height}")

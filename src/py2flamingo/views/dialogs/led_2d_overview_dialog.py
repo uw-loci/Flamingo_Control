@@ -1132,8 +1132,8 @@ class LED2DOverviewDialog(PersistentDialog):
         """
         from py2flamingo.utils.tile_geometry import tile_step_mm
 
-        fov = self._get_actual_fov()
-        if fov is None:
+        fov_mm = self._get_actual_fov()
+        if fov_mm is None:
             return None
         # Before the overlap row is built, the config default (10 %), which is
         # also what the scan falls back to.
@@ -1143,7 +1143,7 @@ class LED2DOverviewDialog(PersistentDialog):
             if overlap is not None
             else ScanConfiguration.tile_overlap_percent
         )
-        return tile_step_mm(fov, pct)
+        return tile_step_mm(fov_mm, pct)
 
     def _calculate_tile_count(self, bbox: BoundingBox) -> Optional[Tuple[int, int]]:
         """Calculate number of tiles needed at the configured overlap.
@@ -1218,8 +1218,8 @@ class LED2DOverviewDialog(PersistentDialog):
             return
 
         # Get actual FOV from camera - required for safe operation
-        fov = self._get_actual_fov()
-        if fov is None:
+        fov_mm = self._get_actual_fov()
+        if fov_mm is None:
             self.tiles_label.setText("Tiles: ⚠ FOV unknown - camera not ready")
             self.total_tiles_label.setText("Total tiles: Cannot calculate")
             self.z_planes_label.setText("Z planes: --")
@@ -1230,9 +1230,9 @@ class LED2DOverviewDialog(PersistentDialog):
             self.preview_btn.setEnabled(False)
             return
 
-        z_step = self.z_step_size.value()
+        z_step_mm = self.z_step_size.value()
         # Tiles step by FOV x (1 - overlap), not by a full FOV.
-        step = self._tile_step_mm() or fov
+        step = self._tile_step_mm() or fov_mm
 
         # Rotation 1 (R): tile across X-Y, Z-stack through Z.
         # Counted with the walk the scan performs, never int(range/step)+1.
@@ -1242,7 +1242,7 @@ class LED2DOverviewDialog(PersistentDialog):
         tiles_y_r1 = len(tile_positions_1d(0.0, bbox.height, step))
         tiles_r1 = tiles_x_r1 * tiles_y_r1
         z_depth_r1 = bbox.z_max - bbox.z_min
-        z_planes_r1 = max(1, int(z_depth_r1 / z_step) + 1)
+        z_planes_r1 = max(1, int(z_depth_r1 / z_step_mm) + 1)
 
         # Check if tip is calibrated for second rotation. The quick-test
         # checkbox skips it outright, whether or not the tip is calibrated.
@@ -1270,7 +1270,7 @@ class LED2DOverviewDialog(PersistentDialog):
             tiles_y_r2 = tiles_y_r1  # Y unchanged
             tiles_r2 = tiles_x_r2 * tiles_y_r2
             z_depth_r2 = new_z_max - new_z_min
-            z_planes_r2 = max(1, int(z_depth_r2 / z_step) + 1)
+            z_planes_r2 = max(1, int(z_depth_r2 / z_step_mm) + 1)
 
             total_tiles = tiles_r1 + tiles_r2
             total_frames = (tiles_r1 * z_planes_r1) + (tiles_r2 * z_planes_r2)

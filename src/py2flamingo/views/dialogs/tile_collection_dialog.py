@@ -1047,10 +1047,10 @@ class TileCollectionDialog(PersistentDialog):
             )
             return
 
-        fov = self._fov_mm_estimate()
+        fov_mm = self._fov_mm_estimate()
         left_only = right_only = both = 0
         for tile in self._left_tiles + self._right_tiles:
-            sel = choose_illumination_arms(tile.x, center_x, fov)
+            sel = choose_illumination_arms(tile.x, center_x, fov_mm)
             if sel.left_on and sel.right_on:
                 both += 1
             elif sel.left_on:
@@ -1060,7 +1060,7 @@ class TileCollectionDialog(PersistentDialog):
 
         total = left_only + right_only + both
         label.setText(
-            f"On — center X ≈ {center_x:.2f} mm, FOV ≈ {fov * 1000:.0f} µm. "
+            f"On — center X ≈ {center_x:.2f} mm, FOV ≈ {fov_mm * 1000:.0f} µm. "
             f"Of {total} tiles: {both} both-arm (near center), "
             f"{left_only} left-only, {right_only} right-only. "
             "Peripheral tiles skip the far arm — output is asymmetric; reassemble "
@@ -2932,8 +2932,8 @@ class TileCollectionDialog(PersistentDialog):
                 per_image_est.set_total(expected)
                 per_image_est.tick(acquired)
             # Update current workflow bar
-            current_pct = int((acquired / max(1, expected)) * 100)
-            progress._current_bar.setValue(current_pct)
+            current_percent = int((acquired / max(1, expected)) * 100)
+            progress._current_bar.setValue(current_percent)
             progress._current_label.setText(
                 f"Tile {workflow_idx + 1}/{total_workflows}: "
                 f"{acquired}/{expected} images"

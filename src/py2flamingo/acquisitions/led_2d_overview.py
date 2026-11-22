@@ -239,10 +239,10 @@ class LED2DOverviewAcquisition(QObject):
         """
         from py2flamingo.utils.tile_geometry import tile_step_mm
 
-        fov = self._actual_fov_mm
-        if fov is None:
+        fov_mm = self._actual_fov_mm
+        if fov_mm is None:
             return None
-        return tile_step_mm(fov, self._tile_overlap_percent())
+        return tile_step_mm(fov_mm, self._tile_overlap_percent())
 
     @staticmethod
     def tile_positions_1d(lo: float, hi: float, step: float) -> List[float]:
@@ -458,7 +458,7 @@ class LED2DOverviewAcquisition(QObject):
         # stage-repeatability error into a visible seam. _tile_step_mm() is the
         # single definition — see its docstring for why this is not computed
         # inline any more.
-        fov = self._actual_fov_mm
+        fov_mm = self._actual_fov_mm
         step = self._tile_step_mm()
 
         # INFO, not DEBUG: this is the number that decides where the stage goes,
@@ -466,7 +466,7 @@ class LED2DOverviewAcquisition(QObject):
         # wrong one cost a 228-tile acquisition on 2026-08-08.
         logger.info(
             f"Tile step size: {step:.4f} mm "
-            f"(FOV={fov:.4f} mm, overlap={self._tile_overlap_percent():.1f}%)"
+            f"(FOV={fov_mm:.4f} mm, overlap={self._tile_overlap_percent():.1f}%)"
         )
 
         # Generate X positions (using effective tile_x range)
@@ -508,13 +508,13 @@ class LED2DOverviewAcquisition(QObject):
             f"X {x_positions[0]:.3f}..{x_positions[-1]:.3f} mm, "
             f"Y {y_positions[0]:.3f}..{y_positions[-1]:.3f} mm"
         )
-        if abs(step - fov) < 1e-6 and self._tile_overlap_percent() > 0:
+        if abs(step - fov_mm) < 1e-6 and self._tile_overlap_percent() > 0:
             # The exact failure from 2026-08-08: overlap requested, edge-to-edge
             # tiles scanned. Loud, because the result is unrecoverable.
             logger.error(
                 f"Tile overlap {self._tile_overlap_percent():.1f}% was requested "
                 f"but the step ({step:.4f} mm) equals a full FOV "
-                f"({fov:.4f} mm) — tiles will butt edge to edge with nothing "
+                f"({fov_mm:.4f} mm) — tiles will butt edge to edge with nothing "
                 f"for the stitcher to register on. STOP and report this."
             )
 
@@ -652,7 +652,7 @@ class LED2DOverviewAcquisition(QObject):
         # SAME position walk the scan will use — see tile_positions_1d. Deriving
         # this independently is how a run predicted 10x14 and laid down 9x12.
         total_tiles = 0
-        fov = self._actual_fov_mm
+        fov_mm = self._actual_fov_mm
         step = self._tile_step_mm()
         for i in range(len(self._rotation_angles)):
             eff_bbox = self._get_effective_bbox(i)
@@ -666,7 +666,7 @@ class LED2DOverviewAcquisition(QObject):
 
         logger.info(
             f"Starting LED 2D Overview: ~{total_tiles} total tiles, "
-            f"rotations: {self._rotation_angles}, FOV: {fov:.4f} mm, "
+            f"rotations: {self._rotation_angles}, FOV: {fov_mm:.4f} mm, "
             f"overlap: {self._tile_overlap_percent():.1f}% "
             f"(step {step:.4f} mm)"
         )
@@ -1331,7 +1331,7 @@ class LED2DOverviewAcquisition(QObject):
 
     @staticmethod
     def _z_sweep_positions(
-        z_min, z_max, z_step, ascending=True, max_planes=MAX_Z_PLANES_PER_TILE
+        z_min, z_max, z_step_mm, ascending=True, max_planes=MAX_Z_PLANES_PER_TILE
     ):
         """Z-plane positions for one tile's sweep, in stage-travel order.
 
@@ -1344,7 +1344,7 @@ class LED2DOverviewAcquisition(QObject):
         the stage. It used to sit inside ``_capture_tile`` only — the slow,
         non-default path — under the comment "this is a quick overview, not
         precision imaging". Fast mode is the default and walked the whole Z range
-        at ``z_step`` with no bound at all, so a deep bounding box could ask for
+        at ``z_step_mm`` with no bound at all, so a deep bounding box could ask for
         30+ planes per tile and the guard written to prevent exactly that never
         ran. Same shape as the tile-step bug: two copies of one calculation, and
         the copy driving hardware was the one missing the guard.
@@ -1359,7 +1359,7 @@ class LED2DOverviewAcquisition(QObject):
         z = z_min
         while z <= z_max:
             positions.append(z)
-            z += z_step
+            z += z_step_mm
         if not positions:
             positions = [z_min]
         if max_planes and len(positions) > max_planes:
@@ -1376,7 +1376,7 @@ class LED2DOverviewAcquisition(QObject):
         return positions
 
     @staticmethod
-    def _tile_z_plan(z_min, z_max, z_step, ascending, max_planes):
+    def _tile_z_plan(z_min, z_max, z_step_mm, ascending, max_planes):
         """``(z_start, z_values)`` for one tile's sweep.
 
         ``z_start`` is the sweep's own first position, never an assumed extreme
@@ -1394,7 +1394,7 @@ class LED2DOverviewAcquisition(QObject):
         disagree.
         """
         z_values = LED2DOverviewAcquisition._z_sweep_positions(
-            z_min, z_max, z_step, ascending, max_planes
+            z_min, z_max, z_step_mm, ascending, max_planes
         )
         return z_values[0], z_values
 
@@ -1639,7 +1639,7 @@ class LED2DOverviewAcquisition(QObject):
 
         # Get effective bounding box and tile info
         eff_bbox = self._current_effective_bbox
-        fov = self._actual_fov_mm
+        fov_mm = self._actual_fov_mm
         z_min = eff_bbox.z_min
         z_max = eff_bbox.z_max
 

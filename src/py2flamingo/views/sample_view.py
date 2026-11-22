@@ -6230,12 +6230,14 @@ class SampleView(QWidget):
             estimated_total = self._estimate_frames_per_tile(position, num_channels)
             total_tiles = max(1, len(self._expected_tiles))
             tile_idx = len(self._tile_buffers_submitted) + 1
-            tile_pct = min(1.0, frame_count / max(1, estimated_total))
-            overall_pct = min(100, int(((tile_idx - 1 + tile_pct) / total_tiles) * 100))
+            tile_fraction = min(1.0, frame_count / max(1, estimated_total))
+            overall_percent = min(
+                100, int(((tile_idx - 1 + tile_fraction) / total_tiles) * 100)
+            )
             status = f"Tile {tile_idx}/{total_tiles}: {frame_count} frames"
             # ETA is driven by the tile-collection dialog's per-image
             # estimator; pass None so we don't clobber its label.
-            self.update_workflow_progress(status, overall_pct, None)
+            self.update_workflow_progress(status, overall_percent, None)
 
         # Kick channel availability timer (will fire after processing catches up)
         self._channel_availability_timer.start()

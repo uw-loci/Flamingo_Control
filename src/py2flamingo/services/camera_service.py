@@ -338,12 +338,12 @@ class CameraService(MicroscopeCommandService):
             )
 
         # Pixel FOV returned in Value field (double)
-        pixel_fov = result["parsed"]["value"]
+        pixel_size_mm = result["parsed"]["value"]
 
         self.logger.info(
-            f"Pixel field of view: {pixel_fov} mm/pixel ({pixel_fov * 1000:.3f} µm/pixel)"
+            f"Pixel field of view: {pixel_size_mm} mm/pixel ({pixel_size_mm * 1000:.3f} µm/pixel)"
         )
-        return pixel_fov
+        return pixel_size_mm
 
     @staticmethod
     def _centered_roi_edges(sensor_px: int, side_px: int) -> Tuple[int, int]:

@@ -221,17 +221,17 @@ def estimate_fov_from_tiles(primary_tiles: List, secondary_tiles: List) -> float
     """
     # Try to estimate from primary tiles first (same rotation)
     if len(primary_tiles) >= 2:
-        fov = min_distance_in_tile_set(primary_tiles)
-        if fov < float("inf"):
-            logger.debug(f"FOV estimated from primary tiles: {fov*1000:.1f} µm")
-            return fov
+        fov_mm = min_distance_in_tile_set(primary_tiles)
+        if fov_mm < float("inf"):
+            logger.debug(f"FOV estimated from primary tiles: {fov_mm*1000:.1f} µm")
+            return fov_mm
 
     # Fallback to secondary tiles if primary insufficient
     if len(secondary_tiles) >= 2:
-        fov = min_distance_in_tile_set(secondary_tiles)
-        if fov < float("inf"):
-            logger.debug(f"FOV estimated from secondary tiles: {fov*1000:.1f} µm")
-            return fov
+        fov_mm = min_distance_in_tile_set(secondary_tiles)
+        if fov_mm < float("inf"):
+            logger.debug(f"FOV estimated from secondary tiles: {fov_mm*1000:.1f} µm")
+            return fov_mm
 
     # Ultimate fallback - use reasonable default for lightsheet microscopy
     logger.warning("Insufficient tiles for FOV estimation, using default 0.4mm (400µm)")

@@ -286,10 +286,10 @@ def resolve_fov_mm(app, log=None) -> Optional[float]:
     if frame_size is None:
         return None
 
-    fov = pixel_size_mm * frame_size
-    if fov < _MIN_SANE_FOV_MM or fov > _MAX_SANE_FOV_MM:
+    fov_mm = pixel_size_mm * frame_size
+    if fov_mm < _MIN_SANE_FOV_MM or fov_mm > _MAX_SANE_FOV_MM:
         log.error(
-            f"Calculated FOV {fov:.4f}mm is outside reasonable range "
+            f"Calculated FOV {fov_mm:.4f}mm is outside reasonable range "
             f"({_MIN_SANE_FOV_MM}-{_MAX_SANE_FOV_MM}mm)"
         )
         return None
@@ -297,7 +297,7 @@ def resolve_fov_mm(app, log=None) -> Optional[float]:
     _log_once(
         log,
         "fov",
-        f"Calculated actual FOV: {fov:.4f} mm "
+        f"Calculated actual FOV: {fov_mm:.4f} mm "
         f"(pixel_size={pixel_size_mm:.6f} mm, frame={frame_size}px)",
     )
-    return fov
+    return fov_mm

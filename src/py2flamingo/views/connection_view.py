@@ -607,11 +607,9 @@ class ConnectionView(QWidget):
 
                 # For camera commands with simple value responses, show cleaner output
                 if command_code_val == 12343:  # CAMERA_PIXEL_FIELD_OF_VIEW_GET
-                    pixel_fov = parsed.get("value", 0.0)
-                    text += f"RESULT: Pixel Field of View = {pixel_fov} mm\n"
-                    text += (
-                        f"        ({pixel_fov * 1000:.3f} micrometers per pixel)\n\n"
-                    )
+                    pixel_size_mm = parsed.get("value", 0.0)
+                    text += f"RESULT: Pixel Field of View = {pixel_size_mm} mm\n"
+                    text += f"        ({pixel_size_mm * 1000:.3f} micrometers per pixel)\n\n"
                     text += "This value indicates the physical size represented by each camera pixel.\n"
 
                 # Show complete protocol structure breakdown

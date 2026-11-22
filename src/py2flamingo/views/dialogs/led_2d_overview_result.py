@@ -97,10 +97,10 @@ class ImagePanel(QWidget):
 
         # Contrast settings - slider values (0-1000 range for precision)
         self._contrast_min_slider = 0  # Maps to _image_min
-        self._contrast_max_slider = 1000  # Maps to _image_max_pct
+        self._contrast_max_slider = 1000  # Maps to _image_p99_5
         # Actual image intensity range (set when image is loaded)
         self._image_min = 0.0
-        self._image_max_pct = 255.0  # 99.5th percentile
+        self._image_p99_5 = 255.0  # 99.5th percentile
 
         self._setup_ui()
 
@@ -214,8 +214,8 @@ class ImagePanel(QWidget):
 
     def _update_zoom_label(self):
         """Update zoom percentage display."""
-        zoom_pct = int(self.image_label.zoom_level * 100)
-        self.zoom_label.setText(f"{zoom_pct}%")
+        zoom_percent = int(self.image_label.zoom_level * 100)
+        self.zoom_label.setText(f"{zoom_percent}%")
 
     def _on_contrast_changed(self):
         """Handle contrast slider change - redraw image with new contrast."""
@@ -244,9 +244,9 @@ class ImagePanel(QWidget):
 
     def _update_contrast_label(self):
         """Update the contrast percentage label."""
-        min_pct = int(self._contrast_min_slider / 10)
-        max_pct = int(self._contrast_max_slider / 10)
-        self._contrast_label.setText(f"{min_pct}-{max_pct}%")
+        min_percent = int(self._contrast_min_slider / 10)
+        max_percent = int(self._contrast_max_slider / 10)
+        self._contrast_label.setText(f"{min_percent}-{max_percent}%")
 
     def set_tile_stride(
         self,
@@ -342,14 +342,14 @@ class ImagePanel(QWidget):
                 )
 
             self._image_min = float(np.min(flat))
-            self._image_max_pct = float(np.percentile(flat, 99.5))
+            self._image_p99_5 = float(np.percentile(flat, 99.5))
 
             # Ensure min < max
-            if self._image_max_pct <= self._image_min:
-                self._image_max_pct = self._image_min + 1
+            if self._image_p99_5 <= self._image_min:
+                self._image_p99_5 = self._image_min + 1
 
             logger.debug(
-                f"Contrast range: min={self._image_min:.1f}, 99.5%={self._image_max_pct:.1f}"
+                f"Contrast range: min={self._image_min:.1f}, 99.5%={self._image_p99_5:.1f}"
             )
 
             # Reset sliders to full range
@@ -564,8 +564,8 @@ class ImagePanel(QWidget):
             bytes_per_line = w
 
             # Apply contrast adjustment using slider values
-            # Slider values (0-1000) map to the range [_image_min, _image_max_pct]
-            intensity_range = self._image_max_pct - self._image_min
+            # Slider values (0-1000) map to the range [_image_min, _image_p99_5]
+            intensity_range = self._image_p99_5 - self._image_min
             display_min = (
                 self._image_min + (self._contrast_min_slider / 1000.0) * intensity_range
             )
@@ -1165,12 +1165,12 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
             # The LED overview is acquired full-frame, so use the full-sensor FOV
             # even when the live camera is cropped to a smaller AOI.
-            fov = get_hardware_config().fov_full_sensor_mm
+            fov_mm = get_hardware_config().fov_full_sensor_mm
         except Exception:
-            fov = 0.5182  # mm fallback
+            fov_mm = 0.5182  # mm fallback
 
-        tiles_x = max(1, int((bbox.width / fov) + 1))
-        tiles_y = max(1, int((bbox.height / fov) + 1))
+        tiles_x = max(1, int((bbox.width / fov_mm) + 1))
+        tiles_y = max(1, int((bbox.height / fov_mm) + 1))
 
         # Create preview images (gray grids)
         preview_w = tiles_x * 100
@@ -1571,7 +1571,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
 
             hw = get_hardware_config()
             px_mm = float(hw.effective_pixel_size_um) / 1000.0
-            fov = (
+            fov_xy_mm = (
                 float(hw.sensor_width_px) * px_mm,
                 float(hw.sensor_height_px) * px_mm,
             )
@@ -1583,9 +1583,9 @@ class LED2DOverviewResultWindow(PersistentWidget):
             )
             return None
         logger.info(
-            f"Overview field assumed full-sensor: {fov[0]:.4f} x {fov[1]:.4f} mm"
+            f"Overview field assumed full-sensor: {fov_xy_mm[0]:.4f} x {fov_xy_mm[1]:.4f} mm"
         )
-        return fov
+        return fov_xy_mm
 
     # ------------------------------------------------------------------ #
     # Acquisition tiling — decided here, over the image, and verified

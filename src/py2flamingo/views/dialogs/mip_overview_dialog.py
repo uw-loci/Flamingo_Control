@@ -805,7 +805,7 @@ class MIPOverviewDialog(PersistentDialog):
             return
 
         try:
-            overlap_pct = self._overlap_spin.value() / 100.0
+            overlap_fraction = self._overlap_spin.value() / 100.0
             export_overview_with_labels(
                 tiles=self._tiles,
                 config=self._config,
@@ -813,7 +813,7 @@ class MIPOverviewDialog(PersistentDialog):
                 flat_tile_infos=(
                     self._flat_tile_infos if self._flat_tile_infos else None
                 ),
-                overlap_pct=overlap_pct,
+                overlap_fraction=overlap_fraction,
             )
             QMessageBox.information(
                 self,
@@ -841,7 +841,7 @@ class MIPOverviewDialog(PersistentDialog):
         tiles_x = self._config.tiles_x
         tiles_y = self._config.tiles_y
         downsample = self._config.downsample_factor
-        overlap_pct = self._overlap_spin.value() / 100.0
+        overlap_fraction = self._overlap_spin.value() / 100.0
 
         # Determine tile size after downsampling
         sample_tile = self._tiles[0].image
@@ -854,8 +854,8 @@ class MIPOverviewDialog(PersistentDialog):
         tile_w = orig_w // downsample
 
         # Compute stride (distance between tile origins) accounting for overlap
-        overlap_x = int(tile_w * overlap_pct)
-        overlap_y = int(tile_h * overlap_pct)
+        overlap_x = int(tile_w * overlap_fraction)
+        overlap_y = int(tile_h * overlap_fraction)
         stride_x = tile_w - overlap_x
         stride_y = tile_h - overlap_y
 
