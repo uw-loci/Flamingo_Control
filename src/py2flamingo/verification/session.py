@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from py2flamingo import _version
 from py2flamingo.core import server_layout
 from py2flamingo.verification import report
 from py2flamingo.verification.context import RunOptions, Target
@@ -169,8 +170,6 @@ def execute(
 ) -> tuple[RunSummary, Path]:
     """Run the checks of ``tiers`` (cumulative: T3 includes T0-T2) and write
     the run folder. Returns the summary and the folder."""
-    from py2flamingo import __version__
-
     top = max(tiers)
     selected_tiers = [t for t in Tier if t <= top]
     checks: List[Check] = checks_for(selected_tiers, only, area)
@@ -202,7 +201,7 @@ def execute(
             if target
             else ""
         ),
-        "app_version": __version__,
+        "app_version": _version.__version__,
         "app_commit": app_commit(),
         "server_version": prepared.server_version,
         "command_layout": summary.facts.get("command_layout", prepared.server_version),

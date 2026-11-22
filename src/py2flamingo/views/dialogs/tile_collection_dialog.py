@@ -33,6 +33,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from py2flamingo import _version
 from py2flamingo.models.data.workflow import StackSettings, Workflow, WorkflowType
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.progress_estimator import (
@@ -2385,12 +2386,7 @@ class TileCollectionDialog(PersistentDialog):
             return ""
 
     def _fill_manifest_identity(self, manifest) -> None:
-        try:
-            from py2flamingo import __version__ as _version
-
-            manifest.software_version = _version
-        except Exception:
-            pass
+        manifest.software_version = _version.__version__
         try:
             manifest.microscope = self._app.configuration_service.get_microscope_name()
         except Exception:

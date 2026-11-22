@@ -4,4 +4,6 @@ Importing the package loads nothing else; the application starts from
 ``python -m py2flamingo`` (``cli.py`` -> ``application.py``).
 """
 
-__version__ = "0.6.2"
+from py2flamingo._version import __version__
+
+__all__ = ["__version__"]

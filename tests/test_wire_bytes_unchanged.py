@@ -126,9 +126,9 @@ class WireBytesCase(unittest.TestCase):
         patcher = mock.patch.object(sl.time, "localtime", lambda *a: fixed)
         patcher.start()
         self.addCleanup(patcher.stop)
-        version = py2flamingo.__version__
-        py2flamingo.__version__ = "0.0.0"
-        self.addCleanup(setattr, py2flamingo, "__version__", version)
+        patcher = mock.patch.object(py2flamingo._version, "__version__", "0.0.0")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         port = adjacent_ports()
         self.scope = RecordingScope(
             command_port=port, live_port=port + 1, layout=self.layout

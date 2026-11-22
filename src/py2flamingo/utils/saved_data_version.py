@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from py2flamingo import _version
+
 #: Where the provenance block lives inside a payload. Deliberately not
 #: ``version``: every existing format already uses that key for its own format
 #: number, and overwriting it would change the meaning of files this is
@@ -114,10 +116,7 @@ def stamp(
     function stays pure and testable.
     """
     if app_version is None:
-        try:
-            from py2flamingo import __version__ as app_version
-        except Exception:  # pragma: no cover - defensive
-            app_version = "unknown"
+        app_version = _version.__version__
     payload[PROVENANCE_KEY] = {
         "app_version": app_version,
         "format": format_name,

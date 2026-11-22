@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from py2flamingo import _version
 from py2flamingo.core import server_layout
 from py2flamingo.core.queue_manager import QueueManager
 
@@ -329,9 +330,7 @@ class MVCConnectionService:
         On any failure the client carries on as before this check existed (the
         3.0.0 numbering, unguarded), and says so.
         """
-        from py2flamingo import __version__
-
-        mine = server_layout.client_version_string(__version__)
+        mine = server_layout.client_version_string(_version.__version__)
         self.server_version_text = ""
         self.server_version_verdict = None
         try:
