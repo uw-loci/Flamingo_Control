@@ -25,6 +25,9 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.models.data.workflow import IlluminationSettings
+from py2flamingo.views.workflow_panels.advanced_illumination_dialog import (
+    AdvancedIlluminationDialog,
+)
 
 # Default laser channels - used when no instrument configuration is provided
 # Format: (Display Name, Workflow Key, Default Power)
@@ -295,8 +298,6 @@ class IlluminationPanel(QWidget):
 
     def _on_advanced_clicked(self) -> None:
         """Open advanced illumination settings dialog."""
-        from py2flamingo.views.dialogs import AdvancedIlluminationDialog
-
         dialog = AdvancedIlluminationDialog(self)
         dialog.set_settings(
             {

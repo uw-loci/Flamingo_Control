@@ -25,6 +25,8 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from py2flamingo.views.workflow_panels.advanced_save_dialog import AdvancedSaveDialog
+
 # Save format options matching workflow file format
 SAVE_FORMATS = [
     ("TIFF", "Tiff"),
@@ -594,8 +596,6 @@ class SavePanel(QWidget):
         Note: Save drive is now in the main UI, not in Advanced dialog.
         Advanced dialog handles: region, subfolders, live view, comments.
         """
-        from py2flamingo.views.dialogs import AdvancedSaveDialog
-
         dialog = AdvancedSaveDialog(
             parent=self,
             default_drive=self._default_save_drive,

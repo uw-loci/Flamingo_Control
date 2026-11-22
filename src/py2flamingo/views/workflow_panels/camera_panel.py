@@ -21,6 +21,10 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from py2flamingo.views.workflow_panels.advanced_camera_dialog import (
+    AdvancedCameraDialog,
+)
+
 # AOI preset configurations (used by dialog)
 AOI_PRESETS = {
     "Full Frame (2048x2048)": (2048, 2048),
@@ -285,8 +289,6 @@ class CameraPanel(QWidget):
         """Open advanced camera settings dialog."""
         if self.aoi_locked:
             return
-        from py2flamingo.views.dialogs import AdvancedCameraDialog
-
         dialog = AdvancedCameraDialog(self)
         dialog.set_settings(
             {
