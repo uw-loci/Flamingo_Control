@@ -64,12 +64,18 @@ def test_span_too_big_reports_not_fit_and_drops_unreachable():
     assert all(5.25 - 1e-6 <= p <= 24.75 + 1e-6 for p in out)
 
 
-def test_no_limits_returns_unchanged():
+def test_no_limits_fails_closed():
+    # Tiles that cannot be checked against the limits are not commanded. Until
+    # 2026-11-22 missing limits skipped the guard and returned fits=True.
     wf = _bare(limits={})
     pos = [1.0, 99.0]
     out, fits = wf._fit_positions_to_limits(pos, "y")
-    assert fits is True
-    assert out == pos
+    assert fits is False
+
+
+def test_no_positions_needs_no_limits():
+    wf = _bare(limits={})
+    assert wf._fit_positions_to_limits([], "y") == ([], True)
 
 
 def test_z_range_pair_shifts_together():

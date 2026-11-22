@@ -106,6 +106,9 @@ class LED2DOverviewWorkflow(QObject):
         self._config = config
         self._running = False
         self._cancelled = False
+        # True only while this scan holds the application's acquisition lock,
+        # so a finish never releases another owner's lock.
+        self._owns_acquisition = False
         # Cached stage soft limits {axis: {'min','max'}} for the tile-position guard.
         self._stage_limits_cache = None
         # Cached MotionTracker for the per-plane Z wait. Sentinel-guarded because
@@ -670,19 +673,34 @@ class LED2DOverviewWorkflow(QObject):
             f"(step {step:.4f} mm)"
         )
 
-        # Lock microscope controls during acquisition
+        # Lock microscope controls during acquisition. A refusal (another
+        # acquisition holds the lock, or the optics guard blocked it) ends the
+        # scan here: nothing has moved and nothing is lit yet.
         if self._app:
-            self._app.start_acquisition("LED 2D Overview")
+            if not self._app.start_acquisition("LED 2D Overview"):
+                logger.error(
+                    "LED 2D Overview not started: the acquisition lock was "
+                    "refused (another acquisition is running, or the optics "
+                    "guard blocked it)"
+                )
+                self._running = False
+                self._unregister_stop_hook()
+                self.scan_error.emit(
+                    "The scan could not start: another acquisition is running, "
+                    "or the optics check blocked acquisition."
+                )
+                return
+            self._owns_acquisition = True
 
         # Enable the LED before starting
         if not self._enable_led():
             logger.error("Failed to enable LED - scan may produce black images!")
+            # Nothing has moved yet, so there is no origin to return to.
+            self._origin_restored = True
+            self._release_run()
             self.scan_error.emit(
                 "LED could not be enabled. Check light source settings."
             )
-            self._running = False
-            if self._app:
-                self._app.stop_acquisition("LED 2D Overview")
             return
 
         self.scan_started.emit()
@@ -747,7 +765,7 @@ class LED2DOverviewWorkflow(QObject):
             # Wait for rotation to complete, then start tiles
             # Use fast continuous mode if enabled, otherwise use slow tile-by-tile mode
             if self._config.fast_mode:
-                QTimer.singleShot(3000, self._scan_tiles_continuous)
+                QTimer.singleShot(3000, self._scan_tiles_continuous_guarded)
             else:
                 if getattr(self._config, "adaptive_z", False):
                     # Say so rather than let a ticked box do nothing. A setting
@@ -762,9 +780,8 @@ class LED2DOverviewWorkflow(QObject):
 
         except Exception as e:
             logger.error(f"Error moving to rotation: {e}")
+            self._release_run()
             self.scan_error.emit(str(e))
-            self._running = False
-            self._return_to_origin()
 
     def _capture_origin_position(self) -> None:
         """Read and remember the live stage position before any scan move.
@@ -1222,8 +1239,8 @@ class LED2DOverviewWorkflow(QObject):
             if self._app and getattr(self._app, "microscope_settings", None):
                 limits = self._app.microscope_settings.get_stage_limits() or {}
         except Exception as exc:  # noqa: BLE001 - guard is best-effort
-            logger.warning(
-                f"Could not load stage limits ({exc}); skipping tile-limit guard"
+            logger.error(
+                f"Could not load stage limits ({exc}); the scan will not start"
             )
         self._stage_limits_cache = limits
         return limits
@@ -1242,9 +1259,17 @@ class LED2DOverviewWorkflow(QObject):
         backstop the returned list still has any unreachable centers removed, so
         it is always safe to command.
         """
-        lim = self._get_stage_limits().get(axis_key)
-        if not lim or not positions:
+        if not positions:
             return positions, True
+        lim = self._get_stage_limits().get(axis_key)
+        if not lim:
+            # Fail closed: tiles that cannot be checked are not commanded.
+            # Until 2026-11-22 this skipped the guard with a warning.
+            logger.error(
+                f"{axis_key.upper()}-axis: no stage limits available; "
+                "refusing to tile without them"
+            )
+            return positions, False
         lo, hi = lim["min"] + margin_mm, lim["max"] - margin_mm
         usable = hi - lo
         span = max(positions) - min(positions)
@@ -1284,19 +1309,26 @@ class LED2DOverviewWorkflow(QObject):
         without commanding any unsafe move.
         """
         bad = [axis for axis, ok in oks.items() if not ok]
-        msg = (
-            "The requested overview area requires unsafe stage movement on "
-            f"{', '.join(bad)}: the span is larger than the stage can travel. "
-            "No acquisition was started.\n\n"
-            "Choose a smaller area, or edit the configured positions in the "
-            "config file."
-        )
+        limits = self._get_stage_limits()
+        unknown = [axis for axis in bad if not limits.get(axis.lower())]
+        if unknown:
+            msg = (
+                f"The stage limits for {', '.join(unknown)} could not be "
+                "loaded, so the overview tiles cannot be checked against them. "
+                "No acquisition was started.\n\n"
+                "Check the microscope's stage-limit configuration "
+                "(Edit > Microscope Setup) and reconnect."
+            )
+        else:
+            msg = (
+                "The requested overview area requires unsafe stage movement on "
+                f"{', '.join(bad)}: the span is larger than the stage can "
+                "travel. No acquisition was started.\n\n"
+                "Choose a smaller area, or edit the configured positions in the "
+                "config file."
+            )
         logger.error(msg)
-        self._running = False
-        if self._app:
-            self._app.stop_acquisition("LED 2D Overview")
-        self._disable_led()
-        self._return_to_origin()
+        self._release_run()
         self.scan_error.emit(msg)
 
     @staticmethod
@@ -1577,6 +1609,16 @@ class LED2DOverviewWorkflow(QObject):
                 f"remaining tile sweeps the full range."
             )
         return band, frames, extra
+
+    def _scan_tiles_continuous_guarded(self):
+        """Run the continuous scan; an exception ends the scan through
+        :meth:`_release_run` instead of escaping the timer callback."""
+        try:
+            self._scan_tiles_continuous()
+        except Exception as e:
+            logger.error(f"Error in continuous scan: {e}", exc_info=True)
+            self._release_run()
+            self.scan_error.emit(str(e))
 
     def _scan_tiles_continuous(self):
         """Scan all tiles using continuous Z sweeps - much faster than step-by-step.
@@ -1940,9 +1982,8 @@ class LED2DOverviewWorkflow(QObject):
 
         except Exception as e:
             logger.error(f"Error capturing tile: {e}", exc_info=True)
+            self._release_run()
             self.scan_error.emit(str(e))
-            self._running = False
-            self._return_to_origin()
 
     def _capture_tile(
         self, x: float, y: float, z_center: float, tile_x_idx: int, tile_y_idx: int
@@ -2304,19 +2345,40 @@ class LED2DOverviewWorkflow(QObject):
         logger.debug(f"Assembled tiles with invert_x={self._invert_x}")
         return output
 
+    def _unregister_stop_hook(self) -> None:
+        try:
+            from py2flamingo.services import stage_motion_gate
+
+            stage_motion_gate.unregister_stop_hook("LED 2D overview")
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Could not unregister the emergency-stop hook: {exc}")
+
+    def _release_run(self) -> None:
+        """Every exit of a started scan goes through here (end, cancel, error).
+
+        Marks the scan stopped, releases the acquisition lock if this scan
+        holds it, turns the LED off and returns the stage to where it started,
+        each step on its own so one failure does not skip the next. Safe to
+        call twice: the lock is released once, and the return to origin is
+        itself once-only.
+        """
+        self._running = False
+        self._unregister_stop_hook()
+        if getattr(self, "_owns_acquisition", False) and self._app:
+            self._owns_acquisition = False
+            try:
+                self._app.stop_acquisition("LED 2D Overview")
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"Could not release the acquisition lock: {exc}")
+        self._disable_led()
+        try:
+            self._return_to_origin()
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Could not return the stage to its start: {exc}")
+
     def _finish_completed(self):
         """Finish the scan successfully."""
-        self._running = False
-
-        # Unlock microscope controls
-        if self._app:
-            self._app.stop_acquisition("LED 2D Overview")
-
-        # Disable LED
-        self._disable_led()
-
-        # Return the stage to where it was before the scan started.
-        self._return_to_origin()
+        self._release_run()
 
         # Log summary
         total_tiles = sum(len(r.tiles) for r in self._results)
@@ -2337,17 +2399,7 @@ class LED2DOverviewWorkflow(QObject):
 
     def _finish_cancelled(self):
         """Finish the scan due to cancellation."""
-        self._running = False
-
-        # Unlock microscope controls
-        if self._app:
-            self._app.stop_acquisition("LED 2D Overview")
-
-        # Disable LED
-        self._disable_led()
-
-        # Return the stage to where it was before the scan started.
-        self._return_to_origin()
+        self._release_run()
 
         logger.info("LED 2D Overview cancelled")
         self.scan_cancelled.emit()
