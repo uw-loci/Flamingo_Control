@@ -99,9 +99,7 @@ class CameraCommandCode:
     # Query commands
     IMAGE_SIZE_GET = 12327  # 0x3027
     PIXEL_FIELD_OF_VIEW_GET = 12343  # 0x3037
-    EXPOSURE_GET = (
-        12298  # 0x300A - get exposure time (returns int32Data0 in microseconds)
-    )
+    EXPOSURE_GET = 12298  # 0x300A - exposure time, int32Data0 in MILLISECONDS
 
     # The only way to confirm a light-sheet line time actually took effect.
     #
@@ -490,10 +488,14 @@ class CameraService(MicroscopeCommandService):
 
         parsed = result["parsed"]
 
-        # Exposure is returned in int32Data0 (params[3]) in microseconds
-        # Reference: PCOBase.cpp getExposureTime() sets pscmd->int32Data0 = exposure
+        # The server answers in whole MILLISECONDS: PCOBase::getExposureTime
+        # puts GetTimeValueMS(exposure, timebase) in int32Data0 (3.0.0 and
+        # later). This read it as microseconds, so 25 ms came back as 25 us;
+        # once workflows carried the exposure to the server (2026-11-21) a
+        # workflow built from the detected settings asked for 1 ms.
         params = parsed["params"]
-        exposure_us = float(params[3]) if len(params) > 3 else 0.0
+        exposure_ms = float(params[3]) if len(params) > 3 else 0.0
+        exposure_us = exposure_ms * 1000.0
 
         self.logger.info(
             f"Camera exposure: {exposure_us} us ({exposure_us/1000:.2f} ms)"

@@ -271,6 +271,17 @@ class TestTheAppsWorkflowSendPath(VerificationTestCase):
         self.assertIn("Exposure time (ms) = ", sent)
 
 
+class TestExposureReadBack(VerificationTestCase):
+    layout = sl.LAYOUT_2026_11_13
+
+    def test_get_exposure_converts_the_servers_milliseconds(self):
+        # PCOBase::getExposureTime answers in ms; the app's callers want us.
+        from py2flamingo.services.camera_service import CameraService
+
+        self.scope.exposure_ms = 25
+        self.assertEqual(CameraService(self.connection).get_exposure(), 25000.0)
+
+
 class TestServerSoftLimitsAtConnect(VerificationTestCase):
     layout = sl.LAYOUT_2026_11_13
 
