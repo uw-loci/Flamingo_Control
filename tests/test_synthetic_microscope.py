@@ -235,6 +235,11 @@ class TestWorkflowUpload(SyntheticScopeTestCase):
     def test_stop_clears_the_running_flag(self):
         self.send(CameraCommands.WORKFLOW_START, additional=b"body")
         self.send(CameraCommands.WORKFLOW_STOP)
+        # The workflow thread clears the flag itself once it sees the stop, a
+        # moment after the reply (CI run 44999600814 caught it still set).
+        deadline = time.monotonic() + 2.0
+        while self.scope.workflow_running and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertFalse(self.scope.workflow_running)
 
 
