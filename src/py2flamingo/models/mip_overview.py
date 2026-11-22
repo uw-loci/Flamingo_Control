@@ -556,18 +556,27 @@ def read_tile_overlap_from_workflow(directory: Path) -> Optional[Tuple[float, fl
         if not candidate.exists():
             continue
         try:
-            content = candidate.read_text(errors="replace")
+            from py2flamingo.utils.workflow_keys import (
+                find_value,
+                read_workflow_sections,
+            )
+
+            sections = read_workflow_sections(candidate)
 
             # Only parse overlap if this is a Tile workflow
-            option_match = re.search(r"Stack option\s*=\s*(\w+)", content)
-            if not option_match or option_match.group(1) != "Tile":
+            option = re.match(r"\w+", str(find_value(sections, "Stack option") or ""))
+            if not option or option.group(0) != "Tile":
                 continue
 
-            s1 = re.search(r"Stack option settings 1\s*=\s*([\d.]+)", content)
-            s2 = re.search(r"Stack option settings 2\s*=\s*([\d.]+)", content)
+            def _number(key):
+                m = re.match(r"[\d.]+", str(find_value(sections, key) or "").strip())
+                return m.group(0) if m else None
+
+            s1 = _number("Stack option settings 1")
+            s2 = _number("Stack option settings 2")
             if s1 and s2:
-                overlap_x = float(s1.group(1))
-                overlap_y = float(s2.group(1))
+                overlap_x = float(s1)
+                overlap_y = float(s2)
                 logger.info(
                     f"Read tile overlap from {candidate.name}: "
                     f"X={overlap_x}%, Y={overlap_y}%"

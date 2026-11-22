@@ -327,6 +327,23 @@ def _pixel_calibration_path() -> Path:
     return scoped_settings_read_path("pixel_calibration.json")
 
 
+def _settings_value(path: Path, key: str) -> Optional[str]:
+    """The first ``key`` in a settings file, in any section, or None
+    (the one settings parser, ``file_handlers.text_to_dict``)."""
+    from py2flamingo.utils.file_handlers import text_to_dict
+    from py2flamingo.utils.workflow_keys import find_value
+
+    return find_value(text_to_dict(path), key)
+
+
+def _settings_number(path: Path, key: str) -> Optional[float]:
+    value = _settings_value(path, key)
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _read_scope_optics(path: Optional[Path] = None) -> Optional[Dict[str, float]]:
     """Read the microscope-reported optics from ScopeSettings.txt.
 
@@ -337,21 +354,18 @@ def _read_scope_optics(path: Optional[Path] = None) -> Optional[Dict[str, float]
     ``{objective_magnification, tube_lens_focal_length_mm,
     reference_tube_lens_mm}`` or None when the file/fields are absent.
     """
-    import re
-
     path = path or _scope_settings_path()
     try:
         if not path.exists():
             return None
-        text = path.read_text(errors="ignore")
-        mag_m = re.search(r"Objective lens magnification\s*=\s*([\d.]+)", text)
-        if not mag_m:
+        mag = _settings_number(path, "Objective lens magnification")
+        if mag is None:
             return None
-        tube_m = re.search(r"Tube lens design focal length \(mm\)\s*=\s*([\d.]+)", text)
+        tube = _settings_number(path, "Tube lens design focal length (mm)")
         return {
-            "objective_magnification": float(mag_m.group(1)),
+            "objective_magnification": mag,
             # Scope expresses the tube lens against a 200 mm reference.
-            "tube_lens_focal_length_mm": float(tube_m.group(1)) if tube_m else 200.0,
+            "tube_lens_focal_length_mm": tube if tube is not None else 200.0,
             "reference_tube_lens_mm": 200.0,
         }
     except Exception:
@@ -401,20 +415,11 @@ def _read_scope_microscope_name(path: Optional[Path] = None) -> Optional[str]:
     Returns None for a missing file or a blank value, so a truncated file can
     never key an overlay.
     """
-    import re
-
     path = path or _scope_settings_path()
     try:
         if not path.exists():
             return None
-        text = path.read_text(errors="ignore")
-        # Horizontal whitespace only, and the value must stay on the SAME line:
-        # with a plain \s* the newline after a blank "Microscope name =" is
-        # consumed and the next line becomes the name.
-        m = re.search(r"Microscope name[^\S\r\n]*=[^\S\r\n]*([^\r\n]+)", text)
-        if not m:
-            return None
-        return m.group(1).strip() or None
+        return (_settings_value(path, "Microscope name") or "").strip() or None
     except Exception:
         logger.debug("Could not read microscope name from %s", path, exc_info=True)
         return None

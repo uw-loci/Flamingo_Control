@@ -2,11 +2,10 @@
 
 The synthetic microscope answers the way the server source says (which code
 replies, which field carries what, HALT ignoring axis 0, the ROI revert, the
-exposure labels a workflow is read with). So the run here is the run the rig
-will see, apart from the hardware itself, and two checks FAIL by design: they
-measure suspected client defects (``t1.roi``: the client sends no right/bottom
-ROI edge; ``t4.workflow``: the server does not read the "Exposure time (us)"
-label the client writes). When those are fixed these expectations flip.
+exposure labels a workflow is read with, the keys each build writes into the
+acquisition). So the run here is the run the rig will see, apart from the
+hardware itself. A check that measures a known client defect is listed in
+``KNOWN_CLIENT_DEFECTS``; there is none at present.
 
 Fault injection below proves that a check can fail: a verifier that only
 ever says PASS has not been tested.
@@ -38,11 +37,12 @@ from py2flamingo.verification.runner import RunCallbacks
 REPO = Path(__file__).resolve().parents[1]
 
 # Checks that fail on purpose against a faithful server (see module docstring).
-# t4.acquisition_files: the app's illumination reader knows only the pre-10-06
-# keys ("Left path = ON 1", not "Left path recording = true"). The stitcher's
+# None now: t4.acquisition_files failed until the app's workflow readers learned
+# the 2026-10-06 keys ("Left path recording = true", "ROI width", "Exposure
+# time (ms)", recording "true"/"false"; utils/workflow_keys.py). The stitcher's
 # name and objective readers handle SystemMetaData.txt from flamingo-stitcher
 # 0.14.1 on.
-KNOWN_CLIENT_DEFECTS = {"t4.acquisition_files"}
+KNOWN_CLIENT_DEFECTS: set = set()
 
 
 def _adjacent_ports():
@@ -172,8 +172,17 @@ class TestFullRun(VerificationTestCase):
         self.assertEqual(wf.outcome, Outcome.PASS, wf.detail)
         self.assertEqual(wf.values["exposure_after_ms"], wf.values["exposure_asked_ms"])
         self.assertNotIn("Exposure time (us)", self.scope.workflows[-1])
-        files = by_id["t4.acquisition_files"].detail
-        self.assertIn("illumination as left=False", files)
+        files = by_id["t4.acquisition_files"]
+        self.assertEqual(files.outcome, Outcome.PASS, files.detail)
+        # The server wrote the 10-06 keys, and the app reads them.
+        self.assertIn("Left path recording", files.values["workflow_keys"])
+        self.assertNotIn("Left path =", files.values["workflow_keys"])
+        self.assertEqual(files.values["app_reads_illumination"], [True, False])
+        self.assertEqual(
+            files.values["app_reads_exposure_us"],
+            1000 * wf.values["exposure_asked_ms"],
+        )
+        files = files.detail
         # flamingo-stitcher 0.14.1 reads SystemMetaData.txt: name and objective found.
         self.assertNotIn("no microscope name", files)
         self.assertNotIn("no objective", files)
@@ -203,7 +212,8 @@ class TestFullRun(VerificationTestCase):
         for name in ("report.txt", "report.json", "exchange.log"):
             self.assertTrue((folder / name).exists(), name)
         text = (folder / "report.txt").read_text()
-        self.assertIn("PROBLEMS", text)
+        # A PROBLEMS section only when something failed.
+        self.assertEqual("PROBLEMS" in text, bool(KNOWN_CLIENT_DEFECTS))
         self.assertIn("2026-11-13", text)
         self.assertTrue(list(folder.glob("target_*")))
 
@@ -695,8 +705,12 @@ class TestAreas(VerificationTestCase):
     def test_the_data_area_brings_the_workflow_it_reads(self):
         _, _, by_id = self.run_tiers(area="data")
         self.assertEqual(by_id["t4.workflow"].outcome, Outcome.PASS)
-        # Still fails on the app's illumination reader (11-13 keys).
-        self.assertEqual(by_id["t4.acquisition_files"].outcome, Outcome.FAIL)
+        # The app's readers know the 11-13 keys.
+        self.assertEqual(
+            by_id["t4.acquisition_files"].outcome,
+            Outcome.PASS,
+            by_id["t4.acquisition_files"].detail,
+        )
         self.assertNotIn("t3.led", by_id)
 
     def test_a_lost_board_during_the_run_fails_the_notice_check(self):

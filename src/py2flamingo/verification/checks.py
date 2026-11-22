@@ -1714,6 +1714,25 @@ def t4_acquisition_files(ctx: RunContext) -> None:
                 f"the app reads the illumination as left={sides[0]}, right={sides[1]}; "
                 "the workflow asked for left only"
             )
+        # The Workflow tab's loader, in the app's keys whichever build wrote it.
+        from py2flamingo.utils.workflow_parser import parse_workflow_file
+
+        exp = parse_workflow_file(folder / "Workflow.txt").get(
+            "Experiment Settings", {}
+        )
+        try:
+            read_us = float(str(exp.get("Exposure time (us)", "")).replace(",", ""))
+        except ValueError:
+            read_us = None
+        ctx.record("app_reads_exposure_us", read_us)
+        asked_ms = ctx.facts.get("workflow_exposure_ms")
+        if not read_us:
+            problems.append("the app reads no exposure from the server's Workflow.txt")
+        elif asked_ms and abs(read_us - 1000 * float(asked_ms)) > 0.5:
+            ctx.note(
+                f"the server's Workflow.txt says {read_us / 1000:g} ms, "
+                f"the workflow asked {asked_ms} ms"
+            )
         text = (folder / "Workflow.txt").read_text(encoding="utf-8", errors="replace")
         ctx.record(
             "workflow_keys",

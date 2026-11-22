@@ -9,6 +9,14 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from py2flamingo.utils.workflow_keys import (
+    PATH_SECTION,
+    SIDES,
+    find_value,
+    path_recording,
+    read_workflow_sections,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,6 +50,14 @@ def parse_workflow_position(workflow_file: Path) -> Optional[Dict]:
     return None
 
 
+def _float(value: Optional[str]) -> Optional[float]:
+    """A workflow number, or None when it is blank or not a number."""
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def read_xy_position_from_workflow(
     workflow_file: Path,
 ) -> Optional[Tuple[float, float]]:
@@ -56,16 +72,10 @@ def read_xy_position_from_workflow(
         (x_mm, y_mm), or None if the block/fields are absent.
     """
     try:
-        with open(workflow_file, "r") as f:
-            content = f.read()
-        x_match = re.search(
-            r"<Start Position>.*?X \(mm\) = ([-\d.]+)", content, re.DOTALL
-        )
-        y_match = re.search(
-            r"<Start Position>.*?Y \(mm\) = ([-\d.]+)", content, re.DOTALL
-        )
-        if x_match and y_match:
-            return float(x_match.group(1)), float(y_match.group(1))
+        start = read_workflow_sections(workflow_file).get("Start Position", {})
+        x, y = _float(start.get("X (mm)")), _float(start.get("Y (mm)"))
+        if x is not None and y is not None:
+            return x, y
     except Exception as e:
         logger.error(f"Failed to read XY position from {workflow_file.name}: {e}")
     return None
@@ -78,41 +88,29 @@ def read_z_range_from_workflow(workflow_file: Path) -> Tuple[float, float]:
         workflow_file: Path to workflow file
 
     Returns:
-        Tuple of (z_min, z_max) in mm
+        Tuple of (z_min, z_max) in mm: the Start and End Position Z, each 0.0
+        when absent; (0.0, 10.0) when the file cannot be read.
     """
     try:
-        with open(workflow_file, "r") as f:
-            content = f.read()
-
-        # Parse Start Position Z
-        z_min = 0.0
-        z_max = 0.0
-
-        start_match = re.search(
-            r"<Start Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL
-        )
-        if start_match:
-            z_min = float(start_match.group(1))
-
-        end_match = re.search(
-            r"<End Position>.*?Z \(mm\) = ([-\d.]+)", content, re.DOTALL
-        )
-        if end_match:
-            z_max = float(end_match.group(1))
-
-        return (z_min, z_max)
-
+        sections = read_workflow_sections(workflow_file)
     except Exception as e:
         logger.error(f"Failed to read Z range from {workflow_file.name}: {e}")
         return (0.0, 10.0)
+    z_min = _float(sections.get("Start Position", {}).get("Z (mm)"))
+    z_max = _float(sections.get("End Position", {}).get("Z (mm)"))
+    return (z_min or 0.0, z_max or 0.0)
+
+
+# The key the server writes for an attached laser: "Laser 2 2: 488 nm MLE".
+_LASER_KEY = re.compile(r"^Laser\s+(\d+)\s+\d+:\s+\d+\s+nm\s+MLE$")
 
 
 def read_laser_channels_from_workflow(workflow_file: Path) -> List[int]:
     """Read enabled laser channels from workflow file.
 
     Parses the <Illumination Source> block to determine which lasers are enabled.
-    Format: "Laser N N: XXX nm MLE = power enabled"
-    where enabled is 1 (on) or 0 (off).
+    Format: "Laser N N: XXX nm MLE = power enabled", where enabled is 1 or 0
+    (3.0.0) or true or false (servers from 2026-10-06 on).
 
     Laser mapping:
         Laser 1 (405nm) -> channel 0
@@ -128,30 +126,20 @@ def read_laser_channels_from_workflow(workflow_file: Path) -> List[int]:
         Falls back to [0] if parsing fails.
     """
     try:
-        with open(workflow_file, "r") as f:
-            content = f.read()
-
-        # Extract Illumination Source block
-        illum_match = re.search(
-            r"<Illumination Source>(.*?)</Illumination Source>", content, re.DOTALL
-        )
-        if not illum_match:
+        sections = read_workflow_sections(workflow_file)
+        if "Illumination Source" not in sections:
             logger.warning(f"No Illumination Source block in {workflow_file.name}")
             return [0]
 
-        illum_block = illum_match.group(1)
         channels = []
-
-        # Match lines like: "Laser 2 2: 488 nm MLE = 10.00 1"
-        # The last number (1 or 0) indicates enabled/disabled
-        for match in re.finditer(
-            r"Laser\s+(\d+)\s+\d+:\s+\d+\s+nm\s+MLE\s*=\s*[\d.]+\s+(\d+)", illum_block
-        ):
-            laser_num = int(match.group(1))
-            enabled = int(match.group(2))
-            if enabled == 1:
+        for key, value in sections["Illumination Source"].items():
+            m = _LASER_KEY.match(key)
+            words = str(value).split()
+            if not m or len(words) < 2 or not re.fullmatch(r"[\d.]+", words[0]):
+                continue
+            if words[1].isdigit() and int(words[1]) == 1:
                 # Laser number to channel: Laser 1 -> ch 0, Laser 2 -> ch 1, etc.
-                channels.append(laser_num - 1)
+                channels.append(int(m.group(1)) - 1)
 
         if not channels:
             logger.warning(
@@ -180,11 +168,9 @@ def read_num_planes_from_workflow(workflow_file: Path) -> Optional[int]:
         Number of planes per channel, or None if not found
     """
     try:
-        with open(workflow_file, "r") as f:
-            content = f.read()
-        match = re.search(r"Number of planes\s*=\s*(\d+)", content)
-        if match:
-            num_planes = int(match.group(1))
+        value = find_value(read_workflow_sections(workflow_file), "Number of planes")
+        if value is not None and str(value).strip().isdigit():
+            num_planes = int(str(value).strip())
             logger.debug(f"Parsed num_planes from {workflow_file.name}: {num_planes}")
             return num_planes
     except Exception as e:
@@ -206,73 +192,50 @@ def read_save_directory_from_workflow(workflow_file: Path) -> Tuple[str, str]:
         e.g. ("G:\\", "CTLSM1\\Test_2026-03-06_X4.88_Y17.63")
     """
     try:
-        with open(workflow_file, "r") as f:
-            content = f.read()
-
-        save_drive = ""
-        save_dir = ""
-
-        drive_match = re.search(r"Save image drive\s*=\s*(.+)", content)
-        if drive_match:
-            save_drive = drive_match.group(1).strip()
-
-        dir_match = re.search(r"Save image directory\s*=\s*(.+)", content)
-        if dir_match:
-            save_dir = dir_match.group(1).strip()
-
-        return (save_drive, save_dir)
-
+        sections = read_workflow_sections(workflow_file)
     except Exception as e:
         logger.error(f"Failed to read save directory from {workflow_file.name}: {e}")
         return ("", "")
+    drive = find_value(sections, "Save image drive")
+    directory = find_value(sections, "Save image directory")
+    return (drive or "", directory or "")
 
 
 def read_illumination_path_from_workflow(workflow_file: Path) -> Tuple[bool, bool]:
     """Read left/right illumination path from workflow file.
 
-    Parses the <Illumination Path> block for "Left path = ON 1" / "Right path = ON 1".
+    Reads the <Illumination Path> block in either form the server writes:
+    "Left path = ON 1" (3.0.0) or "Left path recording = true" (2026-10-06 on).
 
     Args:
         workflow_file: Path to workflow file
 
     Returns:
-        Tuple of (left_enabled, right_enabled). Defaults to (True, False).
+        Tuple of (left_enabled, right_enabled). (True, False) when the file
+        cannot be read or has no Illumination Path block; a side missing from
+        the block is False.
     """
     try:
-        with open(workflow_file, "r") as f:
-            content = f.read()
-
-        illum_match = re.search(
-            r"<Illumination Path>(.*?)</Illumination Path>", content, re.DOTALL
-        )
-        if not illum_match:
-            logger.info(
-                f"No Illumination Path block in {workflow_file.name}, defaulting to left"
-            )
-            return (True, False)
-
-        block = illum_match.group(1)
-
-        left_enabled = False
-        right_enabled = False
-
-        left_match = re.search(r"Left path\s*=\s*\w+\s+(\d+)", block)
-        if left_match:
-            left_enabled = int(left_match.group(1)) == 1
-
-        right_match = re.search(r"Right path\s*=\s*\w+\s+(\d+)", block)
-        if right_match:
-            right_enabled = int(right_match.group(1)) == 1
-
-        logger.info(
-            f"Illumination path from {workflow_file.name}: "
-            f"left={left_enabled}, right={right_enabled}"
-        )
-        return (left_enabled, right_enabled)
-
+        sections = read_workflow_sections(workflow_file)
     except Exception as e:
         logger.error(f"Failed to read illumination path from {workflow_file.name}: {e}")
         return (True, False)
+
+    if PATH_SECTION not in sections:
+        logger.info(
+            f"No Illumination Path block in {workflow_file.name}, defaulting to left"
+        )
+        return (True, False)
+
+    block = sections[PATH_SECTION]
+    left_enabled, right_enabled = (
+        path_recording(block.get(f"{side} path", "")) for side in SIDES
+    )
+    logger.info(
+        f"Illumination path from {workflow_file.name}: "
+        f"left={left_enabled}, right={right_enabled}"
+    )
+    return (left_enabled, right_enabled)
 
 
 def read_z_velocity_from_workflow(workflow_file: Path) -> float:
@@ -285,11 +248,10 @@ def read_z_velocity_from_workflow(workflow_file: Path) -> float:
         Z velocity in mm/s (default 1.0)
     """
     try:
-        with open(workflow_file, "r") as f:
-            content = f.read()
-        match = re.search(r"Z stage velocity \(mm/s\)\s*=\s*([\d.]+)", content)
-        if match:
-            velocity = float(match.group(1))
+        velocity = _float(
+            find_value(read_workflow_sections(workflow_file), "Z stage velocity (mm/s)")
+        )
+        if velocity is not None and velocity >= 0:
             logger.debug(
                 f"Parsed Z velocity from {workflow_file.name}: {velocity} mm/s"
             )

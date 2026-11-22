@@ -62,78 +62,53 @@ _SECTION_CLOSE = re.compile(r"^</(?P<name>.*?)>\s*$")
 _KEY_VAL = re.compile(r"^(?P<k>[^=#]+?)\s*=\s*(?P<v>.*)$")
 
 
-def text_to_dict(file_path: Union[str, Path]) -> Dict[str, Any]:
-    """Parse a legacy nested text file into a nested dict.
+def parse_settings_text(text: str) -> Dict[str, Any]:
+    """Parse settings text (workflow, ScopeSettings, ControlSettings) into a
+    nested dict, the one parser for the server's key = value format.
 
     Handles:
-      - <Section> ... </Section>
-      - key = value pairs
+      - <Section> ... </Section>, nested; a section left open nests the next
+      - key = value pairs (the value stripped, kept as text)
       - '#' comments
       - empty lines
+
+    A key repeated at one level keeps its last value. Lines that are neither
+    a tag nor ``key = value`` are ignored.
     """
-    file_path = Path(file_path)
     root: Dict[str, Any] = {}
     stack: List[Dict[str, Any]] = [root]
-    if not file_path.exists():
-        return root
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            m = _SECTION_OPEN.match(line)
-            if m:
-                name = m.group("name").strip()
-                new: Dict[str, Any] = {}
-                stack[-1][name] = new
-                stack.append(new)
-                continue
-            m = _SECTION_CLOSE.match(line)
-            if m:
-                if len(stack) > 1:
-                    stack.pop()
-                continue
-            m = _KEY_VAL.match(line)
-            if m:
-                k = m.group("k").strip()
-                v = m.group("v").strip()
-                stack[-1][k] = v
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = _SECTION_OPEN.match(line)
+        if m:
+            name = m.group("name").strip()
+            new: Dict[str, Any] = {}
+            stack[-1][name] = new
+            stack.append(new)
+            continue
+        m = _SECTION_CLOSE.match(line)
+        if m:
+            if len(stack) > 1:
+                stack.pop()
+            continue
+        m = _KEY_VAL.match(line)
+        if m:
+            stack[-1][m.group("k").strip()] = m.group("v").strip()
     return root
 
 
-def workflow_to_dict(path) -> Dict[str, Any]:
-    p = Path(path)
-    if not p.exists():
+def text_to_dict(file_path: Union[str, Path]) -> Dict[str, Any]:
+    """Parse a settings text file with :func:`parse_settings_text`.
+
+    A file that does not exist gives an empty dict.
+    """
+    file_path = Path(file_path)
+    if not file_path.exists():
         return {}
-    result: Dict[str, Any] = {}
-    current: Optional[str] = None
-    with open(p, "r", encoding="utf-8", errors="ignore") as f:
-        for raw in f:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            m = _SECTION_OPEN.match(line)
-            if m:
-                name = m.group("name").strip()
-                current = None if name == "Workflow Settings" else name
-                if current and current not in result:
-                    result[current] = {}
-                continue
-            m = _KEY_VAL.match(line)
-            if m and current:
-                k = m.group("k").strip()
-                v = m.group("v").strip()
-                if isinstance(result[current], dict):
-                    result[current][k] = v
-                else:
-                    result[current] = {k: v}
-                continue
-            if current and not line.startswith("<") and "=" not in line:
-                # e.g. <Work Flow Type>\nStack
-                result[current] = line
-                current = None
-                continue
-    return result
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        return parse_settings_text(f.read())
 
 
 def dict_to_workflow(path, wf_dict):

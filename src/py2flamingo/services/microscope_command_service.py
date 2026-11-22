@@ -559,25 +559,22 @@ class MicroscopeCommandService:
         flags = 0
 
         try:
-            # Decode workflow text
-            workflow_text = workflow_data.decode("utf-8", errors="replace")
+            from py2flamingo.utils.workflow_keys import find_value, workflow_sections
+
+            sections = workflow_sections(workflow_data)
+
+            def _word(key: str, default: str) -> str:
+                m = re.match(r"\w+", str(find_value(sections, key) or ""))
+                return m.group(0).lower() if m else default
 
             # Detect Stack option
-            stack_match = re.search(r"Stack option\s*=\s*(\w+)", workflow_text)
-            stack_option = stack_match.group(1).lower() if stack_match else "none"
+            stack_option = _word("Stack option", "none")
 
             # Detect save settings
-            save_data_match = re.search(r"Save image data\s*=\s*(\w+)", workflow_text)
-            save_data = (
-                save_data_match.group(1).lower() if save_data_match else "notsaved"
-            )
+            save_data = _word("Save image data", "notsaved")
             saving_to_disk = save_data not in ("notsaved", "none", "")
 
-            save_mip_match = re.search(
-                r"Save max projection\s*=\s*(\w+)", workflow_text
-            )
-            save_mip = save_mip_match.group(1).lower() if save_mip_match else "false"
-            saving_mip = save_mip == "true"
+            saving_mip = _word("Save max projection", "false") == "true"
 
             # Set flags based on workflow type
             # Reference: CommandDataBits in tcp_protocol.py

@@ -154,18 +154,19 @@ def parse_workflow_file(workflow_path: Path) -> Optional[TiffSizeEstimate]:
         TiffSizeEstimate if parseable, None otherwise
     """
     try:
-        content = workflow_path.read_text()
+        from py2flamingo.utils.workflow_keys import find_value, read_workflow_sections
 
-        # Parse number of planes
-        num_planes_match = re.search(r"Number of planes\s*=\s*(\d+)", content)
-        num_planes = int(num_planes_match.group(1)) if num_planes_match else 1
+        # In the app's keys: "ROI width" (servers from 2026-10-06) reads as
+        # "AOI width".
+        sections = read_workflow_sections(workflow_path)
 
-        # Parse AOI dimensions
-        aoi_width_match = re.search(r"AOI width\s*=\s*(\d+)", content)
-        aoi_height_match = re.search(r"AOI height\s*=\s*(\d+)", content)
+        def _int(key: str, default: int) -> int:
+            m = re.match(r"\d+", str(find_value(sections, key) or "").strip())
+            return int(m.group(0)) if m else default
 
-        image_width = int(aoi_width_match.group(1)) if aoi_width_match else 2048
-        image_height = int(aoi_height_match.group(1)) if aoi_height_match else 2048
+        num_planes = _int("Number of planes", 1)
+        image_width = _int("AOI width", 2048)
+        image_height = _int("AOI height", 2048)
 
         # Assume 16-bit (2 bytes per pixel)
         bytes_per_pixel = 2

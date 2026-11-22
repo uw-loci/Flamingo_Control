@@ -944,7 +944,7 @@ class SyntheticMicroscope:
         copy this build writes (ScopeSettings.txt up to 3.0.0,
         SystemMetaData.txt from 10-06 on). From 10-06 on the workflow keys
         are the server's new ones (ROI, bit binning, exposure in ms,
-        "Left path recording = true")."""
+        "Left path recording = true", "Laser 2 ... = 5.00 true")."""
         import os
 
         m = re.search(r"Save image directory\s*=\s*(.+)", text)
@@ -965,6 +965,23 @@ class SyntheticMicroscope:
                 return f"{match.group(1)} path recording = {'true' if on else 'false'}"
 
             out = re.sub(r"(Left|Right) path\s*=\s*([^\n]*)", path_line, out)
+
+            # WorkflowRecording::serialize writes each source's recording as
+            # true or false (SystemSupport::trueFalse), not 1 or 0.
+            def source_block(match):
+                return re.sub(
+                    r"(=\s*\S+)\s+([01])\s*$",
+                    lambda m: f"{m.group(1)} {'true' if m.group(2) == '1' else 'false'}",
+                    match.group(0),
+                    flags=re.MULTILINE,
+                )
+
+            out = re.sub(
+                r"<Illumination Source>.*?</Illumination Source>",
+                source_block,
+                out,
+                flags=re.DOTALL,
+            )
             out = out.replace("AOI width", "ROI width").replace(
                 "AOI height", "ROI height"
             )

@@ -9,7 +9,7 @@ error handling for robust workflow processing.
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
-from .file_handlers import workflow_to_dict
+from .workflow_keys import read_workflow_sections
 
 
 def parse_workflow_file(path: Union[str, Path]) -> Dict[str, Any]:
@@ -41,10 +41,10 @@ def parse_workflow_file(path: Union[str, Path]) -> Dict[str, Any]:
     if not path.is_file():
         raise ValueError(f"Path is not a file: {path}")
 
-    # Use existing workflow_to_dict with enhanced error handling
+    # One parser for every workflow reader, in the app's keys whichever
+    # server build wrote the file (utils/workflow_keys.py).
     try:
-        # Read with error handling for encoding issues
-        workflow_dict = workflow_to_dict(path)
+        workflow_dict = read_workflow_sections(path)
     except UnicodeDecodeError as e:
         raise ValueError(f"Encoding error in workflow file: {e}")
     except Exception as e:

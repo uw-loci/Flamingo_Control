@@ -136,14 +136,15 @@ verification move may enter.
 
 ## Known results on a correct server
 
-One check is expected to fail until its client fix lands, because it measures a known
-client issue:
+No check is expected to fail on a correct server.
 
-- `t4.acquisition_files` (servers from 2026-10-06 on): the build writes
-  `Left path recording = true`, `ROI width` and a `SystemMetaData.txt` instead of
-  `Left path = ON 1`, `AOI width` and `ScopeSettings.txt`. The app's illumination reader
-  knows only the old form (the stitcher reads both from 0.14.1). On a 3.0.0 server the same
-  check passes.
+Fixed: the acquisition files from servers dated 2026-10-06 and later
+(`t4.acquisition_files`). These builds write `Left path recording = true`, `ROI width`,
+`Exposure time (ms)` and each light source's recording as `true`/`false`, where 3.0.0
+wrote `Left path = ON 1`, `AOI width`, `Exposure time (ns)` and `1`/`0`. The app's
+readers knew only the old form, so they read every such acquisition as lit from neither
+side and with no laser on. Since 2026-11-22 the app reads both forms. The check reads the
+illumination side and the exposure from the server's `Workflow.txt` the way the app does.
 
 Fixed: the camera ROI. The app sent only the left/top edge; the server also reads the
 right/bottom edge (int32Data1) and the 2026-11-13 build reverted every change. Since

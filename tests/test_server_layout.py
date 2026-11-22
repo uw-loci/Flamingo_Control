@@ -252,12 +252,20 @@ class TestTheSettingsDocument(unittest.TestCase):
         self.assertIn("Stage limits/Home z-axis", missing)
 
     def test_the_config_loader_finds_the_microscope_name(self):
-        """It reads the name with a regex, not text_to_dict."""
-        import re
+        import tempfile
+        from pathlib import Path
+
+        from py2flamingo.configs.config_loader import (
+            _read_scope_microscope_name,
+            _read_scope_optics,
+        )
 
         text, _ = legacy_scope_settings_text(parse(self.DOC))
-        m = re.search(r"Microscope name[^\S\r\n]*=[^\S\r\n]*([^\r\n]+)", text)
-        self.assertEqual(m.group(1).strip(), "n7")
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "ScopeSettings.txt"
+            path.write_text(text)
+            self.assertEqual(_read_scope_microscope_name(path), "n7")
+            self.assertEqual(_read_scope_optics(path)["objective_magnification"], 6.205)
 
 
 class TestAgainstTheSyntheticScope(LayoutTestCase):

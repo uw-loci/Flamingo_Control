@@ -1,4 +1,4 @@
-"""Workflow text files: parse (workflow_to_dict) and write (dict_to_workflow).
+"""Workflow text files: parse (parse_workflow_file) and write (dict_to_workflow).
 
 The TCP/protocol tests that used to live here went with the legacy
 ConnectionService and TCPClient; the live protocol is tested in
@@ -14,8 +14,11 @@ import unittest
 class TestWorkflowParsing(unittest.TestCase):
     """Test workflow file parsing and generation."""
 
-    def test_workflow_to_dict(self):
-        """Test parsing workflow text to dictionary."""
+    def test_parse_workflow_file_with_unclosed_sections(self):
+        """Sections a file leaves open still come out one per name.
+
+        (The "<Work Flow Type>" line followed by a bare value is not a format
+        any server writes; it is read as an empty section.)"""
         workflow_text = """<Workflow Settings>
 <Work Flow Type>
 Stack
@@ -44,12 +47,12 @@ Comments = Test workflow
 
         try:
             # Import and test
-            from py2flamingo.utils.file_handlers import workflow_to_dict
+            from py2flamingo.utils.workflow_parser import parse_workflow_file
 
-            result = workflow_to_dict(temp_file)
+            result = parse_workflow_file(temp_file)
 
             # Verify structure
-            self.assertEqual(result["Work Flow Type"], "Stack")
+            self.assertEqual(result["Work Flow Type"], {})
             self.assertEqual(float(result["Start Position"]["X (mm)"]), 10.0)
             self.assertEqual(float(result["End Position"]["Z (mm)"]), 15.0)
             self.assertEqual(int(result["Stack Settings"]["Number of planes"]), 100)

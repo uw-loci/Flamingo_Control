@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from py2flamingo.utils.file_handlers import text_to_dict, workflow_to_dict
+from py2flamingo.utils.file_handlers import text_to_dict
 
 
 class ConfigurationService:
