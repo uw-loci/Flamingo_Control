@@ -22,6 +22,7 @@ import queue
 import socket
 import struct
 import threading
+import time
 from enum import IntEnum
 from typing import (
     Any,
@@ -38,6 +39,9 @@ from typing import (
 from py2flamingo.core.frames import ParsedMessage, parse_frame
 
 logger = logging.getLogger(__name__)
+
+#: How long the reader waits for the next byte of a message's additional data.
+ADDITIONAL_DATA_TIMEOUT_S = 10.0
 
 
 class ProtocolCommands(IntEnum):
@@ -726,11 +730,25 @@ class SocketReader:
         if size <= 0:
             return None
 
+        # The socket's 0.5 s timeout is for the shutdown check, not a limit
+        # on a payload: a settings document or a drive list can take longer
+        # to arrive in full on a busy server, and returning part of it would
+        # cost frame sync. So a timeout only ends the read after
+        # ADDITIONAL_DATA_TIMEOUT_S without a byte, or when stopping.
         data = b""
+        last_byte = time.monotonic()
         try:
             while len(data) < size:
                 remaining = size - len(data)
-                chunk = self._socket.recv(remaining)
+                try:
+                    chunk = self._socket.recv(remaining)
+                except socket.timeout:
+                    if (
+                        self._running
+                        and time.monotonic() - last_byte < ADDITIONAL_DATA_TIMEOUT_S
+                    ):
+                        continue
+                    raise
 
                 if not chunk:
                     logger.warning(
@@ -739,6 +757,7 @@ class SocketReader:
                     return None
 
                 data += chunk
+                last_byte = time.monotonic()
                 self._stats["bytes_read"] += len(chunk)
 
             return data

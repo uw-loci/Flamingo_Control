@@ -1,36 +1,41 @@
 """Position controller debug/diagnostic utilities.
 
-Contains PositionDebugHelper for direct socket communication with
-hardware diagnostics, extracted from position_controller.py.
+Contains PositionDebugHelper, used by the Connection tab's debug buttons and
+by the Pixel Calibrator's "push magnification to the scope". Every command
+goes through the command service (``MicroscopeCommandService``): the one
+locked writer, and replies matched by the background reader. Nothing here
+reads the command socket itself.
 """
 
 import logging
-import socket
-import struct
-import time
-from typing import Dict
+from typing import Optional
 
-from py2flamingo.core.tcp_protocol import CommandDataBits
+from py2flamingo.core import server_layout
+from py2flamingo.core.frames import END_MARKER, START_MARKER
 
 logger = logging.getLogger(__name__)
+
+#: How long a debug query or a settings save waits for its reply.
+DEBUG_REPLY_TIMEOUT_S = 3.0
+SETTINGS_SAVE_REPLY_TIMEOUT_S = 5.0
 
 
 class PositionDebugHelper:
     """Helper class for debug/diagnostic commands on position hardware.
 
-    Handles direct socket communication for querying and saving
-    hardware settings, used by the connection debug view.
+    Sends a command and shows its reply, and sends a settings file back to
+    the scope, for the connection debug view.
     """
 
     # Command codes
-    COMMAND_CODES_STAGE_POSITION_GET = 24584
+    COMMAND_CODES_STAGE_POSITION_GET = 0x6008
 
     # Frame markers bracketing every 128-byte command/response
-    # (see core/tcp_protocol.py). A response is only trustworthy when BOTH
+    # (core/frames.py). A response is only trustworthy when BOTH
     # are right: a good start with a bad end means a truncated or misaligned
     # frame, and the status/command fields between them are then meaningless.
-    START_MARKER = 0xF321E654
-    END_MARKER = 0xFEDC4321
+    START_MARKER = START_MARKER
+    END_MARKER = END_MARKER
 
     def __init__(self, connection_service):
         """Initialize the debug helper.
@@ -40,55 +45,70 @@ class PositionDebugHelper:
         """
         self.connection = connection_service
         self.logger = logging.getLogger(__name__)
+        self._service = None
 
-    def _receive_full_bytes(
-        self, sock: socket.socket, expected_size: int, timeout: float = 5.0
-    ) -> bytes:
-        """Receive exact number of bytes from socket.
+    def _commands(self):
+        """The command service these sends go through (built on first use)."""
+        if self._service is None:
+            from py2flamingo.services.microscope_command_service import (
+                MicroscopeCommandService,
+            )
 
-        Args:
-            sock: Socket to read from
-            expected_size: Exact number of bytes to read
-            timeout: Timeout in seconds
+            self._service = MicroscopeCommandService(self.connection)
+        return self._service
 
-        Returns:
-            Bytes read from socket
+    def _exchange(
+        self,
+        code: int,
+        params,
+        payload: bytes = b"",
+        reply_codes=None,
+        timeout: float = DEBUG_REPLY_TIMEOUT_S,
+    ) -> Optional[dict]:
+        """Send one frame (and ``payload`` after it) and wait for the reply.
 
-        Raises:
-            socket.timeout: If timeout expires
-            socket.error: If socket error occurs
+        The reply is matched by the background reader (any of
+        ``reply_codes``, default the same code). Returns the reply as
+        ``frame_fields`` dict plus ``raw`` (the 128 bytes), or None on
+        timeout. Without a background reader the command service's
+        synchronous path is used.
         """
-        data = b""
-        start_time = time.time()
-        original_timeout = sock.gettimeout()
+        from py2flamingo.core.frames import frame_fields
 
-        try:
-            sock.settimeout(timeout)
-
-            while len(data) < expected_size:
-                if time.time() - start_time > timeout:
-                    raise socket.timeout(
-                        f"Timeout reading {expected_size} bytes (got {len(data)})"
-                    )
-
-                remaining = expected_size - len(data)
-                chunk = sock.recv(remaining)
-                if not chunk:
-                    raise socket.error(
-                        f"Connection closed after {len(data)}/{expected_size} bytes"
-                    )
-                data += chunk
-
-        finally:
-            sock.settimeout(original_timeout)
-
-        return data
+        packet = self.connection.encoder.encode_command(
+            code=code,
+            status=0,
+            params=params,
+            value=0.0,
+            data=b"",
+            additional_data_size=len(payload),
+        )
+        if getattr(self.connection, "has_async_reader", False):
+            message = self.connection.send_command_async(
+                packet + payload, reply_codes or code, timeout=timeout
+            )
+            if message is None:
+                return None
+            fields = frame_fields(message)
+            fields["raw"] = message.raw_data
+            fields["additional_data"] = message.additional_data or b""
+            return fields
+        service = self._commands()
+        service._write(packet + payload)
+        sock = self.connection._command_socket
+        raw = service._receive_full_bytes(sock, 128, timeout=timeout)
+        fields = service._parse_response(raw)
+        fields["raw"] = raw
+        extra = b""
+        if fields["reserved"]:
+            extra = service._receive_full_bytes(sock, fields["reserved"], timeout)
+        fields["additional_data"] = extra
+        return fields
 
     def debug_query_command(self, command_code: int, command_name: str) -> dict:
         """Send a command and return parsed response for debugging.
 
-        This method sends commands using the proper queue-based communication
-        system (like the old code), avoiding race conditions with the listener thread.
+        The reply is matched by the background reader like every other one.
 
         Args:
             command_code: The command code to send
@@ -99,17 +119,12 @@ class PositionDebugHelper:
                 - 'success': bool - Whether query succeeded
                 - 'command_code': int - Command code sent
                 - 'command_name': str - Command name
-                - 'raw_response': bytes/Any - Raw response data from queue
+                - 'raw_response': bytes - The 128-byte reply
                 - 'parsed': dict - Parsed response structure
                 - 'error': str - Error message if failed
                 - 'timeout_explanation': str - Explanation if timeout
-
-        Note:
-            This method uses the queue-based communication system. The command is
-            sent via the command queue, and the response is received via the
-            other_data queue (populated by the listener thread).
         """
-        from queue import Empty
+        from py2flamingo.core.tcp_protocol import CommandDataBits
 
         if not self.connection.is_connected():
             return {
@@ -120,122 +135,46 @@ class PositionDebugHelper:
             }
 
         try:
-            self.logger.info(
-                f"Sending {command_name} (code {command_code}) directly via socket..."
-            )
+            self.logger.info(f"Sending {command_name} (code {command_code})...")
 
-            # MVCConnectionService doesn't use background threads, so direct socket access is safe
-            # Encode command with TRIGGER_CALL_BACK flag to get response
-            # params[6] (cmdBits6) must be set to 0x80000000 to trigger microscope response
-
-            # IMPORTANT: For STAGE_POSITION_GET, params[3] (int32Data0) must specify the axis
-            # Query single axis (1=X, 2=Y, 3=Z, 4=R)
+            # The callback bit makes the server answer. For STAGE_POSITION_GET
+            # int32Data0 must name an axis (1=X, 2=Y, 3=Z, 4=R).
             params = [0, 0, 0, 0, 0, 0, CommandDataBits.TRIGGER_CALL_BACK]
-            if command_code == 24584:  # STAGE_POSITION_GET
-                params[3] = 1  # Query X-axis (1=X, 2=Y, 3=Z, 4=R)
+            if command_code == self.COMMAND_CODES_STAGE_POSITION_GET:
+                params[3] = 1  # X axis
                 self.logger.info(
                     "STAGE_POSITION_GET: Setting params[3] (int32Data0) = 1 for X-axis"
                 )
 
-            cmd_bytes = self.connection.encoder.encode_command(
-                code=command_code, status=0, params=params, value=0.0, data=b""
+            reply = self._exchange(command_code, params)
+            if reply is None:
+                return self._timeout_result(command_code, command_name)
+
+            response_code = reply["command_code"]
+            status_code = reply["status_code"]
+            value = reply["value"]
+            add_data_bytes = reply["reserved"]
+            additional_data = reply["additional_data"]
+            data_tail_str = (
+                reply["data"].rstrip(b"\x00").decode("utf-8", errors="replace")
             )
-
-            # Get command socket from connection service
-            command_socket = self.connection._command_socket
-            if command_socket is None:
-                return {
-                    "success": False,
-                    "command_code": command_code,
-                    "command_name": command_name,
-                    "error": "Command socket not available - not connected?",
-                }
-
-            # Send command
-            command_socket.sendall(cmd_bytes)
-            self.logger.info("Command sent, waiting for response...")
-
-            # Read 128-byte acknowledgment
-            ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
-            self.logger.info(f"Received 128-byte acknowledgment")
-
-            # Parse the 128-byte response
-            if len(ack_response) < 4:
-                return {
-                    "success": False,
-                    "command_code": command_code,
-                    "command_name": command_name,
-                    "error": f"Response too short: {len(ack_response)} bytes",
-                }
-
-            # Unpack binary protocol structure
-            start_marker = struct.unpack("<I", ack_response[0:4])[0]
-            response_code = struct.unpack("<I", ack_response[4:8])[0]
-            status_code = struct.unpack("<I", ack_response[8:12])[0]
-
-            # Unpack 7 parameters
-            params = []
-            for i in range(7):
-                offset = 12 + (i * 4)
-                param = struct.unpack("<i", ack_response[offset : offset + 4])[0]
-                params.append(param)
-
-            # Unpack value (double)
-            value = struct.unpack("<d", ack_response[40:48])[0]
-
-            # Get addDataBytes field
-            add_data_bytes = struct.unpack("<I", ack_response[48:52])[0]
-
-            # Read additional data if specified (CRITICAL for buffer management)
-            additional_data = b""
-            if add_data_bytes > 0:
-                self.logger.info(
-                    f"Reading {add_data_bytes} additional bytes from socket..."
-                )
-                try:
-                    additional_data = self._receive_full_bytes(
-                        command_socket, add_data_bytes, timeout=3.0
-                    )
-                    self.logger.info(
-                        f"Successfully read {len(additional_data)} additional bytes"
-                    )
-                except (socket.timeout, TimeoutError) as e:
-                    self.logger.warning(f"Timeout reading additional data: {e}")
-                except Exception as e:
-                    self.logger.error(f"Error reading additional data: {e}")
-
-            # Get data section (72 bytes)
-            data_field = ack_response[52:124]
-
-            # Try to decode data field as string
-            try:
-                data_tail_str = data_field.rstrip(b"\x00").decode(
-                    "utf-8", errors="replace"
-                )
-            except:
-                data_tail_str = "<binary data>"
-
-            # Try to decode additional data as string
-            additional_data_str = ""
-            if additional_data:
-                try:
-                    additional_data_str = additional_data.rstrip(b"\x00").decode(
-                        "utf-8", errors="replace"
-                    )
-                except:
-                    additional_data_str = "<binary data>"
+            additional_data_str = (
+                additional_data.rstrip(b"\x00").decode("utf-8", errors="replace")
+                if additional_data
+                else ""
+            )
 
             self.logger.info(
-                f"Parsed response: code={response_code}, status={status_code}, value={value}, addDataBytes={add_data_bytes}"
+                f"Parsed response: code={response_code}, status={status_code}, "
+                f"value={value}, addDataBytes={add_data_bytes}"
             )
 
-            # Create parsed structure
             parsed = {
                 "response_type": "Binary Protocol",
-                "start_marker": f"0x{start_marker:08X}",
+                "start_marker": f"0x{reply['start_marker']:08X}",
                 "command_code": response_code,
                 "status_code": status_code,
-                "params": params,
+                "params": reply["params"],
                 "value": value,
                 "reserved": add_data_bytes,
                 "data_tail_string": data_tail_str,
@@ -249,28 +188,22 @@ class PositionDebugHelper:
                 "success": True,
                 "command_code": command_code,
                 "command_name": command_name,
-                "raw_response": ack_response,
+                "raw_response": reply["raw"],
                 "parsed": parsed,
                 "interpretation": self._interpret_command_response(
                     parsed, command_code, command_name
                 ),
             }
 
-        except (socket.timeout, TimeoutError) as e:
-            self.logger.error(f"Timeout waiting for response from {command_name}")
+        except (TimeoutError, OSError) as e:
+            if isinstance(e, TimeoutError) or "timed out" in str(e):
+                return self._timeout_result(command_code, command_name)
+            self.logger.error(f"Failed to query {command_name}: {e}", exc_info=True)
             return {
                 "success": False,
                 "command_code": command_code,
                 "command_name": command_name,
-                "error": "timeout",
-                "timeout_explanation": (
-                    f"No response from microscope after sending {command_name} (code {command_code}).\n\n"
-                    "This likely means:\n"
-                    "1. Command is NOT IMPLEMENTED in microscope firmware\n"
-                    "2. Command is defined in CommandCodes.h but never used\n"
-                    "3. Microscope ignores unknown/unimplemented commands\n\n"
-                    "Try other commands to see which ones are actually implemented."
-                ),
+                "error": f"Communication error: {str(e)}",
             }
         except Exception as e:
             self.logger.error(f"Failed to query {command_name}: {e}", exc_info=True)
@@ -280,6 +213,23 @@ class PositionDebugHelper:
                 "command_name": command_name,
                 "error": f"Communication error: {str(e)}",
             }
+
+    def _timeout_result(self, command_code: int, command_name: str) -> dict:
+        self.logger.error(f"Timeout waiting for response from {command_name}")
+        return {
+            "success": False,
+            "command_code": command_code,
+            "command_name": command_name,
+            "error": "timeout",
+            "timeout_explanation": (
+                f"No response from microscope after sending {command_name} (code {command_code}).\n\n"
+                "This likely means:\n"
+                "1. Command is NOT IMPLEMENTED in microscope firmware\n"
+                "2. Command is defined in CommandCodes.h but never used\n"
+                "3. Microscope ignores unknown/unimplemented commands\n\n"
+                "Try other commands to see which ones are actually implemented."
+            ),
+        }
 
     def _interpret_command_response(
         self, parsed: dict, command_code: int, command_name: str
@@ -474,10 +424,24 @@ class PositionDebugHelper:
         return "\n".join(interpretation_lines)
 
     def debug_save_settings(self, settings_data: bytes) -> dict:
-        """Test SCOPE_SETTINGS_SAVE command by sending settings file to microscope.
+        """Send a settings file to the microscope with SCOPE_SETTINGS_SAVE.
 
-        This replicates the old code's handle_scope_settings_save() function
-        which sends a settings file to the microscope using text_to_nuc pattern.
+        3.0.0 servers only (the 2026-10-06 builds moved the settings into the
+        metadata document and dropped the command; there it is refused before
+        anything is sent). The file goes as additional data after the frame,
+        in one locked write. The server answers (ControlServer::
+        saveScopeSettings):
+
+        * COMMON_SCOPE_SETTINGS (0x1007), status 1, echoing the file: it took
+          the settings (held in memory: this client does not set the
+          SAVE_TO_DISK bit, so the scope's own uC copy is not rewritten);
+        * MESSAGE_FROM_CONTROLLER "Save scope settings error - invalid scope
+          settings file": it refused them;
+        * nothing, for an empty file.
+
+        It never answers with SCOPE_SETTINGS_SAVE itself, so the ack this used
+        to wait for (code 0x1008, status 0) could not arrive from a real
+        server; and it read that ack on the raw socket, racing the reader.
 
         Args:
             settings_data: Settings file content as bytes
@@ -489,109 +453,104 @@ class PositionDebugHelper:
             return {"success": False, "error": "Not connected to microscope"}
 
         try:
-            from py2flamingo.models.command import Command
-
-            COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE = 4104
+            try:
+                save_code = server_layout.code(
+                    "COMMON_SCOPE_SETTINGS_SAVE", fallback=0x1008
+                )
+                echo_code = server_layout.code("COMMON_SCOPE_SETTINGS", fallback=0x1007)
+                message_code = server_layout.code(
+                    "COMMON_MESSAGE_FROM_CONTROLLER", fallback=0x1006
+                )
+            except server_layout.CommandUnavailable as e:
+                return {
+                    "success": False,
+                    "error": (
+                        "This server build has no SCOPE_SETTINGS_SAVE: its "
+                        f"settings live in the metadata document ({e})"
+                    ),
+                }
 
             self.logger.info(
                 f"Sending SCOPE_SETTINGS_SAVE with {len(settings_data)} bytes of data"
             )
-
-            # Create command with file size in addDataBytes field
-            cmd_bytes = self.connection.encoder.encode_command(
-                code=COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE,
-                status=0,
-                params=[0, 0, 0, 0, 0, 0, 0],
-                value=0.0,
-                data=b"",  # Don't send data in command structure
-                additional_data_size=len(
-                    settings_data
-                ),  # Tell microscope data is coming
+            reply = self._exchange(
+                save_code,
+                [0, 0, 0, 0, 0, 0, 0],
+                payload=settings_data,
+                reply_codes=(echo_code, message_code),
+                timeout=SETTINGS_SAVE_REPLY_TIMEOUT_S,
             )
-
-            # Send command followed by file data
-            command_socket = self.connection._command_socket
-            if command_socket is None:
-                return {"success": False, "error": "Command socket not available"}
-
-            command_socket.sendall(cmd_bytes)
-            command_socket.sendall(settings_data)
-
-            self.logger.info("Command and data sent, waiting for acknowledgment...")
-
-            # Read 128-byte acknowledgment
-            try:
-                ack = self._receive_full_bytes(command_socket, 128, timeout=5.0)
-                self.logger.info("Received acknowledgment")
-
-                # Parse acknowledgment. All four checks matter: this call
-                # OVERWRITES the microscope's own settings file, so "it replied"
-                # is not the same as "it worked". Previously only the start
-                # marker was tested, which meant a scope that answered with an
-                # error status, echoed a different command, or sent a truncated
-                # frame was all reported as success.
-                start_marker = struct.unpack("<I", ack[0:4])[0]
-                response_code = struct.unpack("<I", ack[4:8])[0]
-                status_code = struct.unpack("<I", ack[8:12])[0]
-                end_marker = struct.unpack("<I", ack[124:128])[0]
-
-                detail = (
-                    f"marker=0x{start_marker:08X}, code={response_code}, "
-                    f"status={status_code}, end=0x{end_marker:08X}"
-                )
-                self.logger.info(f"Acknowledgment: {detail}")
-
-                if start_marker != self.START_MARKER:
-                    return {
-                        "success": False,
-                        "error": f"Invalid response start marker: {detail}",
-                    }
-                if end_marker != self.END_MARKER:
-                    # A good start marker with a bad end marker means the frame
-                    # is truncated or misaligned — the fields between them
-                    # cannot be trusted either.
-                    return {
-                        "success": False,
-                        "error": f"Malformed response frame (bad end marker): {detail}",
-                    }
-                if response_code != COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE:
-                    return {
-                        "success": False,
-                        "error": (
-                            f"Scope answered a different command "
-                            f"({response_code}, expected "
-                            f"{COMMAND_CODES_COMMON_SCOPE_SETTINGS_SAVE}): {detail}"
-                        ),
-                    }
-                if status_code != 0:
-                    # Byte 8-11 is documented as "Status/error code"
-                    # (.claude/rules/tcp-protocol.md). Nothing in this codebase read
-                    # it until now, so a rejected save looked like a successful
-                    # one. Treated as failure and reported verbatim: if this
-                    # scope uses a non-zero status to mean something benign, the
-                    # value is right here to say so.
-                    return {
-                        "success": False,
-                        "error": (
-                            f"Scope reported status {status_code} (non-zero = "
-                            f"error). Settings may NOT have been saved: {detail}"
-                        ),
-                    }
-                return {
-                    "success": True,
-                    "message": (
-                        f"Microscope acknowledged settings save.\n"
-                        f"Status code: {status_code}\n"
-                        f"Response code: {response_code}"
-                    ),
-                }
-
-            except (socket.timeout, TimeoutError):
+            if reply is None:
                 return {
                     "success": False,
                     "error": "Timeout waiting for acknowledgment (command may not be implemented)",
                 }
+            return self._judge_save_reply(reply, echo_code, message_code)
 
         except Exception as e:
             self.logger.error(f"Failed to save settings: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+
+    def _judge_save_reply(self, reply: dict, echo_code: int, message_code: int) -> dict:
+        """Success only for the settings echo with status 1 in a whole frame.
+
+        This call replaces the settings the server works with, so "it
+        replied" is not the same as "it worked".
+        """
+        start_marker = reply["start_marker"]
+        response_code = reply["command_code"]
+        status_code = reply["status_code"]
+        end_marker = reply["end_marker"]
+        detail = (
+            f"marker=0x{start_marker:08X}, code={response_code}, "
+            f"status={status_code}, end=0x{end_marker:08X}"
+        )
+        self.logger.info(f"Acknowledgment: {detail}")
+
+        if start_marker != self.START_MARKER:
+            return {
+                "success": False,
+                "error": f"Invalid response start marker: {detail}",
+            }
+        if end_marker != self.END_MARKER:
+            # A good start marker with a bad end marker means the frame is
+            # truncated or misaligned: the fields between cannot be trusted.
+            return {
+                "success": False,
+                "error": f"Malformed response frame (bad end marker): {detail}",
+            }
+        if response_code == message_code:
+            text = (
+                (reply.get("additional_data") or b"")
+                .decode("utf-8", "replace")
+                .replace("\x00", "")
+                .strip()
+            )
+            return {
+                "success": False,
+                "error": f"Scope refused the settings: {text or '(no text)'}: {detail}",
+            }
+        if response_code != echo_code:
+            return {
+                "success": False,
+                "error": (
+                    f"Scope answered a different command ({response_code}, "
+                    f"expected {echo_code}): {detail}"
+                ),
+            }
+        if status_code != 1:
+            return {
+                "success": False,
+                "error": (
+                    f"Scope reported status {status_code} (1 = settings taken). "
+                    f"Settings may NOT have been saved: {detail}"
+                ),
+            }
+        return {
+            "success": True,
+            "message": (
+                f"Microscope acknowledged settings save.\n"
+                f"Status code: {status_code}\n"
+                f"Response code: {response_code}"
+            ),
+        }

@@ -182,8 +182,10 @@ class MVCWorkflowService:
             # Create stop command
             cmd = Command(code=CommandCode.CMD_WORKFLOW_STOP)
 
-            # Send command
-            response = self.connection_service.send_command(cmd)
+            # Send command. 5 s for the answer, as before send_command
+            # honored its timeout: the server halts the stage before it
+            # answers.
+            response = self.connection_service.send_command(cmd, timeout=5.0)
 
             self.logger.info("Workflow stop command sent to microscope")
             return True

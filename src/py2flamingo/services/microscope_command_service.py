@@ -621,22 +621,28 @@ class MicroscopeCommandService:
         return flags
 
     def _send_workflow_stop_command(
-        self, cmd: "Command", timeout: float = 3.0
+        self, cmd: "Command", timeout: float = DEFAULT_REPLY_TIMEOUT_S
     ) -> bytes:
         """
-        Send a workflow stop command.
+        Send a workflow stop command and wait for the server's answer.
 
         WORKFLOW_STOP requires special handling:
         - Does NOT use TRIGGER_CALL_BACK flag (unlike query commands)
         - Uses params[6] = 0 (no special flags needed)
-        - Still expects a response
+        - The server answers with WORK_FLOW_STOP, status always 1, and
+          "Work flow terminated" or "No active work flow running" in the
+          buffer (ControlServer, WorkflowControl)
+
+        The answer is matched by the background reader like every other
+        reply; this used to read the socket itself, racing the reader for
+        the frame (and a lost race read as a timeout).
 
         Args:
             cmd: Command object with code=CMD_WORKFLOW_STOP
             timeout: Response timeout in seconds
 
         Returns:
-            128-byte response from microscope
+            128-byte response from microscope (and any additional data)
 
         Raises:
             RuntimeError: If not connected
@@ -651,9 +657,7 @@ class MicroscopeCommandService:
         self.logger.info(f"Sending workflow stop command")
 
         try:
-            # Get command socket
-            command_socket = self.connection._command_socket
-            if command_socket is None:
+            if getattr(self.connection, "_command_socket", None) is None:
                 raise RuntimeError("Command socket not available")
 
             # Encode command with params[6] = 0 (NOT TRIGGER_CALL_BACK)
@@ -665,29 +669,34 @@ class MicroscopeCommandService:
                 data=b"",
             )
 
-            # Send command
-            self._write(cmd_bytes)
-            self.logger.debug(f"Sent {cmd_name}")
-
-            # Wait for response
-            response = self._receive_full_bytes(command_socket, 128, timeout=timeout)
-
-            # Parse response
-            parsed = self._parse_response(response)
-            status = parsed.get("status_code", 0)
-
-            # Handle any additional data
-            add_data_bytes = parsed.get("reserved", 0)
-            if add_data_bytes > 0:
-                self.logger.debug(
-                    f"Reading {add_data_bytes} additional bytes from stop response..."
+            if getattr(self.connection, "has_async_reader", False):
+                message = self.connection.send_command_async(
+                    cmd_bytes, command_code, timeout=timeout
                 )
-                additional_data = self._receive_full_bytes(
-                    command_socket, add_data_bytes, timeout=3.0
+                if message is None:
+                    raise socket.timeout(f"no {cmd_name} reply in {timeout} s")
+                response = message.raw_data + (message.additional_data or b"")
+                status = message.status_code
+                text = message.data_field.rstrip(b"\x00").decode("utf-8", "replace")
+            else:
+                # No background reader: nothing else reads the socket.
+                command_socket = self.connection._command_socket
+                self._write(cmd_bytes)
+                response = self._receive_full_bytes(
+                    command_socket, 128, timeout=timeout
                 )
-                parsed["additional_data"] = additional_data
+                parsed = self._parse_response(response)
+                status = parsed.get("status_code", 0)
+                text = parsed["data"].rstrip(b"\x00").decode("utf-8", "replace")
+                if parsed.get("reserved", 0) > 0:
+                    response += self._receive_full_bytes(
+                        command_socket, parsed["reserved"], timeout=timeout
+                    )
 
-            self.logger.info(f"Workflow stop acknowledged (status={status})")
+            self.logger.info(
+                f"Workflow stop acknowledged (status={status})"
+                + (f": {text}" if text else "")
+            )
             return response
 
         except socket.timeout as e:

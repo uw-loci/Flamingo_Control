@@ -1,14 +1,14 @@
-"""An acknowledgment is only an acknowledgment if we read it.
+"""An acknowledgment is only an acknowledgment if it is the server's own.
 
-`SCOPE_SETTINGS_SAVE` OVERWRITES the microscope's own settings file, and the
-calibrated objective magnification reaches every future acquisition through it.
-The reply was previously accepted on its start marker alone — so a scope that
-answered with an error status, echoed a different command, or sent a truncated
-frame was reported to the user as a successful save.
+`SCOPE_SETTINGS_SAVE` replaces the settings the microscope works with, and
+the calibrated objective magnification reaches every future acquisition
+through it. The 3.0.0 server answers it with COMMON_SCOPE_SETTINGS (0x1007),
+status 1, echoing the file, or with MESSAGE_FROM_CONTROLLER when it refuses
+the file (ControlServer::saveScopeSettings); it never answers with
+SCOPE_SETTINGS_SAVE itself. Until 2026-11-22 the client waited for exactly
+that impossible ack (code 0x1008 and status 0), on the raw socket.
 
-The protocol puts a status/error code at bytes 8-11 and an end marker at 124-127
-(`core/tcp_protocol.py`). Nothing in the codebase read either until
-2026-08-17.
+Every field is checked: markers, the reply code, the status.
 
 Run: python3 -m pytest tests/test_scope_settings_save_ack.py -q
 """
@@ -26,39 +26,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from py2flamingo.controllers.position_debug import (  # noqa: E402
     PositionDebugHelper,
 )
+from py2flamingo.core.frames import frame_fields, parse_frame  # noqa: E402
 
-SCOPE_SETTINGS_SAVE = 4104
+SCOPE_SETTINGS = 0x1007
+MESSAGE_FROM_CONTROLLER = 0x1006
 
 
 def _ack(
     start: int = PositionDebugHelper.START_MARKER,
-    code: int = SCOPE_SETTINGS_SAVE,
-    status: int = 0,
+    code: int = SCOPE_SETTINGS,
+    status: int = 1,
     end: int = PositionDebugHelper.END_MARKER,
-) -> bytes:
+    additional: bytes = b"",
+) -> dict:
     frame = bytearray(128)
     frame[0:4] = struct.pack("<I", start)
     frame[4:8] = struct.pack("<I", code)
     frame[8:12] = struct.pack("<I", status)
     frame[124:128] = struct.pack("<I", end)
-    return bytes(frame)
-
-
-class _Socket:
-    def sendall(self, _data):
-        pass
+    fields = frame_fields(parse_frame(bytes(frame)))
+    fields["raw"] = bytes(frame)
+    fields["additional_data"] = additional
+    return fields
 
 
 class _Connection:
-    _command_socket = _Socket()
-
     def is_connected(self):
         return True
-
-    class encoder:  # noqa: N801 - mirrors the real attribute name
-        @staticmethod
-        def encode_command(**_kwargs):
-            return b"\x00" * 128
 
 
 class _Logger:
@@ -69,26 +63,36 @@ class _Logger:
         pass
 
 
-def _save(ack: bytes) -> dict:
+def _save(ack: dict) -> dict:
     helper = PositionDebugHelper.__new__(PositionDebugHelper)
     helper.connection = _Connection()
     helper.logger = _Logger()
-    helper._receive_full_bytes = lambda *_a, **_k: ack
+    helper._exchange = lambda *_a, **_k: ack
     return helper.debug_save_settings(b"settings-bytes")
 
 
 class TestTheAckIsActuallyChecked:
-    def test_a_clean_acknowledgment_succeeds(self):
+    def test_the_settings_echo_with_status_1_succeeds(self):
         assert _save(_ack())["success"] is True
 
-    def test_a_nonzero_status_is_a_failure(self):
-        # The field is documented as "Status/error code". Reporting a rejected
-        # save as a success is the worst outcome here: the user believes the
-        # scope now carries the calibrated magnification when it does not.
-        result = _save(_ack(status=7))
+    def test_another_status_is_a_failure(self):
+        # Reporting a rejected save as a success is the worst outcome here:
+        # the user believes the scope now carries the calibrated
+        # magnification when it does not.
+        result = _save(_ack(status=0))
         assert result["success"] is False
-        assert "status 7" in result["error"]
+        assert "status 0" in result["error"]
         assert "may NOT have been saved" in result["error"]
+
+    def test_a_refusal_is_a_failure_and_says_why(self):
+        result = _save(
+            _ack(
+                code=MESSAGE_FROM_CONTROLLER,
+                additional=b"Save scope settings error - invalid scope settings file",
+            )
+        )
+        assert result["success"] is False
+        assert "invalid scope settings file" in result["error"]
 
     def test_a_wrong_command_echo_is_a_failure(self):
         result = _save(_ack(code=9999))
@@ -106,10 +110,13 @@ class TestTheAckIsActuallyChecked:
     def test_a_bad_start_marker_is_a_failure(self):
         assert _save(_ack(start=0xDEADBEEF))["success"] is False
 
+    def test_no_reply_is_a_failure(self):
+        result = _save(None)
+        assert result["success"] is False
+        assert "Timeout" in result["error"]
+
     def test_the_failure_message_always_carries_the_raw_fields(self):
-        # Whoever reads this next needs the numbers, not an adjective — if this
-        # scope uses a non-zero status to mean something benign, the value has
-        # to be visible to say so.
+        # Whoever reads this next needs the numbers, not an adjective.
         for ack in (
             _ack(status=7),
             _ack(code=9999),

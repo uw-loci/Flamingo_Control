@@ -26,6 +26,19 @@ def _receive_full_bytes(
     return recv_exactly(sock, expected_size, timeout=timeout)
 
 
+def _about_scope_settings(message_code: Optional[int]):
+    """Reply predicate: any reply, except that a MESSAGE_FROM_CONTROLLER
+    counts only when it is about the scope settings. The server sends that
+    code for many other things (a laser, a stage error), to every client."""
+
+    def accepts(message) -> bool:
+        if message_code is None or message.command_code != message_code:
+            return True
+        return b"scope settings" in (message.additional_data or b"").lower()
+
+    return accepts
+
+
 # ============================================================================
 # MVC Refactoring - New Connection Service
 # ============================================================================
@@ -256,49 +269,52 @@ class MVCConnectionService:
         additional: bytes = b"",
         timeout: float = 3.0,
     ) -> Tuple[bytes, bytes]:
-        """Send one command and read whole frames until one with code ``want``.
+        """Send one command and wait for the frame with code ``want``.
 
-        Returns that frame's 128 bytes and its additional data. Frames before it
-        are logged and skipped; frames after it stay on the socket for the
-        background reader, which is paused for the exchange and resumed after.
+        Returns that frame's 128 bytes and its additional data. With the
+        background reader running (always, in the app) the reply is matched
+        by the reader like any other; frames before and after it go to their
+        own handlers. Without a reader the socket is read here, skipping
+        frames until ``want``.
         """
         from py2flamingo.core.frames import parse_frame
 
         if self._command_socket is None:
             raise RuntimeError("Not connected to microscope")
-        paused = False
-        if hasattr(self.tcp_connection, "pause_async_reader"):
-            paused = self.tcp_connection.pause_async_reader()
-        try:
-            packet = self.encoder.encode_command(
-                code=code, additional_data_size=len(additional)
+        packet = self.encoder.encode_command(
+            code=code, additional_data_size=len(additional)
+        )
+        if self.has_async_reader:
+            message = self.send_command_async(packet + additional, want, timeout)
+            if message is None:
+                raise TimeoutError(
+                    f"No 0x{want:04X} reply to 0x{code:04X} within {timeout:.1f} s"
+                )
+            return message.raw_data, message.additional_data or b""
+
+        self.send_raw_bytes(packet + additional)
+        deadline = time.time() + timeout
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"No 0x{want:04X} reply to 0x{code:04X} within {timeout:.1f} s"
+                )
+            header = _receive_full_bytes(self._command_socket, 128, remaining)
+            head = parse_frame(header)
+            got, size = head.command_code, head.additional_data_size
+            extra = (
+                _receive_full_bytes(
+                    self._command_socket, size, max(deadline - time.time(), 1.0)
+                )
+                if size
+                else b""
             )
-            self.send_raw_bytes(packet + additional)
-            deadline = time.time() + timeout
-            while True:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    raise TimeoutError(
-                        f"No 0x{want:04X} reply to 0x{code:04X} within {timeout:.1f} s"
-                    )
-                header = _receive_full_bytes(self._command_socket, 128, remaining)
-                head = parse_frame(header)
-                got, size = head.command_code, head.additional_data_size
-                extra = (
-                    _receive_full_bytes(
-                        self._command_socket, size, max(deadline - time.time(), 1.0)
-                    )
-                    if size
-                    else b""
-                )
-                if got == want:
-                    return header, extra
-                self.logger.debug(
-                    f"Skipped 0x{got:04X} ({size} extra bytes) while waiting for 0x{want:04X}"
-                )
-        finally:
-            if paused:
-                self.tcp_connection.resume_async_reader()
+            if got == want:
+                return header, extra
+            self.logger.debug(
+                f"Skipped 0x{got:04X} ({size} extra bytes) while waiting for 0x{want:04X}"
+            )
 
     def _identify_server(self) -> None:
         """Ask the server for its version and take its command layout from it.
@@ -916,13 +932,18 @@ class MVCConnectionService:
         self, cmd: "Command", expected_min_size: int = 1000
     ) -> str:
         """
-        Send command and read complete text response from socket.
+        Send a command whose answer is a frame followed by text, and return
+        the text.
 
-        Some commands (like SCOPE_SETTINGS_LOAD) send:
-        1. 128-byte binary acknowledgment
-        2. Additional text data (could be several KB)
-
-        This method reads ALL data from socket, not just the 128-byte ack.
+        SCOPE_SETTINGS_LOAD (3.0.0) is answered with COMMON_SCOPE_SETTINGS
+        (0x1007) carrying the settings file as additional data, or with
+        MESSAGE_FROM_CONTROLLER "Failed to read scope settings from uC"
+        (ControlServer::loadScopeSettings). The background reader reads the
+        frame and exactly addDataBytes of text and hands it here, so the
+        reader is no longer paused for this. Pausing it raced: the reader
+        could already be inside a read when the reply came, and every second
+        settings read in a session failed ("Text response too small: 0
+        bytes").
 
         Args:
             cmd: Command to send
@@ -936,20 +957,10 @@ class MVCConnectionService:
             ConnectionError: If send/receive fails
             ValueError: If response too small
         """
-        import select
-
         if not self.is_connected():
             raise RuntimeError("Not connected to microscope")
 
-        # Pause async reader to allow synchronous socket reading
-        reader_was_paused = False
-        if hasattr(self.tcp_connection, "pause_async_reader"):
-            reader_was_paused = self.tcp_connection.pause_async_reader()
-            if reader_was_paused:
-                self.logger.debug("Paused async reader for text response")
-
         try:
-            # Encode and send command
             cmd_bytes = self.encoder.encode_command(
                 code=cmd.code,
                 status=0,
@@ -965,45 +976,14 @@ class MVCConnectionService:
                 ),
                 data=b"",
             )
+            if self.has_async_reader:
+                additional_data = self._text_reply_via_reader(cmd.code, cmd_bytes)
+            else:
+                additional_data = self._text_reply_read_here(cmd_bytes)
 
-            self.send_raw_bytes(cmd_bytes)
-            self.logger.debug(f"Sent command {cmd.code}, reading text response...")
-
-            # Read 128-byte acknowledgment first
-            ack_data = _receive_full_bytes(self._command_socket, 128, timeout=2.0)
-            self.logger.debug("Received 128-byte ack")
-
-            # Check for additional data using select (like old code's bytes_waiting)
-            import time
-
-            time.sleep(0.1)  # Brief wait for additional data
-
-            additional_data = b""
-            self._command_socket.settimeout(0.5)
-
-            try:
-                while True:
-                    ready = select.select([self._command_socket], [], [], 0.05)
-                    if not ready[0]:
-                        break
-
-                    chunk = self._command_socket.recv(4096)
-                    if not chunk:
-                        break
-                    additional_data += chunk
-                    self.logger.debug(
-                        f"Received {len(chunk)} bytes (total: {len(additional_data)})"
-                    )
-
-            except socket.timeout:
-                pass
-            finally:
-                self._command_socket.settimeout(None)
-
-            # Log total data received
-            total_bytes = len(ack_data) + len(additional_data)
             self.logger.info(
-                f"Received total: {total_bytes} bytes (128 ack + {len(additional_data)} text)"
+                f"Received total: {128 + len(additional_data)} bytes "
+                f"(128 ack + {len(additional_data)} text)"
             )
 
             # Check if we got enough text data (don't count the 128-byte ack)
@@ -1014,7 +994,6 @@ class MVCConnectionService:
                 )
 
             # Decode ONLY the text data, not the binary ack
-            # The 128-byte ack is binary protocol structure, not text
             text_response = additional_data.decode("utf-8", errors="replace")
             text_response = text_response.rstrip("\x00\r\n")
 
@@ -1029,13 +1008,43 @@ class MVCConnectionService:
             self.logger.error(f"Failed to get text response: {e}")
             raise ConnectionError(f"Failed to receive text response: {e}") from e
 
-        finally:
-            # Resume async reader if we paused it
-            if reader_was_paused and hasattr(
-                self.tcp_connection, "resume_async_reader"
-            ):
-                self.tcp_connection.resume_async_reader()
-                self.logger.debug("Resumed async reader after text response")
+    def _text_reply_via_reader(
+        self, code: int, cmd_bytes: bytes, timeout: float = 5.0
+    ) -> bytes:
+        """Send ``cmd_bytes``; return the additional data of its text reply."""
+        replies = {code}
+        message_code = None
+        try:
+            replies.add(server_layout.code("COMMON_SCOPE_SETTINGS", fallback=0x1007))
+            message_code = server_layout.code(
+                "COMMON_MESSAGE_FROM_CONTROLLER", fallback=0x1006
+            )
+            replies.add(message_code)
+        except server_layout.CommandUnavailable:
+            pass  # a build without them: only the same code can answer
+        reply = self.send_command_async(
+            cmd_bytes, replies, timeout, _about_scope_settings(message_code)
+        )
+        if reply is None:
+            raise TimeoutError(f"No reply to 0x{code:04X} within {timeout:.1f} s")
+        text = reply.additional_data or b""
+        if message_code is not None and reply.command_code == message_code:
+            raise ConnectionError(
+                "the server answered: "
+                + text.decode("utf-8", "replace").replace("\x00", "").strip()
+            )
+        return text
+
+    def _text_reply_read_here(self, cmd_bytes: bytes) -> bytes:
+        """Without a background reader: send, then read the frame and text."""
+        from py2flamingo.core.frames import parse_frame
+
+        self.send_raw_bytes(cmd_bytes)
+        ack_data = _receive_full_bytes(self._command_socket, 128, timeout=2.0)
+        size = parse_frame(ack_data).additional_data_size
+        if not size:
+            return b""
+        return _receive_full_bytes(self._command_socket, size, timeout=5.0)
 
     def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
         """

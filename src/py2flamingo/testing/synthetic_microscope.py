@@ -404,6 +404,8 @@ class SyntheticMicroscope:
         self.workflow_running = False
         #: Workflow text the client uploaded, newest last.
         self.workflows: List[str] = []
+        #: Settings files sent with SCOPE_SETTINGS_SAVE (3.0.0), newest last.
+        self.saved_scope_settings: List[bytes] = []
 
         self._received: List[ReceivedCommand] = []
         self._lock = threading.Lock()
@@ -606,6 +608,7 @@ class SyntheticMicroscope:
             "COMMON_UI_CONTROLLER_ID_GET": self._on_controller_id,
             "COMMON_SUBSYSTEM_CONFIGURATION_GET": self._on_configuration_get,
             "COMMON_SCOPE_SETTINGS_LOAD": self._on_scope_settings_load,
+            "COMMON_SCOPE_SETTINGS_SAVE": self._on_scope_settings_save,
             "COMMON_STORAGE_PATH_SET": self._on_storage_path,
             "COMMON_SYSTEM_SYSTEM_SLEEP": self._on_sleep,
         }
@@ -758,8 +761,31 @@ class SyntheticMicroscope:
         text = "".join(
             line + "\n" for line in text.splitlines() if not line.startswith("#")
         )
+        # The 3.0.0 server answers with COMMON_SCOPE_SETTINGS, not with the
+        # code that was sent (ControlServer::loadScopeSettings).
         self._reply(
-            client, code, additional=(text + _LEGACY_EXTRA_SECTIONS).encode("utf-8")
+            client,
+            self.layout.codes["COMMON_SCOPE_SETTINGS"],
+            additional=(text + _LEGACY_EXTRA_SECTIONS).encode("utf-8"),
+        )
+
+    def _on_scope_settings_save(self, client, code, params, value, additional) -> None:
+        """3.0.0 ControlServer::saveScopeSettings: an empty file gets no reply;
+        a file the server cannot read gets MESSAGE_FROM_CONTROLLER; otherwise
+        the settings are taken (in memory, as no SAVE_TO_DISK bit is set) and
+        echoed back with COMMON_SCOPE_SETTINGS, status 1."""
+        self.saved_scope_settings.append(additional or b"")
+        if not additional:
+            return
+        if b"<" not in additional:
+            self._reply(
+                client,
+                self.layout.codes["COMMON_MESSAGE_FROM_CONTROLLER"],
+                additional=b"Save scope settings error - invalid scope settings file",
+            )
+            return
+        self._reply(
+            client, self.layout.codes["COMMON_SCOPE_SETTINGS"], additional=additional
         )
 
     def _on_storage_path(self, client, code, params, value, additional) -> None:
