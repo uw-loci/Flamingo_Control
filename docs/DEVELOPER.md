@@ -8,6 +8,7 @@ Guide for developers and contributors to the Flamingo Microscope Control softwar
 
 - [Development Setup](#development-setup)
 - [Architecture Overview](#architecture-overview)
+- [Glossary and naming rules](glossary.md) (units, terms, class roles, names that must never change)
 - [Testing](#testing)
 - [Contributing](#contributing)
 - [Code Style](#code-style)
@@ -81,6 +82,8 @@ src/py2flamingo/
 ├── controllers/     # Business logic (ConnectionController, WorkflowController, etc.)
 ├── services/        # Reusable services (ConfigurationManager, TCP connection, etc.)
 ├── core/            # Core infrastructure (queues, events, protocol)
+├── acquisitions/    # Scans the client drives itself (LED 2D overview, volume scan)
+├── workflows/       # Server workflow tooling (workflow validator)
 └── utils/           # Utilities (parsers, formatters, validators)
 ```
 

@@ -56,6 +56,7 @@ The application will:
 
 - **[INSTALLATION.md](docs/INSTALLATION.md)** - Complete installation guide for all platforms
 - **[DEVELOPER.md](docs/DEVELOPER.md)** - Developer guide, architecture, testing
+- **[Glossary](docs/glossary.md)** - Developer naming rules: units, terms, and names that must never change
 - **[Headless Pipelines](docs/headless_pipelines.md)** - Running pipelines from the command line
 - **[LED 2D Overview Guide](docs/led_2d_overview.md)** - Sample orientation scanning
 - **[Pipeline JSON Format](docs/pipeline_json_format.md)** - Pipeline serialization reference (10 NodeTypes, port compatibility, examples)
