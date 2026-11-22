@@ -32,13 +32,13 @@ pytest.importorskip("PyQt5")
 def _no_timers(monkeypatch):
     """start() schedules the first rotation on a QTimer; it must not fire in
     some later test's event loop."""
-    import py2flamingo.workflows.led_2d_overview_workflow as mod
+    import py2flamingo.acquisitions.led_2d_overview as mod
 
     monkeypatch.setattr(mod, "QTimer", SimpleNamespace(singleShot=lambda *a, **k: None))
 
 
 def _workflow(start_ok=True):
-    from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+    from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
     app = MagicMock()
     app.start_acquisition.return_value = start_ok
@@ -48,7 +48,7 @@ def _workflow(start_ok=True):
     config = SimpleNamespace(
         starting_r=0.0, single_rotation=True, fast_mode=False, led_name="led_green"
     )
-    wf = LED2DOverviewWorkflow(app=app, config=config)
+    wf = LED2DOverviewAcquisition(app=app, config=config)
     wf._actual_fov_mm = 1.0
     wf._tile_step_mm = lambda: 1.0
     wf._tile_overlap_percent = lambda: 10.0

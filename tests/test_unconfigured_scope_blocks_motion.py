@@ -9,7 +9,7 @@ Every guard that keyed off `is_configured` lived in a dialog; nothing in the
 movement path consulted it. These tests pin the gate that closed that, at BOTH
 places a move is actually emitted — `PositionController._move_axis` and
 `StageService.move_to_position`. Gating only the controllers would have left
-`workflow_queue_service` and `led_2d_overview_workflow`, which call the service
+`workflow_queue_service` and `led_2d_overview`, which call the service
 directly, free to drive an unconfigured stage.
 
 Run: QT_QPA_PLATFORM=offscreen ./.venv/bin/python -m pytest \

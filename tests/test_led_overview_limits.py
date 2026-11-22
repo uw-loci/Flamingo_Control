@@ -1,4 +1,4 @@
-"""Tests for LED2DOverviewWorkflow._fit_positions_to_limits.
+"""Tests for LED2DOverviewAcquisition._fit_positions_to_limits.
 
 When a requested overview tiling overruns a stage soft limit, the whole set is
 shifted as a block to sit flush against the nearest reachable edge (limit minus
@@ -11,7 +11,7 @@ Run: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_led_overvie
 
 import pytest
 
-from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
 _LIMITS = {
     "x": {"min": 1.0, "max": 12.31},
@@ -22,7 +22,7 @@ _MARGIN = 0.25  # default
 
 
 def _bare(limits=_LIMITS):
-    wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+    wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
     wf._stage_limits_cache = limits
     return wf
 

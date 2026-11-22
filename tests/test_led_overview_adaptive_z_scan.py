@@ -56,9 +56,9 @@ class _Sample:
 
 def _workflow(config, sample):
     """A workflow instance with the hardware stubbed out."""
-    from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+    from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
-    wf = LED2DOverviewWorkflow(app=SimpleNamespace(), config=config)
+    wf = LED2DOverviewAcquisition(app=SimpleNamespace(), config=config)
 
     def fake_sweep(stage, camera, x_pos, y_pos, band, ascending):
         # Indices recovered from position: the loop knows them, this stand-in
@@ -315,15 +315,15 @@ def _run_scan_loop(monkeypatch, config, sample, grid=(3, 3)):
     the whole bounding box passed every test.
     """
     import py2flamingo.services.stage_service as stage_mod
+    from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
     from py2flamingo.models.data.overview_results import (
         EffectiveBoundingBox,
         RotationResult,
     )
-    from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
 
     monkeypatch.setattr(stage_mod, "StageService", lambda *a, **k: _NullStage())
 
-    wf = LED2DOverviewWorkflow(
+    wf = LED2DOverviewAcquisition(
         app=SimpleNamespace(connection_service=None), config=config
     )
     wf._running = True

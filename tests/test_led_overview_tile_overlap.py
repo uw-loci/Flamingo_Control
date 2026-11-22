@@ -12,8 +12,8 @@ Run: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \\
 
 import pytest
 
+from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 from py2flamingo.utils.tile_geometry import OVERLAP_PERCENT_MAX
-from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
 
 
 class _Config:
@@ -27,7 +27,7 @@ class _Config:
 
 def _workflow(config):
     """A workflow instance without running __init__ (which needs hardware)."""
-    wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+    wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
     wf._config = config
     return wf
 
@@ -275,7 +275,7 @@ class TestFocusStackingIsNotAnAcquisitionChoice:
 
         return (
             Path(__file__).resolve().parents[1]
-            / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+            / "src/py2flamingo/acquisitions/led_2d_overview.py"
         ).read_text(encoding="utf-8")
 
     def test_the_checkbox_is_gone(self):

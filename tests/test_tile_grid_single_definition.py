@@ -31,7 +31,7 @@ import pytest
 
 WORKFLOW = (
     Path(__file__).resolve().parents[1]
-    / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+    / "src/py2flamingo/acquisitions/led_2d_overview.py"
 )
 
 # The rig's real numbers.
@@ -42,9 +42,9 @@ BBOX_Y = (11.725, 24.0)
 
 def _cls():
     pytest.importorskip("PyQt5")
-    from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+    from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
-    return LED2DOverviewWorkflow
+    return LED2DOverviewAcquisition
 
 
 class TestThereIsOneDefinitionOfTheStep:
@@ -297,7 +297,7 @@ class TestThePreviewMatchesTheScan:
 
         src = (
             Path(__file__).resolve().parents[1]
-            / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+            / "src/py2flamingo/acquisitions/led_2d_overview.py"
         ).read_text(encoding="utf-8")
         assert "from py2flamingo.utils.tile_geometry import tile_positions_1d" in src
 

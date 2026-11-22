@@ -1,4 +1,4 @@
-"""Tests for LED2DOverviewWorkflow._z_sweep_positions (serpentine Z).
+"""Tests for LED2DOverviewAcquisition._z_sweep_positions (serpentine Z).
 
 The overview sweeps Z continuously per tile. To avoid a full-stack Z reset
 between tiles, alternate tiles sweep the same planes in reverse. The output is a
@@ -8,9 +8,9 @@ travel.
 Run: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_led_overview_serpentine.py -q
 """
 
-from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
-_z = LED2DOverviewWorkflow._z_sweep_positions
+_z = LED2DOverviewAcquisition._z_sweep_positions
 
 
 def test_ascending_is_zmin_to_zmax():

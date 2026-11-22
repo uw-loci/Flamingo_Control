@@ -147,7 +147,7 @@ class TestNoSixthCopy:
     _ALLOWED = {
         "utils/tile_geometry.py",  # THE definition
         "utils/acquisition_profile_generator.py",  # tile_step_mm, delegates
-        "workflows/led_2d_overview_workflow.py",  # _tile_step_mm, delegates
+        "acquisitions/led_2d_overview.py",  # _tile_step_mm, delegates
     }
 
     def test_no_module_assigns_a_step_equal_to_a_bare_fov(self):

@@ -293,7 +293,7 @@ The LED 2D Overview feature consists of 7 main files (~228KB total):
 | `views/dialogs/led_2d_overview_dialog.py` | 60KB | Configuration dialog |
 | `views/dialogs/led_2d_overview_result.py` | 68KB | Results display window |
 | `views/dialogs/tile_collection_dialog.py` | 73KB | Tile workflow generation |
-| `workflows/led_2d_overview_workflow.py` | 52KB | Scan execution engine |
+| `acquisitions/led_2d_overview.py` | 52KB | Scan execution engine |
 | `views/dialogs/overview_thresholder_dialog.py` | 20KB | Auto-selection tool |
 | `views/dialogs/mip_overview_dialog.py` | 28KB | Related overview feature |
 | `models/mip_overview.py` | 8KB | Shared data models |
@@ -305,7 +305,7 @@ LED2DOverviewDialog (Configuration)
         │
         │ scan_requested signal
         ▼
-LED2DOverviewWorkflow (Execution)
+LED2DOverviewAcquisition (Execution)
         │
         │ Captures tiles at each rotation
         │ Calculates projections (best_focus, min, max, mean, EDF)
@@ -384,9 +384,9 @@ class RotationResult:
 ```
 LED2DOverviewDialog
     │
-    ├── scan_requested(ScanConfiguration) ──► LED2DOverviewWorkflow
+    ├── scan_requested(ScanConfiguration) ──► LED2DOverviewAcquisition
     │
-LED2DOverviewWorkflow
+LED2DOverviewAcquisition
     │
     ├── scan_started() ──────────────────► UI updates
     ├── scan_progress(str, float) ───────► Progress display

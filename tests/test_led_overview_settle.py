@@ -1,4 +1,4 @@
-"""Unit tests for LED2DOverviewWorkflow._wait_for_axes_settled.
+"""Unit tests for LED2DOverviewAcquisition._wait_for_axes_settled.
 
 The fast-mode Z sweep grabs frames continuously, so the stage MUST have
 physically arrived before imaging — otherwise the projection ingests frames
@@ -9,7 +9,7 @@ loop, no hardware).
 Run: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_led_overview_settle.py -q
 """
 
-from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
 
 class _FakeStage:
@@ -29,7 +29,7 @@ class _FakeStage:
 
 def _bare_workflow():
     # Bypass __init__ (needs an app/QObject wiring) — we only test pure logic.
-    wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+    wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
     wf._cancelled = False
     # Minimal state for the live-position broadcast that settle now performs. With
     # no _app, _broadcast_stage_position returns early (no sample view), so the

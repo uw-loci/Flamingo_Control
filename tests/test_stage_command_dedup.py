@@ -138,7 +138,7 @@ class TestItIsWiredIntoBothEmitters:
         assert "StageService(self.connection).move_to_position(" in body
 
     def test_the_workflow_bypass_path_checks_it(self):
-        # workflow_queue_service and led_2d_overview_workflow reach the stage
+        # workflow_queue_service and led_2d_overview reach the stage
         # through StageService and never touch PositionController.
         src = self._src("py2flamingo/services/stage_service.py")
         assert "stage_command_dedup" in src

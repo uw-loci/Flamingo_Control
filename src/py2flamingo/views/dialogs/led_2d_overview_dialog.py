@@ -1763,12 +1763,12 @@ class LED2DOverviewDialog(PersistentDialog):
         self._estimator.tick(0)  # mark start time
 
         try:
-            from py2flamingo.workflows.led_2d_overview_workflow import (
-                LED2DOverviewWorkflow,
+            from py2flamingo.acquisitions.led_2d_overview import (
+                LED2DOverviewAcquisition,
             )
 
             # Keep reference to prevent garbage collection
-            self._workflow = LED2DOverviewWorkflow(
+            self._workflow = LED2DOverviewAcquisition(
                 app=self._app,
                 config=config,
                 parent=self,  # Parent to dialog so it stays alive

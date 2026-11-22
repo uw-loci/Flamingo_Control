@@ -231,20 +231,20 @@ def test_single_rotation_config_controls_scanned_angles(
 ):
     """The quick-test flag skips R+90 even when the tip IS calibrated."""
     pytest.importorskip("PyQt5")
-    from py2flamingo.workflows import led_2d_overview_workflow as mod
+    from py2flamingo.acquisitions import led_2d_overview as mod
 
     monkeypatch.setattr(
-        mod.LED2DOverviewWorkflow, "_calculate_actual_fov", lambda self: 0.4
+        mod.LED2DOverviewAcquisition, "_calculate_actual_fov", lambda self: 0.4
     )
     monkeypatch.setattr(
-        mod.LED2DOverviewWorkflow, "_get_tip_position", lambda self: (3.0, 9.0)
+        mod.LED2DOverviewAcquisition, "_get_tip_position", lambda self: (3.0, 9.0)
     )
     monkeypatch.setattr(
-        mod.LED2DOverviewWorkflow, "_load_invert_x_setting", lambda self: False
+        mod.LED2DOverviewAcquisition, "_load_invert_x_setting", lambda self: False
     )
 
-    workflow = mod.LED2DOverviewWorkflow.__new__(mod.LED2DOverviewWorkflow)
-    mod.LED2DOverviewWorkflow.__init__(
+    workflow = mod.LED2DOverviewAcquisition.__new__(mod.LED2DOverviewAcquisition)
+    mod.LED2DOverviewAcquisition.__init__(
         workflow, config=_scan_config(single_rotation), app=None
     )
     assert workflow._rotation_angles == expected

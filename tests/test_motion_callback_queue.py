@@ -220,7 +220,7 @@ class TestTheZSweepUsesCallbacksNotPolling:
 
         return (
             Path(__file__).resolve().parents[1]
-            / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+            / "src/py2flamingo/acquisitions/led_2d_overview.py"
         ).read_text(encoding="utf-8")
 
     def test_capture_plane_no_longer_polls_position_every_10ms(self):

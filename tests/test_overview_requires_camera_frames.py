@@ -20,34 +20,36 @@ class TestTheEmptyTileStreak:
     """The mid-scan guard, tested on the policy rather than on a live stage."""
 
     def test_the_threshold_is_small_enough_to_matter(self):
-        from py2flamingo.workflows.led_2d_overview_workflow import (
-            LED2DOverviewWorkflow,
+        from py2flamingo.acquisitions.led_2d_overview import (
+            LED2DOverviewAcquisition,
         )
 
         # A healthy stream never produces one empty tile. The failure produced
         # 294 in a row, so anything low works -- but it has to be far below the
         # tile count or the guard costs an hour before it fires.
-        assert 1 <= LED2DOverviewWorkflow.MAX_EMPTY_TILE_STREAK <= 5
+        assert 1 <= LED2DOverviewAcquisition.MAX_EMPTY_TILE_STREAK <= 5
 
     def test_the_streak_counter_starts_at_zero(self):
-        from py2flamingo.workflows.led_2d_overview_workflow import (
-            LED2DOverviewWorkflow,
+        from py2flamingo.acquisitions.led_2d_overview import (
+            LED2DOverviewAcquisition,
         )
 
-        wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+        wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
         # __init__ needs a controller stack; the attribute is what matters here.
-        assert "_empty_tile_streak" in LED2DOverviewWorkflow.__init__.__code__.co_names
+        assert (
+            "_empty_tile_streak" in LED2DOverviewAcquisition.__init__.__code__.co_names
+        )
 
     def test_the_scan_loop_checks_the_streak_and_emits_an_error(self):
         """The guard has to abort AND say why -- a silent stop is the same
         failure with a shorter log."""
         import inspect
 
-        from py2flamingo.workflows.led_2d_overview_workflow import (
-            LED2DOverviewWorkflow,
+        from py2flamingo.acquisitions.led_2d_overview import (
+            LED2DOverviewAcquisition,
         )
 
-        src = inspect.getsource(LED2DOverviewWorkflow)
+        src = inspect.getsource(LED2DOverviewAcquisition)
         assert "_empty_tile_streak >= self.MAX_EMPTY_TILE_STREAK" in src
         # It must reach the user, not just the log file.
         guard = src[src.index("_empty_tile_streak >= self.MAX_EMPTY_TILE_STREAK") :]
@@ -56,13 +58,13 @@ class TestTheEmptyTileStreak:
     def test_a_tile_with_frames_resets_the_streak(self):
         import inspect
 
-        from py2flamingo.workflows.led_2d_overview_workflow import (
-            LED2DOverviewWorkflow,
+        from py2flamingo.acquisitions.led_2d_overview import (
+            LED2DOverviewAcquisition,
         )
 
         # Without the reset, three empty tiles scattered across a long scan
         # would abort a run that was working.
-        src = inspect.getsource(LED2DOverviewWorkflow)
+        src = inspect.getsource(LED2DOverviewAcquisition)
         assert "self._empty_tile_streak = 0" in src
 
 

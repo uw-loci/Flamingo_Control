@@ -72,7 +72,7 @@ class TestOnlyOneSourceOfPixelSize:
     def test_the_led_overview_dialog_and_workflow_share_one_resolver(self):
         """The two that actually diverged — preview vs the stage that moves."""
         dialog = (SRC / "views/dialogs/led_2d_overview_dialog.py").read_text()
-        workflow = (SRC / "workflows/led_2d_overview_workflow.py").read_text()
+        workflow = (SRC / "acquisitions/led_2d_overview.py").read_text()
         for name, text in (("dialog", dialog), ("workflow", workflow)):
             assert (
                 "from py2flamingo.utils.fov import resolve_fov_mm" in text

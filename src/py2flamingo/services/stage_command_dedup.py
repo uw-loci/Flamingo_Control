@@ -34,7 +34,7 @@ one copy per control, which is how the tile-step calculation ended up with five.
 * ``PositionController._move_axis`` -- funnel for move_x/y/z/r and
   move_to_position.
 * ``StageService.move_to_position`` -- used DIRECTLY by
-  ``workflow_queue_service`` and ``led_2d_overview_workflow``, which never touch
+  ``workflow_queue_service`` and ``led_2d_overview``, which never touch
   the controllers.
 
 **What it deliberately does not do.** It suppresses a command only while an

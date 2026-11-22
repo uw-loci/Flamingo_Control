@@ -206,9 +206,9 @@ def test_volume_scan_does_not_guess_the_rotation():
     # An unknown position used to become R = 0, rotating the sample unasked.
     import pytest
 
-    from py2flamingo.workflows.volume_scan_workflow import VolumeScanWorkflow
+    from py2flamingo.acquisitions.volume_scan import VolumeScanAcquisition
 
-    wf = VolumeScanWorkflow.__new__(VolumeScanWorkflow)
+    wf = VolumeScanAcquisition.__new__(VolumeScanAcquisition)
     wf.position_controller = MagicMock()
     wf.position_controller.get_current_position.return_value = None
     with pytest.raises(RuntimeError):

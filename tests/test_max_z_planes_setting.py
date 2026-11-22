@@ -18,11 +18,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
 
 def _wf(config):
-    wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+    wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
     wf._config = config
     return wf
 
@@ -31,21 +31,21 @@ class TestTheAcquisitionValueIsUsed:
     def test_the_configured_cap_wins_over_the_class_constant(self):
         wf = _wf(SimpleNamespace(max_z_planes=3))
         assert wf._max_z_planes() == 3
-        assert LED2DOverviewWorkflow.MAX_Z_PLANES_PER_TILE == 10
+        assert LED2DOverviewAcquisition.MAX_Z_PLANES_PER_TILE == 10
 
     def test_a_config_without_the_field_falls_back_to_the_constant(self):
         """An old session must keep behaving the way it did, not go unlimited."""
         wf = _wf(SimpleNamespace())
-        assert wf._max_z_planes() == LED2DOverviewWorkflow.MAX_Z_PLANES_PER_TILE
+        assert wf._max_z_planes() == LED2DOverviewAcquisition.MAX_Z_PLANES_PER_TILE
 
     @pytest.mark.parametrize("bad", [0, -5, None, "lots"])
     def test_a_nonsense_value_falls_back_rather_than_disabling_the_cap(self, bad):
         wf = _wf(SimpleNamespace(max_z_planes=bad))
-        assert wf._max_z_planes() == LED2DOverviewWorkflow.MAX_Z_PLANES_PER_TILE
+        assert wf._max_z_planes() == LED2DOverviewAcquisition.MAX_Z_PLANES_PER_TILE
 
     def test_it_actually_bounds_the_sweep(self):
         wf = _wf(SimpleNamespace(max_z_planes=4))
-        planes = LED2DOverviewWorkflow._z_sweep_positions(
+        planes = LED2DOverviewAcquisition._z_sweep_positions(
             0.0, 10.0, 0.25, True, wf._max_z_planes()
         )
         assert len(planes) == 4
@@ -85,7 +85,7 @@ class TestItIsOnTheDialog:
         """
         import ast
 
-        tree = ast.parse(self._src("workflows/led_2d_overview_workflow.py"))
+        tree = ast.parse(self._src("acquisitions/led_2d_overview.py"))
         offenders = []
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef) or fn.name == "_max_z_planes":
@@ -109,7 +109,7 @@ class TestItIsOnTheDialog:
 
     def test_both_scan_paths_ask_for_the_configured_cap(self):
         """Fast mode and the slow path must both pass it through."""
-        body = self._src("workflows/led_2d_overview_workflow.py")
+        body = self._src("acquisitions/led_2d_overview.py")
         assert body.count("self._max_z_planes()") >= 3, (
             "expected the fast-mode sweep, the slow path, and the up-front "
             "plane-count log to each use the configured cap"

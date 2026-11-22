@@ -22,7 +22,7 @@ Run: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \\
 import numpy as np
 import pytest
 
-from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
 Z_AXIS = 3
 
@@ -71,7 +71,7 @@ class FakeCamera:
 
 
 def _workflow(cancelled=False):
-    wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+    wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
     wf._cancelled = cancelled
     wf._last_xyz = [0.0, 0.0, 0.0]
     wf._broadcast_stage_position = lambda *a, **k: None
@@ -187,7 +187,7 @@ class TestTheTileMoveWaitsOnTheEventNotThePoll:
             return True
 
     def _wf(self, tracker):
-        wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+        wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
         wf._cancelled = False
         wf._last_xyz = [0.0, 0.0, 0.0]
         wf._broadcast_stage_position = lambda *a, **k: None
@@ -257,36 +257,36 @@ class TestThePlaneCapAppliesToThePathThatMoves:
 
     def test_a_deep_range_is_capped(self):
         # 10 mm at 0.25 mm would be 41 planes.
-        planes = LED2DOverviewWorkflow._z_sweep_positions(0.0, 10.0, 0.25)
-        assert len(planes) == LED2DOverviewWorkflow.MAX_Z_PLANES_PER_TILE
+        planes = LED2DOverviewAcquisition._z_sweep_positions(0.0, 10.0, 0.25)
+        assert len(planes) == LED2DOverviewAcquisition.MAX_Z_PLANES_PER_TILE
 
     def test_the_cap_still_spans_the_whole_range(self):
         """Subsample, do not truncate — a truncated sweep misses the far half."""
-        planes = LED2DOverviewWorkflow._z_sweep_positions(2.0, 12.0, 0.25)
+        planes = LED2DOverviewAcquisition._z_sweep_positions(2.0, 12.0, 0.25)
         assert planes[0] == pytest.approx(2.0)
         assert planes[-1] == pytest.approx(12.0)
 
     def test_a_shallow_range_is_untouched(self):
-        planes = LED2DOverviewWorkflow._z_sweep_positions(0.0, 1.0, 0.25)
+        planes = LED2DOverviewAcquisition._z_sweep_positions(0.0, 1.0, 0.25)
         assert len(planes) == 5  # 0.00 .. 1.00
         assert planes == pytest.approx([0.0, 0.25, 0.5, 0.75, 1.0])
 
     def test_descending_tiles_are_capped_the_same_way(self):
         """Serpentine Z must not change how many planes a tile costs."""
-        up = LED2DOverviewWorkflow._z_sweep_positions(0.0, 10.0, 0.25, True)
-        down = LED2DOverviewWorkflow._z_sweep_positions(0.0, 10.0, 0.25, False)
+        up = LED2DOverviewAcquisition._z_sweep_positions(0.0, 10.0, 0.25, True)
+        down = LED2DOverviewAcquisition._z_sweep_positions(0.0, 10.0, 0.25, False)
         assert len(up) == len(down)
         assert up == list(reversed(down))
 
     def test_the_cap_can_be_lifted_explicitly(self):
-        planes = LED2DOverviewWorkflow._z_sweep_positions(
+        planes = LED2DOverviewAcquisition._z_sweep_positions(
             0.0, 10.0, 0.25, True, max_planes=None
         )
         assert len(planes) == 41
 
     def test_a_degenerate_range_still_yields_one_plane(self):
         """z_min == z_max must not produce an empty sweep (no frames at all)."""
-        assert LED2DOverviewWorkflow._z_sweep_positions(3.0, 3.0, 0.25) == [3.0]
+        assert LED2DOverviewAcquisition._z_sweep_positions(3.0, 3.0, 0.25) == [3.0]
 
     def test_both_scan_paths_share_one_definition(self):
         """The regression: a private copy of the walk in _capture_tile."""
@@ -295,7 +295,7 @@ class TestThePlaneCapAppliesToThePathThatMoves:
 
         src = (
             Path(__file__).resolve().parents[1]
-            / "src/py2flamingo/workflows/led_2d_overview_workflow.py"
+            / "src/py2flamingo/acquisitions/led_2d_overview.py"
         ).read_text(encoding="utf-8")
         tree = ast.parse(src)
         fn = next(

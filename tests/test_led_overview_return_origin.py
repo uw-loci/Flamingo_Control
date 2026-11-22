@@ -1,4 +1,4 @@
-"""Unit tests for LED2DOverviewWorkflow origin capture / return-to-origin.
+"""Unit tests for LED2DOverviewAcquisition origin capture / return-to-origin.
 
 A scan should never leave the stage parked at the last tile: the workflow records
 the live stage position *before* the first move and returns there at the end
@@ -11,7 +11,7 @@ Run: QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_led_overvie
 from types import SimpleNamespace
 
 import py2flamingo.services.stage_service as stage_mod
-from py2flamingo.workflows.led_2d_overview_workflow import LED2DOverviewWorkflow
+from py2flamingo.acquisitions.led_2d_overview import LED2DOverviewAcquisition
 
 
 class _FakePosition:
@@ -60,7 +60,7 @@ class _FakeMovementController:
 
 
 def _bare_workflow():
-    wf = LED2DOverviewWorkflow.__new__(LED2DOverviewWorkflow)
+    wf = LED2DOverviewAcquisition.__new__(LED2DOverviewAcquisition)
     wf._cancelled = False
     wf._movement_controller = None
     wf._last_xyz = [0.0, 0.0, 0.0]

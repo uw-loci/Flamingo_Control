@@ -29,8 +29,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from py2flamingo.workflows.led_2d_overview_workflow import (  # noqa: E402
-    LED2DOverviewWorkflow,
+from py2flamingo.acquisitions.led_2d_overview import (  # noqa: E402
+    LED2DOverviewAcquisition,
 )
 
 Z_MIN, Z_MAX, Z_STEP = 14.21, 24.21, 0.25
@@ -38,7 +38,7 @@ DEPTH = Z_MAX - Z_MIN  # 10.0 mm, the real bounding box from the 08-17 run
 
 
 def sweep(max_planes, ascending=True):
-    return LED2DOverviewWorkflow._z_sweep_positions(
+    return LED2DOverviewAcquisition._z_sweep_positions(
         Z_MIN, Z_MAX, Z_STEP, ascending=ascending, max_planes=max_planes
     )
 
@@ -80,7 +80,7 @@ class TestTheTilePlanCannotDisagreeWithItself:
 
     @staticmethod
     def _plan(planes, ascending):
-        return LED2DOverviewWorkflow._tile_z_plan(
+        return LED2DOverviewAcquisition._tile_z_plan(
             Z_MIN, Z_MAX, Z_STEP, ascending, planes
         )
 
@@ -160,7 +160,7 @@ class TestSweepShape:
 
     def test_a_zero_depth_range_yields_one_position(self):
         # z_min == z_max must not produce an empty sweep.
-        positions = LED2DOverviewWorkflow._z_sweep_positions(
+        positions = LED2DOverviewAcquisition._z_sweep_positions(
             5.0, 5.0, Z_STEP, ascending=True, max_planes=10
         )
         assert positions == [5.0]

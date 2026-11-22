@@ -1,4 +1,4 @@
-"""LED 2D Overview Workflow.
+"""LED 2D Overview acquisition (a client-side scan, not a server workflow).
 
 Executes the LED 2D Overview scan, creating 2D overview maps
 at two rotation angles (R and R+90 degrees).
@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 _UNSET = object()
 
 
-class LED2DOverviewWorkflow(QObject):
-    """Workflow for LED 2D Overview scans.
+class LED2DOverviewAcquisition(QObject):
+    """Client-side acquisition for LED 2D Overview scans.
 
     Creates 2D overview maps at two rotation angles by:
     1. For each rotation, calculating the effective bounding box
@@ -1393,7 +1393,7 @@ class LED2DOverviewWorkflow(QObject):
         mistake this file can make. One function returns both, so they cannot
         disagree.
         """
-        z_values = LED2DOverviewWorkflow._z_sweep_positions(
+        z_values = LED2DOverviewAcquisition._z_sweep_positions(
             z_min, z_max, z_step, ascending, max_planes
         )
         return z_values[0], z_values

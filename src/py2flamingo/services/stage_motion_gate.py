@@ -16,9 +16,9 @@ because the two places that actually emit a move command reach it by different
 routes and one of them has no access to the configuration layer:
 
 * ``PositionController._move_axis`` — the funnel for move_x/y/z/r and
-  move_to_position, used by the GUI and by volume_scan_workflow.
+  move_to_position, used by the GUI and by volume_scan.
 * ``StageService.move_to_position`` — used DIRECTLY by
-  ``workflow_queue_service`` and ``led_2d_overview_workflow``, which never
+  ``workflow_queue_service`` and ``led_2d_overview``, which never
   touch the controllers at all. Gating only the controllers would have left the
   LED overview free to drive an unconfigured stage.
 

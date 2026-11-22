@@ -1,5 +1,5 @@
 """
-Optimal Volume Scanning Workflow.
+Optimal volume scanning acquisition (a client-side scan, not a server workflow).
 
 Implements bidirectional Z-painting with serpentine XY tiling for
 efficient 3D volume acquisition. This strategy minimizes scan time by:
@@ -15,7 +15,7 @@ Based on timing analysis:
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
@@ -50,7 +50,7 @@ class VolumeScanConfig:
     settle_time_s: float = 0.3
 
 
-class VolumeScanWorkflow(QObject):
+class VolumeScanAcquisition(QObject):
     """
     Executes optimal volume scanning using bidirectional Z-painting.
 
@@ -304,38 +304,3 @@ class VolumeScanWorkflow(QObject):
     def progress(self) -> Tuple[int, int]:
         """Get current progress as (current, total)."""
         return (self._current_position_idx, len(self._positions))
-
-
-def run_volume_scan(
-    movement_controller,
-    position_controller,
-    config: Optional[VolumeScanConfig] = None,
-    on_complete: Optional[Callable] = None,
-    on_error: Optional[Callable[[str], None]] = None,
-) -> VolumeScanWorkflow:
-    """
-    Convenience function to start a volume scan.
-
-    Args:
-        movement_controller: Controller for stage movement
-        position_controller: Controller for position queries
-        config: Optional scan configuration
-        on_complete: Callback when scan completes
-        on_error: Callback on error with message
-
-    Returns:
-        VolumeScanWorkflow instance (can be used to cancel or monitor progress)
-    """
-    workflow = VolumeScanWorkflow(
-        movement_controller=movement_controller,
-        position_controller=position_controller,
-        config=config,
-    )
-
-    if on_complete:
-        workflow.scan_completed.connect(on_complete)
-    if on_error:
-        workflow.scan_error.connect(on_error)
-
-    workflow.start()
-    return workflow
