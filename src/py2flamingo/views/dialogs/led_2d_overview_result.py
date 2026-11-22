@@ -38,7 +38,7 @@ from py2flamingo.utils.saved_data_version import LED_2D_SESSION
 
 logger = logging.getLogger(__name__)
 
-from py2flamingo.utils.fov import effective_pixel_size_um
+from py2flamingo.configs.fov import effective_pixel_size_um
 from py2flamingo.views.widgets.zoomable_image_label import ZoomableImageLabel
 from py2flamingo.visualization.zarr_2d_session import (
     ZARR_AVAILABLE,

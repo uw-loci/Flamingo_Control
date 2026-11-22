@@ -579,9 +579,9 @@ class UnionThresholderDialog(PersistentDialog):
                 return None
 
             # One shared resolver for pixel size / FOV — see
-            # py2flamingo.utils.fov. Reading the firmware value directly here
+            # py2flamingo.configs.fov. Reading the firmware value directly here
             # made this a second source of truth for tile geometry.
-            from py2flamingo.utils.fov import resolve_fov_mm
+            from py2flamingo.configs.fov import resolve_fov_mm
 
             return resolve_fov_mm(self._app)
         except Exception:

@@ -66,7 +66,7 @@ Notes on the table:
   exposure is also the slit width (`models/aslm_timing.py`).
 - **Pixel size.** The server's `CAMERA_PIXEL_FIELD_OF_VIEW_GET` returns mm per pixel. That
   is a pixel size, despite the server's name, and a variable holding it is
-  `pixel_size_mm`, never `fov` or `pixel_fov`. `utils/fov.py` is the one reader.
+  `pixel_size_mm`, never `fov` or `pixel_fov`. `configs/fov.py` is the one reader.
 - **Z step.** The Workflow tab's Z step is µm (`Plane spacing (um)` in the file). The LED
   2D overview works in mm (`z_step_size`, `z_step_mm`).
 

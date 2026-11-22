@@ -12,7 +12,7 @@ while the workflow that moved the stage resolved its step through
 today — both ~1.0475 µm at 6.205x — so it looked fine. They diverge the moment an
 XY Pixel Calibrator result is saved.
 
-``py2flamingo.utils.fov`` is now that single source. The allowlist below is the
+``py2flamingo.configs.fov`` is now that single source. The allowlist below is the
 whole of the exception: the Pixel Calibrator must read the firmware value
 directly, because showing it against its own measurement is the entire point of
 the dialog.
@@ -32,7 +32,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "py2flamingo"
 # Modules permitted to call the firmware pixel size directly, and why.
 FIRMWARE_ALLOWLIST = {
     # Owns the resolution order; reads firmware as fallback + for comparison.
-    "utils/fov.py",
+    "configs/fov.py",
     # Defines the accessor.
     "services/camera_service.py",
     # Displays firmware vs measured — that comparison IS the feature.
@@ -63,7 +63,7 @@ class TestOnlyOneSourceOfPixelSize:
     def test_no_new_module_reads_the_firmware_pixel_size(self):
         offenders = _modules_calling("get_pixel_field_of_view") - FIRMWARE_ALLOWLIST
         assert not offenders, (
-            "these modules bypass py2flamingo.utils.fov and read the firmware "
+            "these modules bypass py2flamingo.configs.fov and read the firmware "
             f"pixel size directly: {sorted(offenders)}. Use resolve_fov_mm()/"
             "resolve_pixel_size_mm() so the preview and the scan cannot "
             "disagree about tile size."
@@ -75,13 +75,13 @@ class TestOnlyOneSourceOfPixelSize:
         workflow = (SRC / "acquisitions/led_2d_overview.py").read_text()
         for name, text in (("dialog", dialog), ("workflow", workflow)):
             assert (
-                "from py2flamingo.utils.fov import resolve_fov_mm" in text
-            ), f"the LED overview {name} must resolve FOV through utils.fov"
+                "from py2flamingo.configs.fov import resolve_fov_mm" in text
+            ), f"the LED overview {name} must resolve FOV through configs.fov"
 
     def test_the_resolver_prefers_the_config_over_the_firmware(self, monkeypatch):
         """Behaviour, not prose: with both available, the config wins."""
         import py2flamingo.configs.config_loader as cl
-        from py2flamingo.utils import fov
+        from py2flamingo.configs import fov
 
         monkeypatch.setattr(
             cl,
@@ -103,7 +103,7 @@ class TestOnlyOneSourceOfPixelSize:
     def test_the_firmware_is_used_when_the_config_cannot_be_read(self, monkeypatch):
         """A fallback, so an unconfigured scope still previews something."""
         import py2flamingo.configs.config_loader as cl
-        from py2flamingo.utils import fov
+        from py2flamingo.configs import fov
 
         def _boom():
             raise RuntimeError("no config")
@@ -120,7 +120,7 @@ class TestOnlyOneSourceOfPixelSize:
     def test_an_unresolvable_pixel_size_refuses_rather_than_guesses(self, monkeypatch):
         """None is a refusal — a wrong FOV drives the stage the wrong distance."""
         import py2flamingo.configs.config_loader as cl
-        from py2flamingo.utils import fov
+        from py2flamingo.configs import fov
 
         def _boom():
             raise RuntimeError("no config")
@@ -138,7 +138,7 @@ class TestOnlyOneSourceOfPixelSize:
     def test_fov_is_pixel_size_times_the_smaller_frame_dimension(self, monkeypatch):
         """Honours a cropped AOI — the static config does not know about it."""
         import py2flamingo.configs.config_loader as cl
-        from py2flamingo.utils import fov
+        from py2flamingo.configs import fov
 
         monkeypatch.setattr(
             cl,
@@ -163,7 +163,7 @@ class TestTheMismatchIsReportedAtConnectionNotMidRun:
     """A mismatch is a property of the scope's setup, not of one acquisition."""
 
     def test_the_resolver_does_not_warn_from_inside_the_tile_loop(self):
-        src = (SRC / "utils/fov.py").read_text()
+        src = (SRC / "configs/fov.py").read_text()
         tree = ast.parse(src)
         resolver = next(
             n
@@ -186,7 +186,7 @@ class TestTheMismatchIsReportedAtConnectionNotMidRun:
         assert "_pixel_size_lines" in src
 
     def test_agreeing_sources_produce_no_warning(self):
-        from py2flamingo.utils.fov import PixelSizeComparison
+        from py2flamingo.configs.fov import PixelSizeComparison
 
         r = PixelSizeComparison(config_um=1.0475, firmware_um=1.0480)
         assert r.agrees
@@ -194,7 +194,7 @@ class TestTheMismatchIsReportedAtConnectionNotMidRun:
         assert "1.0475" in r.summary()
 
     def test_diverging_sources_produce_an_actionable_warning(self):
-        from py2flamingo.utils.fov import PixelSizeComparison
+        from py2flamingo.configs.fov import PixelSizeComparison
 
         r = PixelSizeComparison(config_um=1.0475, firmware_um=0.5000)
         assert not r.agrees
@@ -204,7 +204,7 @@ class TestTheMismatchIsReportedAtConnectionNotMidRun:
         assert "1.0475" in msg and "0.5000" in msg
 
     def test_a_missing_source_is_not_treated_as_disagreement(self):
-        from py2flamingo.utils.fov import PixelSizeComparison
+        from py2flamingo.configs.fov import PixelSizeComparison
 
         assert PixelSizeComparison(config_um=1.0475, firmware_um=None).agrees
         assert PixelSizeComparison(config_um=None, firmware_um=None).warning() is None
@@ -261,7 +261,7 @@ class TestTheResolverDoesNotTalkToTheScopeNeedlessly:
 
     def test_the_firmware_is_not_queried_when_the_config_answers(self, monkeypatch):
         import py2flamingo.configs.config_loader as cl
-        from py2flamingo.utils import fov
+        from py2flamingo.configs import fov
 
         monkeypatch.setattr(
             cl,
@@ -279,7 +279,7 @@ class TestTheResolverDoesNotTalkToTheScopeNeedlessly:
     def test_it_is_still_queried_when_the_config_cannot_answer(self, monkeypatch):
         """The fallback must survive the optimisation."""
         import py2flamingo.configs.config_loader as cl
-        from py2flamingo.utils import fov
+        from py2flamingo.configs import fov
 
         def _boom():
             raise RuntimeError("no config")
@@ -294,7 +294,7 @@ class TestTheResolverDoesNotTalkToTheScopeNeedlessly:
         import logging
 
         import py2flamingo.configs.config_loader as cl
-        from py2flamingo.utils import fov
+        from py2flamingo.configs import fov
 
         monkeypatch.setattr(
             cl,

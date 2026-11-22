@@ -1115,9 +1115,9 @@ class LED2DOverviewDialog(PersistentDialog):
         resolved its FOV through the calibration-aware hardware config. Two
         sources for the same number means the tile grid previewed here can
         differ from the grid the scope scans, and the user cannot tell which is
-        right. See py2flamingo.utils.fov.
+        right. See py2flamingo.configs.fov.
         """
-        from py2flamingo.utils.fov import resolve_fov_mm
+        from py2flamingo.configs.fov import resolve_fov_mm
 
         try:
             return resolve_fov_mm(self._app, log=self._logger)

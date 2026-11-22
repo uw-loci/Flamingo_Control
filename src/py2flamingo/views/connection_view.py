@@ -1238,7 +1238,7 @@ class ConnectionView(QWidget):
         """Pixel size, and a mismatch notice, for the settings readout.
 
         Every tile grid the client draws or scans derives from one pixel size
-        (py2flamingo.utils.fov). Two sources exist — the calibration-aware
+        (py2flamingo.configs.fov). Two sources exist — the calibration-aware
         hardware config, which wins, and the firmware's magnification-derived
         value — and they can drift apart without anything visibly breaking
         until a tile grid comes out the wrong size.
@@ -1249,7 +1249,7 @@ class ConnectionView(QWidget):
         line must not be able to break the settings readout.
         """
         try:
-            from py2flamingo.utils.fov import compare_pixel_size_sources
+            from py2flamingo.configs.fov import compare_pixel_size_sources
 
             # compare_pixel_size_sources() reads `app.camera_service`; this view
             # is handed the service directly, so wrap it in that shape.

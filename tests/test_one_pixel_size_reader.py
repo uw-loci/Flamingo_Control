@@ -1,6 +1,6 @@
 """One reader of the effective pixel size, and no guessed fallback.
 
-``utils.fov.effective_pixel_size_um`` replaces two identical dialog methods
+``configs.fov.effective_pixel_size_um`` replaces two identical dialog methods
 (tile collection, LED overview results). The Stage Repeatability dialog fell
 back to 0.406 um/px (the 16x objective's) when the config could not say,
 which turns every measured shift into a wrong number of micrometers; it now
@@ -19,7 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 class EffectivePixelSize(unittest.TestCase):
     def test_reads_the_hardware_config(self):
-        from py2flamingo.utils.fov import effective_pixel_size_um
+        from py2flamingo.configs.fov import effective_pixel_size_um
 
         hw = SimpleNamespace(effective_pixel_size_um=1.0475)
         with patch(
@@ -28,7 +28,7 @@ class EffectivePixelSize(unittest.TestCase):
             self.assertEqual(effective_pixel_size_um(), 1.0475)
 
     def test_unknown_is_none_not_a_guess(self):
-        from py2flamingo.utils.fov import effective_pixel_size_um
+        from py2flamingo.configs.fov import effective_pixel_size_um
 
         for hw in (SimpleNamespace(effective_pixel_size_um=0.0), RuntimeError("no")):
             kw = (
@@ -59,7 +59,7 @@ class StageRepeatabilityRefusesAnUnknownPixelSize(unittest.TestCase):
         self.addCleanup(dlg.deleteLater)
         dlg._latest_frame = np.zeros((8, 8), dtype=np.uint16)
         with patch(
-            "py2flamingo.utils.fov.effective_pixel_size_um", return_value=None
+            "py2flamingo.configs.fov.effective_pixel_size_um", return_value=None
         ), patch.object(mod.QMessageBox, "warning") as warn, patch.object(
             mod, "_RepeatabilityWorker"
         ) as worker:

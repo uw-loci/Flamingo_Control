@@ -1050,7 +1050,7 @@ class MVCConnectionService:
         Retrieve the microscope settings (ScopeSettings.txt, or its legacy
         form built from the 2026-10-06+ metadata document).
 
-        The pixel size is not computed here: utils/fov and
+        The pixel size is not computed here: configs/fov and
         configs/config_loader.get_hardware_config are its one source, and
         they read the ScopeSettings.txt this writes.
 

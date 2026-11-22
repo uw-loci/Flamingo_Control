@@ -34,6 +34,7 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo import _version
+from py2flamingo.configs.fov import effective_pixel_size_um
 from py2flamingo.models.data.workflow import StackSettings, Workflow, WorkflowType
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.progress_estimator import (
@@ -48,7 +49,6 @@ from py2flamingo.services.tiff_size_validator import (
     validate_workflow_params,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.utils.fov import effective_pixel_size_um
 from py2flamingo.utils.limited_acquisition import (
     ArmSelection,
     choose_illumination_arms,

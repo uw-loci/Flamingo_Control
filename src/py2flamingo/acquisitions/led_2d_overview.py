@@ -269,10 +269,10 @@ class LED2DOverviewAcquisition(QObject):
         with an unknown FOV, since it drives stage movement.
 
         The resolution order (calibration > ScopeSettings > YAML, firmware only
-        as a fallback) now lives in py2flamingo.utils.fov so the dialog's tile
+        as a fallback) now lives in py2flamingo.configs.fov so the dialog's tile
         preview and this scan cannot disagree about how big a tile is.
         """
-        from py2flamingo.utils.fov import resolve_fov_mm
+        from py2flamingo.configs.fov import resolve_fov_mm
 
         try:
             return resolve_fov_mm(self._app, log=logger)

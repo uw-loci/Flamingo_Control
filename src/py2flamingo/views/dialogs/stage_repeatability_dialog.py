@@ -251,7 +251,7 @@ class StageRepeatabilityDialog(PersistentDialog):
     def _update_pixel_label(self) -> Optional[float]:
         """Show the pixel size the run will use; None (shown as unknown) when
         the hardware config cannot say."""
-        from py2flamingo.utils.fov import effective_pixel_size_um
+        from py2flamingo.configs.fov import effective_pixel_size_um
 
         px = effective_pixel_size_um()
         self._pixel_label.setText(f"{px:.4f}" if px else "unknown")
