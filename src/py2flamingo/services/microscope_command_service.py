@@ -851,6 +851,44 @@ class MicroscopeCommandService:
     # COMPATIBILITY METHODS - For consolidating all send_command implementations
     # ============================================================================
 
+    def exchange_frame(
+        self,
+        packet: bytes,
+        reply_codes,
+        timeout: float = DEFAULT_REPLY_TIMEOUT_S,
+    ) -> Optional[Dict[str, Any]]:
+        """Send an encoded frame (and any payload after it) and return the reply.
+
+        For the diagnostic commands (``services/position_debug.py``), which
+        show the whole reply. With the background reader the reply is the
+        first frame with one of ``reply_codes`` (one code or several), matched
+        by the reader. Returns the reply's ``frame_fields`` dict plus ``raw``
+        (the 128 bytes) and ``additional_data``, or None on timeout. Without a
+        background reader the next frame on the socket is read here.
+        """
+        from py2flamingo.core.frames import frame_fields
+
+        if getattr(self.connection, "has_async_reader", False):
+            message = self.connection.send_command_async(
+                packet, reply_codes, timeout=timeout
+            )
+            if message is None:
+                return None
+            fields = frame_fields(message)
+            fields["raw"] = message.raw_data
+            fields["additional_data"] = message.additional_data or b""
+            return fields
+        self._write(packet)
+        sock = self.connection._command_socket
+        raw = self._receive_full_bytes(sock, 128, timeout=timeout)
+        fields = self._parse_response(raw)
+        fields["raw"] = raw
+        extra = b""
+        if fields["reserved"]:
+            extra = self._receive_full_bytes(sock, fields["reserved"], timeout)
+        fields["additional_data"] = extra
+        return fields
+
     def send_command_raw(
         self,
         command_code: int,

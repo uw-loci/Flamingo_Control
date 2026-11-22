@@ -72,10 +72,10 @@ class TestEveryReaderAgrees(unittest.TestCase):
         self.assertTrue(decoded["valid"])
 
     def test_the_service_dicts_match_the_reader(self):
-        from py2flamingo.controllers.motion_tracker import MotionTracker
         from py2flamingo.services.microscope_command_service import (
             MicroscopeCommandService,
         )
+        from py2flamingo.services.motion_tracker import MotionTracker
 
         raw = _frame()
         expected = frame_fields(parse_frame(raw))

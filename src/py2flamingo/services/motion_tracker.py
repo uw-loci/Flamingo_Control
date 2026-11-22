@@ -39,6 +39,22 @@ class MotionTracker:
 
     STAGE_MOTION_STOPPED = StageCommands.MOTION_STOPPED  # 0x6010
 
+    @classmethod
+    def for_connection_service(cls, connection_service) -> Optional["MotionTracker"]:
+        """The tracker for an ``MVCConnectionService``, or None without a socket.
+
+        Uses the background reader's callbacks when the connection runs one
+        (always, in the app) and the raw command socket only for the
+        synchronous fallback. Built here, in the services layer, so callers
+        above it never touch the connection's socket.
+        """
+        command_socket = getattr(connection_service, "_command_socket", None)
+        if not command_socket:
+            return None
+        # MVCConnectionService wraps the TCPConnection that owns the reader.
+        tcp_conn = getattr(connection_service, "tcp_connection", None)
+        return cls(command_socket=command_socket, connection=tcp_conn)
+
     def __init__(
         self,
         command_socket: Optional[socket.socket] = None,

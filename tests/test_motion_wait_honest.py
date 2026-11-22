@@ -40,7 +40,7 @@ def _controller(connection):
 
 class TestArmedBeforeTheMove(SyntheticScopeCase):
     def test_a_fast_stop_is_not_missed(self):
-        from py2flamingo.controllers.motion_tracker import MotionTracker
+        from py2flamingo.services.motion_tracker import MotionTracker
 
         pc = _controller(self.connection)
         self.assertIsNotNone(pc._motion_tracker)

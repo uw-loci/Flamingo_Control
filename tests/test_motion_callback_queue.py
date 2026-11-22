@@ -41,7 +41,7 @@ class _Msg:
 
 def _tracker():
     pytest.importorskip("PyQt5")
-    from py2flamingo.controllers.motion_tracker import MotionTracker
+    from py2flamingo.services.motion_tracker import MotionTracker
 
     t = MotionTracker.__new__(MotionTracker)
     t._callback_queue = queue.Queue(maxsize=100)
@@ -95,7 +95,7 @@ class TestTheWaitWindowIsClosedOnEveryPath:
 
         return (
             Path(__file__).resolve().parents[1]
-            / "src/py2flamingo/controllers/motion_tracker.py"
+            / "src/py2flamingo/services/motion_tracker.py"
         ).read_text(encoding="utf-8")
 
     def test_the_flag_is_cleared_in_a_finally_block(self):

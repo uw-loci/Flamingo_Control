@@ -142,20 +142,14 @@ class PositionController:
         """
         try:
             if self.connection.is_connected():
-                from py2flamingo.controllers.motion_tracker import MotionTracker
+                from py2flamingo.services.motion_tracker import MotionTracker
 
-                # Get the underlying TCPConnection which has the async reader
-                # MVCConnectionService wraps TCPConnection as tcp_connection attribute
-                tcp_conn = getattr(self.connection, "tcp_connection", None)
-                command_socket = self.connection._command_socket
+                # Async mode when the connection runs the background reader;
+                # None when there is no command socket.
+                tracker = MotionTracker.for_connection_service(self.connection)
 
-                if command_socket:
-                    # Pass both socket and TCPConnection to support async/sync modes
-                    # MotionTracker will use async mode if TCPConnection has async reader
-                    self._motion_tracker = MotionTracker(
-                        command_socket=command_socket,
-                        connection=tcp_conn,  # Pass TCPConnection, not MVCConnectionService
-                    )
+                if tracker is not None:
+                    self._motion_tracker = tracker
                     # Log which mode is active
                     if self._motion_tracker._use_async_mode():
                         self.logger.info("Motion tracker initialized (async mode)")
@@ -1399,7 +1393,7 @@ class PositionController:
     def _debug_helper(self):
         """Lazy-initialized debug helper for diagnostic commands."""
         if not hasattr(self, "_debug_helper_instance"):
-            from py2flamingo.controllers.position_debug import PositionDebugHelper
+            from py2flamingo.services.position_debug import PositionDebugHelper
 
             self._debug_helper_instance = PositionDebugHelper(self.connection)
         return self._debug_helper_instance

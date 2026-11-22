@@ -221,7 +221,7 @@ class TestReferenceLayout(WireBytesCase):
         self.step("live view stop", camera.stop_live_view)
         self.step("system state", c.query_system_state)
         self.step("drives query", c.query_available_drives)
-        from py2flamingo.controllers.position_debug import PositionDebugHelper
+        from py2flamingo.services.position_debug import PositionDebugHelper
 
         helper = PositionDebugHelper(c)
         self.step(

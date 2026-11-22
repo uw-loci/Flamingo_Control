@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import threading
 
-from py2flamingo.controllers.position_debug import PositionDebugHelper
 from py2flamingo.models.command import Command
+from py2flamingo.services.position_debug import PositionDebugHelper
 from py2flamingo.services.stage_service import StageService
 from tests.synthetic_scope_case import SyntheticScopeCase, wait_until
 

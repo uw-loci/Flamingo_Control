@@ -1076,7 +1076,7 @@ class LED2DOverviewAcquisition(QObject):
 
         tracker = None
         try:
-            from py2flamingo.controllers.motion_tracker import MotionTracker
+            from py2flamingo.services.motion_tracker import MotionTracker
 
             tcp_conn = getattr(self._app.connection_service, "tcp_connection", None)
             if tcp_conn is not None:

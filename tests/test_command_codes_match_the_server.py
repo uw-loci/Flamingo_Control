@@ -210,14 +210,14 @@ class TestTheLogLabelTable:
 
 
 def _tables():
-    from py2flamingo.controllers.motion_tracker import MotionTracker
     from py2flamingo.controllers.position_controller import PositionController
-    from py2flamingo.controllers.position_debug import PositionDebugHelper
     from py2flamingo.core import command_codes as cc
     from py2flamingo.core.socket_reader import ProtocolCommands
     from py2flamingo.services import safe_state
     from py2flamingo.services.camera_service import CameraCommandCode
     from py2flamingo.services.laser_led_service import LaserLEDCommandCode
+    from py2flamingo.services.motion_tracker import MotionTracker
+    from py2flamingo.services.position_debug import PositionDebugHelper
     from py2flamingo.services.stage_service import StageCommandCode
 
     return {

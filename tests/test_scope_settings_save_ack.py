@@ -23,10 +23,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from py2flamingo.controllers.position_debug import (  # noqa: E402
+from py2flamingo.core.frames import frame_fields, parse_frame  # noqa: E402
+from py2flamingo.services.position_debug import (  # noqa: E402
     PositionDebugHelper,
 )
-from py2flamingo.core.frames import frame_fields, parse_frame  # noqa: E402
 
 SCOPE_SETTINGS = 0x1007
 MESSAGE_FROM_CONTROLLER = 0x1006

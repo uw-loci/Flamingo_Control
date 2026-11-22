@@ -1,6 +1,8 @@
-"""Position controller debug/diagnostic utilities.
+"""Debug/diagnostic commands for the Connection tab and the Pixel Calibrator.
 
-Contains PositionDebugHelper, used by the Connection tab's debug buttons and
+Contains PositionDebugHelper (reached through
+``PositionController.debug_query_command`` / ``debug_save_settings``), used by
+the Connection tab's debug buttons and
 by the Pixel Calibrator's "push magnification to the scope". Every command
 goes through the command service (``MicroscopeCommandService``): the one
 locked writer, and replies matched by the background reader. Nothing here
@@ -71,11 +73,8 @@ class PositionDebugHelper:
         The reply is matched by the background reader (any of
         ``reply_codes``, default the same code). Returns the reply as
         ``frame_fields`` dict plus ``raw`` (the 128 bytes), or None on
-        timeout. Without a background reader the command service's
-        synchronous path is used.
+        timeout (``MicroscopeCommandService.exchange_frame``).
         """
-        from py2flamingo.core.frames import frame_fields
-
         packet = self.connection.encoder.encode_command(
             code=code,
             status=0,
@@ -84,27 +83,9 @@ class PositionDebugHelper:
             data=b"",
             additional_data_size=len(payload),
         )
-        if getattr(self.connection, "has_async_reader", False):
-            message = self.connection.send_command_async(
-                packet + payload, reply_codes or code, timeout=timeout
-            )
-            if message is None:
-                return None
-            fields = frame_fields(message)
-            fields["raw"] = message.raw_data
-            fields["additional_data"] = message.additional_data or b""
-            return fields
-        service = self._commands()
-        service._write(packet + payload)
-        sock = self.connection._command_socket
-        raw = service._receive_full_bytes(sock, 128, timeout=timeout)
-        fields = service._parse_response(raw)
-        fields["raw"] = raw
-        extra = b""
-        if fields["reserved"]:
-            extra = service._receive_full_bytes(sock, fields["reserved"], timeout)
-        fields["additional_data"] = extra
-        return fields
+        return self._commands().exchange_frame(
+            packet + payload, reply_codes or code, timeout=timeout
+        )
 
     def debug_query_command(self, command_code: int, command_name: str) -> dict:
         """Send a command and return parsed response for debugging.
