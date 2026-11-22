@@ -10,8 +10,8 @@ movement, validation, and position tracking.
 import logging
 import socket
 import threading
-from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Tuple
 
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
@@ -28,6 +28,16 @@ class AxisCode:
     Y = 2
     Z = 3
     R = 4
+
+
+@dataclass
+class EmergencyStopResult:
+    """What an emergency stop managed to do."""
+
+    halt_sent: bool
+    workflow_stop_sent: bool
+    #: (name, error) per cancelled client operation; error None = cancelled.
+    cancelled: List[Tuple[str, Optional[str]]] = field(default_factory=list)
 
 
 class PositionController:
@@ -92,9 +102,6 @@ class PositionController:
         # Max size is loaded from microscope-specific settings
         self._position_history: List[Position] = []
         self._max_history_size = self._config_service.get_position_history_max_size()
-
-        # Emergency stop flag
-        self._emergency_stop_active = False
 
         # Try to initialize position from microscope settings
         self._initialize_position()
@@ -869,75 +876,81 @@ class PositionController:
         # Use move_to_position to move all axes to home
         self.move_to_position(home_position, validate=True)
 
-    def emergency_stop(self) -> None:
-        """
-        Emergency stop - halt all stage movement immediately.
+    @property
+    def _emergency_stop_active(self) -> bool:
+        """The emergency-stop latch, kept in ``stage_motion_gate``.
 
-        This sends the HALT command to the hardware to physically stop motion,
-        then sets a flag that prevents new movements. The emergency stop state
-        must be cleared before movements can resume.
+        It lives there so StageService.move_to_position (the LED overview and
+        workflow queue path) refuses moves too, not only this controller.
+        """
+        from py2flamingo.services import stage_motion_gate
+
+        return stage_motion_gate.is_emergency_stop_active()
+
+    def emergency_stop(self) -> "EmergencyStopResult":
+        """
+        Emergency stop: halt all stage motion and stop what drives it.
+
+        In this order, each step on its own:
+
+        1. HALT (0x6003, int32Data0 = 0xFF, every axis), fire-and-forget on
+           the socket that is open now. No reconnect, no wait for a reply.
+        2. Latch the stop in ``stage_motion_gate``: every stage move from
+           every path is refused until an operator clears it.
+        3. WORKFLOW_STOP, fire-and-forget, for a server workflow.
+        4. Cancel the client operations that registered a stop hook (the
+           workflow queue, the LED 2D overview).
+
+        Returns:
+            EmergencyStopResult; ``halt_sent`` False means HALT did NOT leave
+            this computer and the stage may still be moving.
 
         WARNING: This may leave the stage in an unknown position.
         """
+        from py2flamingo.services import safe_state, stage_motion_gate
+
         self.logger.warning(
             "EMERGENCY STOP ACTIVATED - Sending HALT command to hardware"
         )
+        # HALT for every axis. int32Data0 must name the axes: the server runs
+        # a stage command only for axis 1-4 or STAGE_AXIS_ALL (0xFF) and
+        # silently drops axis 0 (STAGE_AXIS_NONE), which is what this sent
+        # until 2026-11-19 (StageControl::exeCommandValidAxis,
+        # PIStageBase::halt; the same in the 3.0.0 server).
+        halt_sent = safe_state.halt_all_axes(self.connection)
+        stage_motion_gate.latch_emergency_stop()
+        workflow_stop_sent = safe_state.stop_workflow(self.connection)
+        cancelled = stage_motion_gate.run_stop_hooks()
 
-        # CRITICAL: Send HALT command to hardware FIRST to stop physical motion
-        try:
-            from py2flamingo.core.command_codes import StageCommands
-            from py2flamingo.models.command import Command
-            from py2flamingo.services.stage_service import AxisCode
-
-            # HALT (0x6003) for every axis. int32Data0 must name the axes: the
-            # server runs a stage command only for axis 1-4 or STAGE_AXIS_ALL
-            # (0xFF) and silently drops axis 0 (STAGE_AXIS_NONE), which is what
-            # this sent until 2026-11-19 (StageControl::exeCommandValidAxis,
-            # PIStageBase::halt; the same in the 3.0.0 server).
-            halt_cmd = Command(
-                code=StageCommands.HALT,
-                parameters={
-                    "params": [0, 0, 0, AxisCode.ALL, 0, 0, 0],
-                    "value": 0.0,
-                },
+        if halt_sent:
+            self.logger.warning("HALT sent (0x6003, all axes)")
+        else:
+            self.logger.critical(
+                "HALT NOT SENT - the stage may still be moving. Use the "
+                "instrument's own stop."
             )
-
-            if self.connection.is_connected():
-                self.logger.info("Sending HALT (0x6003, all axes) to stop stage motion")
-                self.connection.send_command(halt_cmd)
-                self.logger.info(
-                    "HALT command sent - stage motion should stop immediately"
-                )
-            else:
-                self.logger.warning(
-                    "Not connected - cannot send HALT command to hardware"
-                )
-
-        except Exception as e:
-            self.logger.error(f"Error sending HALT command: {e}", exc_info=True)
-            # Continue with emergency stop flag even if HALT fails
-
-        # Set emergency stop flag to prevent new movements
-        self._emergency_stop_active = True
-
-        # DON'T manually release the lock here - let the background thread handle it
-        # The motion tracker will timeout/complete and release the lock properly
-        # Manually releasing it here causes "release unlocked lock" errors
-        self.logger.info("Emergency stop flag set - no new movements will be accepted")
-        self.logger.info(
-            "Waiting for background motion tracker to timeout and release lock..."
+        # DON'T release the movement lock here: the background motion wait
+        # releases it when it ends; releasing it here causes "release unlocked
+        # lock" errors.
+        return EmergencyStopResult(
+            halt_sent=halt_sent,
+            workflow_stop_sent=workflow_stop_sent,
+            cancelled=cancelled,
         )
 
     def clear_emergency_stop(self) -> None:
         """
-        Clear emergency stop flag and allow movements to resume.
+        Clear the emergency stop and allow movements to resume.
 
-        After clearing, the position may be uncertain. Consider using
-        go_home() to return to a known position.
+        Only an operator action may call this. After clearing, the position
+        may be uncertain. Consider using go_home() to return to a known
+        position.
         """
+        from py2flamingo.services import stage_motion_gate
+
         if self._emergency_stop_active:
             self.logger.info("Clearing emergency stop - movements can resume")
-            self._emergency_stop_active = False
+            stage_motion_gate.clear_emergency_stop()
         else:
             self.logger.debug("Emergency stop already clear")
 

@@ -687,6 +687,17 @@ class StageControlView(QWidget):
         )
         layout.addWidget(self.estop_btn)
 
+        # Clearing is its own button, shown only while the stop is latched, so
+        # a second press of EMERGENCY STOP re-sends HALT and never clears it.
+        self.clear_estop_btn = QPushButton("Clear emergency stop")
+        self.clear_estop_btn.clicked.connect(self._on_clear_emergency_stop_clicked)
+        self.clear_estop_btn.setStyleSheet(
+            f"background-color: {WARNING_COLOR}; color: white; padding: 10px; "
+            "font-weight: bold; font-size: 10pt; border-radius: 4px;"
+        )
+        self.clear_estop_btn.setVisible(False)
+        layout.addWidget(self.clear_estop_btn)
+
         group.setLayout(layout)
         group.setMaximumWidth(500)
         group.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
@@ -890,34 +901,58 @@ class StageControlView(QWidget):
     def _on_emergency_stop_clicked(self) -> None:
         """Handle emergency stop button click.
 
-        Stops current motion immediately and automatically clears the stop
-        flag after 2 seconds so user can resume normal operation.
+        Sends HALT (every press, so a second press retries it), latches the
+        stop and shows whether HALT actually left this computer. The stop
+        stays latched until the operator presses "Clear emergency stop".
         """
-        # Disable button to prevent multiple rapid clicks
-        self.estop_btn.setEnabled(False)
+        try:
+            result = self.movement_controller.halt_motion()
+            halt_sent = bool(getattr(result, "halt_sent", False))
+        except Exception as e:  # noqa: BLE001 - must still show the state
+            self.logger.critical(f"Emergency stop raised: {e}", exc_info=True)
+            halt_sent = False
+        self._estop_halt_sent = halt_sent
+        self._show_emergency_stop_state()
 
-        # Stop current motion
-        self.movement_controller.halt_motion()
-
-        # Show emergency stop status
-        self.motion_status_label.setText("EMERGENCY STOPPED - Clearing in 2s...")
+    def _show_emergency_stop_state(self) -> bool:
+        """Show the latched stop; returns False when no stop is latched."""
+        if not self.movement_controller.position_controller._emergency_stop_active:
+            return False
+        if getattr(self, "_estop_halt_sent", True):
+            text = "EMERGENCY STOPPED - moves blocked until cleared"
+        else:
+            text = (
+                "HALT NOT SENT - the stage may still be moving! Use the "
+                "instrument's own stop. Press EMERGENCY STOP to retry."
+            )
+        self.motion_status_label.setText(text)
         self.motion_status_label.setStyleSheet(
             f"background-color: {ERROR_BG}; color: #c62828; padding: 8px; "
             f"border: 3px solid {ERROR_COLOR}; font-weight: bold; font-size: 10pt;"
         )
+        self.clear_estop_btn.setVisible(True)
+        return True
 
-        # Automatically clear emergency stop after 2 seconds
-        # This allows the user to resume normal operation without manual intervention
-        from PyQt5.QtCore import QTimer
-
-        QTimer.singleShot(2000, self._clear_emergency_stop)
+    def _on_clear_emergency_stop_clicked(self) -> None:
+        """Clear the latched stop after the operator confirms."""
+        reply = QMessageBox.question(
+            self,
+            "Clear Emergency Stop",
+            "Clear the emergency stop and allow stage moves again?\n\n"
+            "The stage position may be uncertain after a stop.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._clear_emergency_stop()
 
     def _clear_emergency_stop(self) -> None:
         """Clear emergency stop flag and restore normal operation."""
         self.movement_controller.position_controller.clear_emergency_stop()
+        self._estop_halt_sent = True
 
-        # Re-enable emergency stop button
         self.estop_btn.setEnabled(True)
+        self.clear_estop_btn.setVisible(False)
 
         # Show cleared status
         self.motion_status_label.setText("Emergency stop cleared - Ready")
@@ -1378,11 +1413,13 @@ class StageControlView(QWidget):
             f"[StageControlView] Received motion_stopped signal for: {axis_name}"
         )
 
-        self.motion_status_label.setText(f"{axis_name} motion complete - Ready")
-        self.motion_status_label.setStyleSheet(
-            f"background-color: {SUCCESS_BG}; color: #2e7d32; padding: 8px; "
-            f"border: 2px solid {SUCCESS_COLOR}; font-weight: bold; font-size: 10pt;"
-        )
+        if not self._show_emergency_stop_state():
+            self.motion_status_label.setText(f"{axis_name} motion complete - Ready")
+            self.motion_status_label.setStyleSheet(
+                f"background-color: {SUCCESS_BG}; color: #2e7d32; padding: 8px; "
+                f"border: 2px solid {SUCCESS_COLOR}; font-weight: bold; "
+                "font-size: 10pt;"
+            )
 
         # Re-enable controls
         logger.info("[StageControlView] Re-enabling controls")
@@ -1411,11 +1448,13 @@ class StageControlView(QWidget):
         self.message_label.setText(f"Error: {message}")
         self.message_label.setStyleSheet(f"color: {ERROR_COLOR}; padding: 6px;")
 
-        self.motion_status_label.setText("Error - Ready")
-        self.motion_status_label.setStyleSheet(
-            f"background-color: {ERROR_BG}; color: #c62828; padding: 8px; "
-            f"border: 2px solid {ERROR_COLOR}; font-weight: bold; font-size: 10pt;"
-        )
+        if not self._show_emergency_stop_state():
+            self.motion_status_label.setText("Error - Ready")
+            self.motion_status_label.setStyleSheet(
+                f"background-color: {ERROR_BG}; color: #c62828; padding: 8px; "
+                f"border: 2px solid {ERROR_COLOR}; font-weight: bold; "
+                "font-size: 10pt;"
+            )
 
         # Re-enable controls
         self._set_controls_enabled(True)

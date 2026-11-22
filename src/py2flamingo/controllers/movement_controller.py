@@ -378,10 +378,21 @@ class MovementController(QObject):
 
         return self.move_absolute(axis, axis_map[axis], verify=True)
 
-    def halt_motion(self) -> None:
-        """Emergency stop - halt all stage motion immediately."""
-        self.position_controller.emergency_stop()
-        self.error_occurred.emit("EMERGENCY STOP - All motion halted")
+    def halt_motion(self):
+        """Emergency stop - halt all stage motion immediately.
+
+        Returns the controller's EmergencyStopResult; ``halt_sent`` False means
+        HALT never left this computer.
+        """
+        result = self.position_controller.emergency_stop()
+        if getattr(result, "halt_sent", False):
+            self.error_occurred.emit("EMERGENCY STOP - HALT sent to all axes")
+        else:
+            self.error_occurred.emit(
+                "EMERGENCY STOP - HALT NOT SENT. The stage may still be moving: "
+                "use the instrument's own stop."
+            )
+        return result
 
     # ============================================================================
     # Position Verification

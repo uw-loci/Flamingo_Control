@@ -30,12 +30,23 @@ service behave exactly as before.
 The emergency stop is NOT gated: ``PositionController.emergency_stop`` sends
 HALT directly and never passes through ``_move_axis``. Stopping motion must
 always be possible.
+
+The emergency-stop LATCH lives here too, for the same reason: both funnels
+consult it. Until 2026-11-22 it was a flag on ``PositionController`` that
+``StageService.move_to_position`` never saw, so the LED overview and the
+workflow queue kept moving the stage after an emergency stop. The latch is
+cleared only by :func:`clear_emergency_stop`, which only an operator action
+calls.
+
+Long-running client operations (the workflow queue, the LED 2D overview)
+register a stop hook while they run; the emergency stop calls every hook.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
+import threading
+from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +63,71 @@ SETUP_DOCS_PATH = (
 
 class MicroscopeNotConfiguredError(RuntimeError):
     """Raised when a stage move is attempted on a scope with no known limits."""
+
+
+class EmergencyStopActiveError(RuntimeError):
+    """Raised when a stage move is attempted while the emergency stop is latched."""
+
+
+EMERGENCY_STOP_MESSAGE = (
+    "Movement blocked - emergency stop active. Clear the emergency stop first."
+)
+
+_estop_lock = threading.Lock()
+_estop_active = False
+_stop_hooks: Dict[str, Callable[[], None]] = {}
+
+
+def latch_emergency_stop() -> None:
+    """Block every stage move until :func:`clear_emergency_stop` is called."""
+    global _estop_active
+    with _estop_lock:
+        _estop_active = True
+    logger.critical("EMERGENCY STOP latched: stage moves are refused until cleared")
+
+
+def clear_emergency_stop() -> None:
+    """Allow stage moves again. Only an operator action may call this."""
+    global _estop_active
+    with _estop_lock:
+        was = _estop_active
+        _estop_active = False
+    if was:
+        logger.warning("Emergency stop cleared by the operator; moves allowed again")
+
+
+def is_emergency_stop_active() -> bool:
+    return _estop_active
+
+
+def register_stop_hook(name: str, hook: Callable[[], None]) -> None:
+    """Have the emergency stop call ``hook`` (a cancel) while ``name`` runs."""
+    with _estop_lock:
+        _stop_hooks[name] = hook
+
+
+def unregister_stop_hook(name: str) -> None:
+    with _estop_lock:
+        _stop_hooks.pop(name, None)
+
+
+def run_stop_hooks() -> List[Tuple[str, Optional[str]]]:
+    """Call every registered stop hook, each in its own try.
+
+    Returns ``(name, error)`` per hook; ``error`` is None when it returned.
+    """
+    with _estop_lock:
+        hooks = list(_stop_hooks.items())
+    results = []
+    for name, hook in hooks:
+        try:
+            hook()
+            logger.warning(f"Emergency stop: cancelled {name}")
+            results.append((name, None))
+        except Exception as e:  # noqa: BLE001 - the next hook must still run
+            logger.error(f"Emergency stop: cancelling {name} failed: {e}")
+            results.append((name, str(e)))
+    return results
 
 
 # None => motion allowed. A string => blocked, and the string says why.
@@ -81,11 +157,17 @@ def motion_block_reason() -> Optional[str]:
 
 
 def is_motion_allowed() -> bool:
-    return _block_reason is None
+    return _block_reason is None and not _estop_active
 
 
 def ensure_motion_allowed() -> None:
-    """Raise :class:`MicroscopeNotConfiguredError` when motion is blocked."""
+    """Raise when a stage move must not be sent.
+
+    :class:`EmergencyStopActiveError` while the emergency stop is latched,
+    :class:`MicroscopeNotConfiguredError` when the limits are unknown.
+    """
+    if _estop_active:
+        raise EmergencyStopActiveError(EMERGENCY_STOP_MESSAGE)
     if _block_reason is not None:
         raise MicroscopeNotConfiguredError(_block_reason)
 

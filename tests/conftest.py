@@ -78,9 +78,14 @@ def _reset_stage_motion_gate():
     """
     from py2flamingo.services import stage_motion_gate
 
-    stage_motion_gate.set_motion_blocked(None)
+    def reset():
+        stage_motion_gate.set_motion_blocked(None)
+        stage_motion_gate.clear_emergency_stop()
+        stage_motion_gate._stop_hooks.clear()
+
+    reset()
     yield
-    stage_motion_gate.set_motion_blocked(None)
+    reset()
 
 
 @pytest.fixture(autouse=True)

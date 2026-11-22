@@ -638,6 +638,11 @@ class LED2DOverviewWorkflow(QObject):
         self._results = []
         self._current_rotation_idx = 0
 
+        # The emergency stop cancels the scan while it runs.
+        from py2flamingo.services import stage_motion_gate
+
+        stage_motion_gate.register_stop_hook("LED 2D overview", self.cancel)
+
         # Record where the stage is right now, before any scan move, so we can
         # return it here when the scan ends (completion, cancel, or error).
         self._capture_origin_position()

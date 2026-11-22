@@ -249,6 +249,11 @@ class WorkflowQueueService(QObject):
         self._is_running = True
         self._cancel_requested = False
 
+        # The emergency stop cancels the queue while it runs.
+        from py2flamingo.services import stage_motion_gate
+
+        stage_motion_gate.register_stop_hook("workflow queue", self.cancel)
+
         # Start execution in background thread
         self._execution_thread = threading.Thread(
             target=self._execute_queue, name="WorkflowQueueExecution", daemon=True
@@ -854,6 +859,9 @@ class WorkflowQueueService(QObject):
         finally:
             self._is_running = False
             self._unregister_callbacks()
+            from py2flamingo.services import stage_motion_gate
+
+            stage_motion_gate.unregister_stop_hook("workflow queue")
 
     def _execute_single_workflow(self, item: WorkflowQueueItem) -> tuple:
         """
