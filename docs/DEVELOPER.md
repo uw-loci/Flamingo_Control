@@ -170,7 +170,7 @@ All inter-thread communication uses centralized queues/events:
 - `visualize_event` - Signal update display
 - `processing_event` - Processing in progress
 
-**Access:** `services/component_factory.py` builds one `QueueManager` and one
+**Access:** `component_factory.py` builds one `QueueManager` and one
 `EventManager` at startup; `FlamingoApplication` keeps them (`app.queue_manager`) and
 passes them to the services that need them.
 

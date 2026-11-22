@@ -189,7 +189,7 @@ First, ensure you have a connection service instance:
 from py2flamingo.services.camera_service import CameraService
 
 # `connection` is the application's MVCConnectionService
-# (services/component_factory.py builds it; FlamingoApplication.connection_service)
+# (component_factory.py builds it; FlamingoApplication.connection_service)
 
 # Create camera service
 camera_service = CameraService(connection)

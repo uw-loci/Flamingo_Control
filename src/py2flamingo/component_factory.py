@@ -3,6 +3,10 @@ Component Factory - Creates application components by architectural layer.
 
 Extracts component creation from FlamingoApplication.setup_dependencies() into
 focused factory functions, one per layer. Each returns a dict of named components.
+
+This is the composition root: the one module that knows every layer, which is
+why it sits at the package root beside ``application`` and not in ``services``
+(see docs/architecture.md).
 """
 
 import logging

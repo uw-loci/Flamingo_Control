@@ -8,7 +8,7 @@ This module provides the main FlamingoApplication class that handles:
 - Lazy Sample View creation
 - Main window composition
 
-Component creation is handled by services.component_factory.
+Component creation is handled by component_factory.
 Signal wiring is handled by services.signal_wiring.
 Voxel storage creation is handled by visualization.voxel_storage_factory.
 """
@@ -20,7 +20,7 @@ from typing import Optional
 from PyQt5.QtCore import QObject, Qt, pyqtSignal
 from PyQt5.QtWidgets import QApplication
 
-from py2flamingo.services.component_factory import (
+from py2flamingo.component_factory import (
     create_controllers_layer,
     create_core_layer,
     create_models_layer,
@@ -141,7 +141,7 @@ class FlamingoApplication(QObject):
     def setup_dependencies(self):
         """Create and wire all application components using dependency injection.
 
-        Delegates to factory functions in services.component_factory for creation
+        Delegates to factory functions in component_factory for creation
         and services.signal_wiring for signal connections.
         """
         self.logger.info("Setting up application dependencies...")
