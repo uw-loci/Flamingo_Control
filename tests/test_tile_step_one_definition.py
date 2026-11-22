@@ -77,27 +77,27 @@ def _run_auto_tiling(extent_x_mm, extent_y_mm):
     runner = WorkflowRunner()
     runner._get_input = lambda n, p, c, name: obj if name == "position" else None
     runner.run(node, pipeline, ctx)
-    return facade.get_current_workflow()
+    from py2flamingo.utils.workflow_keys import workflow_sections
+
+    return workflow_sections(facade.started[-1])
 
 
 def test_auto_tiling_images_the_tiles_it_counted():
     wf = _run_auto_tiling(2.0, 1.0)
-    tiles = wf.tile_settings
-    # 2.0 mm and 1.0 mm plus 25 % each side, at 0.52 mm and 10 % overlap.
-    assert (tiles.num_tiles_x, tiles.num_tiles_y) == (7, 4)
+    start, end, stack = wf["Start Position"], wf["End Position"], wf["Stack Settings"]
+    sx, ex = float(start["X (mm)"]), float(end["X (mm)"])
+    sy, ey = float(start["Y (mm)"]), float(end["Y (mm)"])
+    # The server reads Stack option settings 1/2 as the overlap percent.
+    assert stack["Stack option"] == "Tile"
+    overlap_x = float(stack["Stack option settings 1"])
+    overlap_y = float(stack["Stack option settings 2"])
+    assert (overlap_x, overlap_y) == (10.0, 10.0)
+    # 2.0 mm and 1.0 mm plus 25 % each side, at 0.52 mm and 10 % overlap:
+    # the grid the server lays from the text that was sent.
     geo = compute_tile_geometry(
-        wf.start_position.x,
-        wf.end_position.x,
-        wf.start_position.y,
-        wf.end_position.y,
-        0.0,
-        0.0,
-        0.52,
-        0.52,
-        tiles.overlap_percent,
-        tiles.overlap_percent,
+        sx, ex, sy, ey, 0.0, 0.0, 0.52, 0.52, overlap_x, overlap_y
     )
     assert (geo.tiles_x, geo.tiles_y) == (7, 4)
     # centered on the object
-    assert (wf.start_position.x + wf.end_position.x) / 2 == pytest.approx(10.0)
-    assert (wf.start_position.y + wf.end_position.y) / 2 == pytest.approx(12.0)
+    assert (sx + ex) / 2 == pytest.approx(10.0)
+    assert (sy + ey) / 2 == pytest.approx(12.0)

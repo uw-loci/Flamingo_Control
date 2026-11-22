@@ -111,26 +111,41 @@ class StubWorkflowFacade:
     Useful when running a pipeline in non-hardware mode and you want
     ``WorkflowRunner`` to short-circuit to ``COMPLETED`` on the first poll.
     Does NOT touch the microscope or write any files.
+
+    Works on workflow text, as the live ``MVCWorkflowService`` does:
+    ``load_workflow`` returns the template's bytes (a placeholder Z-stack when
+    the file is not on this computer) and ``start_workflow`` records the bytes
+    it was given, with the node's overrides applied, in ``started``.
     """
+
+    #: The runner refuses a facade that cannot say when a workflow finished.
+    reports_workflow_completion = True
+    #: Nothing here moves a stage, so the runner skips the stage-limit check.
+    drives_stage = False
 
     def __init__(self):
         self._calls = 0
         self._current = None
+        self.started: list = []
 
-    def load_workflow(self, _path):
+    def load_workflow(self, path):
+        from pathlib import Path
+
+        path = Path(path)
+        if path.is_file():
+            return path.read_bytes()
+        logger.info(
+            "Stub workflow facade: %s is not on this computer; using a "
+            "placeholder template",
+            path,
+        )
+        return _placeholder_template().encode("utf-8")
+
+    def start_workflow(self, workflow_bytes):
         from types import SimpleNamespace
 
-        wf = SimpleNamespace(
-            start_position=SimpleNamespace(x=0.0, y=0.0, z=0.0, r=0.0),
-            stack_settings=None,
-            tile_settings=None,
-            end_position=None,
-            output_path="",
-        )
-        self._current = wf
-        return wf
-
-    def start_workflow(self, _workflow):
+        self.started.append(workflow_bytes)
+        self._current = SimpleNamespace(output_path="", workflow_bytes=workflow_bytes)
         return True
 
     def get_workflow_status(self):
@@ -146,6 +161,29 @@ class StubWorkflowFacade:
 
     def get_current_workflow(self):
         return self._current
+
+
+def _placeholder_template() -> str:
+    """A 10-plane Z-stack at the origin, written by the one workflow writer."""
+    from py2flamingo.utils.workflow_parser import dict_to_workflow_text
+
+    position = {"X (mm)": 0.0, "Y (mm)": 0.0, "Z (mm)": 0.0, "Angle (degrees)": 0.0}
+    return dict_to_workflow_text(
+        {
+            "Experiment Settings": {
+                "Plane spacing (um)": 5.0,
+                "Frame rate (f/s)": 40.0,
+            },
+            "Stack Settings": {
+                "Number of planes": 10,
+                "Change in Z axis (mm)": 0.05,
+                "Z stage velocity (mm/s)": 0.2,
+                "Stack option": "ZStack",
+            },
+            "Start Position": position,
+            "End Position": dict(position, **{"Z (mm)": 0.05}),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------

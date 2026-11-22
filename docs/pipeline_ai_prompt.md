@@ -305,10 +305,12 @@ Every node MUST include exactly these ports with exactly these names, types, and
 | Key | Type | Default | Constraints | Description |
 |-----|------|---------|-------------|-------------|
 | `template_file` | string | `""` | File path (`.txt`) | Path to workflow template file |
-| `use_input_position` | bool | `true` | — | If true, use position from input port instead of current stage |
-| `auto_z_range` | bool | `false` | — | If true, derive Z-range from input object bounding box |
-| `auto_tiling` | bool | `false` | — | If true, auto-compute tiling from object XY extent vs. camera FOV. Single-FOV objects stay 1x1; larger objects get NxM grid with buffer |
+| `use_input_position` | bool | `true` | — | If true, the position on the input port replaces the template's Start Position (End moves with it) |
+| `auto_z_range` | bool | `false` | — | If true, derive Start/End Z and the plane count from the input object's bounding box; the node refuses to run without an object |
+| `auto_tiling` | bool | `false` | — | If true, auto-compute tiling from object XY extent vs. camera FOV. Single-FOV objects stay 1x1; larger objects get NxM grid with buffer; the node refuses to run without an object |
 | `buffer_percent` | float | `25.0` | >= 0 | Extra buffer around bounding box (%) for Z-range and XY tiling |
+
+Every Start and End position the node would send is checked against the stage limits, and the node refuses to run outside them or when they are unknown. The node does not start a workflow on the microscope yet (the workflow service cannot report when it finished); it runs headless and in tests. See `docs/pipeline_json_format.md`, WORKFLOW.
 
 ### THRESHOLD Config
 

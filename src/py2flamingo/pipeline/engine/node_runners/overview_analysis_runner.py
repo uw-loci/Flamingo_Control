@@ -130,7 +130,10 @@ class OverviewAnalysisRunner(AbstractNodeRunner):
             obj = DetectedObject(
                 label_id=i + 1,
                 centroid_voxel=(0.0, cy, cx),  # z=0 for 2D
-                centroid_stage=(cx, cy, 0.0),  # image coords as stage placeholder
+                # Image pixel coordinates, not stage millimeters: marked
+                # unknown so a WORKFLOW node refuses to drive there.
+                centroid_stage=(cx, cy, 0.0),
+                stage_coords_available=False,
                 bounding_box=(
                     slice(0, 1),
                     slice(int(ty * tile_h), int((ty + 1) * tile_h)),

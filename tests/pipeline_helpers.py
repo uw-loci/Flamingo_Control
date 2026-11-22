@@ -47,29 +47,60 @@ def qt_app():
 
 
 class FakeWorkflow:
-    """Minimal workflow object returned by ``FakeWorkflowFacade.load_workflow``.
+    """What ``FakeWorkflowFacade.get_current_workflow`` returns."""
 
-    Has the attributes ``WorkflowRunner`` touches (start_position, stack_settings,
-    tile_settings, end_position, output_path).
-    """
-
-    def __init__(self, output_path: str = "/tmp/fake_workflow_output"):
-        self.start_position = SimpleNamespace(x=0.0, y=0.0, z=0.0, r=0.0)
-        self.stack_settings = None
-        self.tile_settings = None
-        self.end_position = None
+    def __init__(self, output_path: str, workflow_bytes: bytes = b""):
         self.output_path = output_path
+        self.workflow_bytes = workflow_bytes
+
+
+#: A Z-stack template the fake facade loads: 10 planes of 5 um from z = 15.
+FAKE_TEMPLATE = """<Workflow Settings>
+    <Experiment Settings>
+    Plane spacing (um) = 5.0
+    Frame rate (f/s) = 40.0
+    Exposure time (us) = 10000
+    </Experiment Settings>
+    <Stack Settings>
+    Change in Z axis (mm) = 0.050000
+    Number of planes = 10
+    Z stage velocity (mm/s) = 0.2
+    Stack option = ZStack
+    Stack option settings 1 = 0
+    Stack option settings 2 = 0
+    </Stack Settings>
+    <Start Position>
+    X (mm) = 5.000000
+    Y (mm) = 10.000000
+    Z (mm) = 15.000000
+    Angle (degrees) = 0.00
+    </Start Position>
+    <End Position>
+    X (mm) = 5.000000
+    Y (mm) = 10.000000
+    Z (mm) = 15.050000
+    Angle (degrees) = 0.00
+    </End Position>
+</Workflow Settings>
+"""
 
 
 class FakeWorkflowFacade:
-    """Mock ``WorkflowFacade`` that satisfies ``WorkflowRunner``.
+    """Mock workflow facade that satisfies ``WorkflowRunner``.
 
-    ``WorkflowRunner`` polls ``get_workflow_status()`` every 1.0s
-    (``workflow_runner.py:271-293``) until it sees a status whose ``.name`` is
-    one of ``COMPLETED``/``IDLE``/``STOPPED``, or until status is ``None``. By
-    default this fake returns a single ``COMPLETED`` and the runner exits the
-    loop on the first poll, keeping tests fast.
+    Works on workflow text like the live ``MVCWorkflowService``:
+    ``load_workflow`` returns ``template`` as bytes and ``start_workflow``
+    records the bytes it was sent in ``started_workflows``. ``WorkflowRunner``
+    polls ``get_workflow_status()`` every 1.0 s until it sees a status whose
+    ``.name`` is ``COMPLETED``/``IDLE``/``STOPPED``, or until status is
+    ``None``. By default this fake returns a single ``COMPLETED`` and the
+    runner exits the loop on the first poll, keeping tests fast. It drives no
+    stage (``drives_stage``), so the runner skips the stage-limit check unless
+    a test sets it True.
     """
+
+    reports_workflow_completion = True
+    drives_stage = False
 
     def __init__(
         self,
@@ -77,6 +108,7 @@ class FakeWorkflowFacade:
         status_sequence: Optional[Iterable[Any]] = None,
         output_path: str = "/tmp/fake_workflow_output",
         start_workflow_succeeds: bool = True,
+        template: str = FAKE_TEMPLATE,
     ):
         self._status_seq = list(
             status_sequence
@@ -86,18 +118,17 @@ class FakeWorkflowFacade:
         self._calls = 0
         self._output_path = output_path
         self._start_succeeds = start_workflow_succeeds
+        self._template = template
         self._current: Optional[FakeWorkflow] = None
-        self.started_workflows: List[FakeWorkflow] = []
+        self.started_workflows: List[bytes] = []
         self.stop_called = False
 
     def load_workflow(self, _path):
-        wf = FakeWorkflow(output_path=self._output_path)
-        self._current = wf
-        return wf
+        return self._template.encode("utf-8")
 
-    def start_workflow(self, workflow):
-        self.started_workflows.append(workflow)
-        self._current = workflow
+    def start_workflow(self, workflow_bytes):
+        self.started_workflows.append(workflow_bytes)
+        self._current = FakeWorkflow(self._output_path, workflow_bytes)
         return self._start_succeeds
 
     def get_workflow_status(self):

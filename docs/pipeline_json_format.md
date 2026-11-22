@@ -119,9 +119,9 @@ Executes a microscope acquisition workflow (e.g., Z-stack).
 | Key | Panel label | Type | Default | Units | What it does |
 |-----|-------------|------|---------|-------|--------------|
 | `template_file` | Workflow Template | string | `""` | path | The `.txt` workflow template this node acquires with. |
-| `use_input_position` | Override Position from Input | bool | `true` | — | When an object or `(x,y,z[,r])` arrives on the `position` port, it **replaces** the template's start position. **Has no effect while that port is unconnected**, which is the state of a freshly dropped node. |
-| `auto_z_range` | Auto Z-Range from Object | bool | `false` | — | Replaces the template's `z_range_um` with the input object's Z bounding box plus `buffer_percent`. Needs the `z_range` port wired. |
-| `auto_tiling` | Auto Tiling from Object | bool | `false` | — | If the buffered XY extent fits one field of view, tiling is **removed**; otherwise an N×M grid is computed and **both** start and end positions are rewritten around the object's centroid. Overlap comes from the template, or 10% if it has none. Needs the `z_range` port wired. |
+| `use_input_position` | Override Position from Input | bool | `true` | — | When an object or `(x,y,z[,r])` arrives on the `position` port, it **replaces** the template's Start Position, and the End Position moves by the same amount (the template's Z range and tile span are kept). An object has no angle and is taken at `r = 0`. An object without stage coordinates, or anything else on the port, is refused. **Has no effect while that port is unconnected**, which is the state of a freshly dropped node. |
+| `auto_z_range` | Auto Z-Range from Object | bool | `false` | — | Start Z and End Z span the input object's Z bounding box plus `buffer_percent`, at the template's `Plane spacing (um)`; `Number of planes` and `Change in Z axis (mm)` are rewritten to match (range = planes × spacing, rounded up). Needs an object on the `position` or `z_range` port: without one the node **refuses to run** instead of sending the template unchanged. |
+| `auto_tiling` | Auto Tiling from Object | bool | `false` | — | If the buffered XY extent fits one field of view, tiling is **removed** (End X/Y = Start X/Y; a `Tile` template becomes `ZStack`); otherwise an N×M grid is computed and **both** start and end positions are rewritten around the object's centroid as the corner tiles' centers, with `Stack option = Tile` and the overlap percent in `Stack option settings 1/2`. Overlap comes from the template, or 10% if it has none. Needs an object with stage coordinates, as for `auto_z_range`. |
 | `buffer_percent` | BBox Buffer (%) | float | `25.0` | percent | Padding added **at each end of every axis**, so `25` makes the extent **50% larger**. Read only when `auto_z_range` or `auto_tiling` is on. |
 | `config_mode` | *(not shown)* | string | — | — | Legacy. Only honored to warn and skip; present in older saved pipelines. |
 
@@ -134,6 +134,22 @@ Three cautions on the `auto_*` switches, none of them visible in the editor:
   default (see [Limitations](#limitations)), however fine a Z step you asked for.
 - **`auto_tiling` ignores the object's own Z.** Z comes from whatever
   `auto_z_range` left behind.
+
+How the node changes the workflow and when it refuses (since 2026-11-22):
+
+- **Only the values above change.** The template is edited in place
+  (`utils/workflow_parser.edit_workflow_text`); every other line, including
+  keys the app does not know, goes to the server as written.
+- **Every Start and End position is checked against the stage limits**
+  (the settings json narrowed to the server's soft limits) before anything is
+  sent, overridden or not: a template's placeholder origin is refused like any
+  other position outside the limits. Unknown limits refuse the run.
+- **The emergency stop refuses it**, as it refuses every stage move.
+- **The node does not run on the microscope yet.** The workflow service cannot
+  report when a server workflow has finished, so the node would wait 30
+  minutes and then stop the acquisition; it refuses before sending anything.
+  Headless runs (the stub facade) and tests run it. Run the template from the
+  Workflow tab until the node waits through the workflow queue.
 
 ### THRESHOLD
 
@@ -466,10 +482,11 @@ smaller than 8 voxels, and are omitted from the serialized form entirely.
 `equivalent_diameter_um` is always present, since it needs only the volume.
 
 **OVERVIEW_ANALYSIS objects are different.** Its `selected_tiles` carry
-**image pixel coordinates** in `centroid_stage` and `volume_mm3 = 0.0`. Do not
-wire them into a WORKFLOW `position` input — `use_input_position` defaults to
-`true`, so pixel indices would be sent to the stage as millimeters. Use them to
-drive tile selection only.
+**image pixel coordinates** in `centroid_stage` and `volume_mm3 = 0.0`, and
+`stage_coords_available = false` (since 2026-11-22; before, pixel indices wired
+into a WORKFLOW `position` input would have been sent to the stage as
+millimeters). A WORKFLOW node refuses them. Use them to drive tile selection
+only.
 
 ## Limitations
 

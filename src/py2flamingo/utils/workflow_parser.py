@@ -362,15 +362,99 @@ def _required(section: Dict[str, Any], section_name: str, key: str) -> Any:
     return value
 
 
+# Formats of the values that set where the stage goes, shared by the writer
+# (dict_to_workflow_text) and the in-place editor (edit_workflow_text).
+POSITION_FORMATS = (
+    ("X (mm)", ".6f"),
+    ("Y (mm)", ".6f"),
+    ("Z (mm)", ".6f"),
+    ("Angle (degrees)", ".2f"),
+)
+
+
+def format_position(position: Dict[str, Any], name: str) -> Dict[str, str]:
+    """``{key: text}`` for one Start/End Position, as the writer formats it."""
+    return {
+        key: f"{float(_required(position, name, key)):{fmt}}"
+        for key, fmt in POSITION_FORMATS
+    }
+
+
+def edit_workflow_text(text: str, edits: Dict[str, Dict[str, str]]) -> str:
+    """``text`` with the values in ``edits`` (``{section: {key: text}}``)
+    replaced, and every other byte unchanged.
+
+    For changing a few values of a workflow someone else wrote (a pipeline
+    node's template) without passing it through :func:`dict_to_workflow_text`,
+    which writes only the keys it knows, rounds the frame rate to 0.1 f/s and
+    needs numbers where the reader returns text. The values are written as
+    given; format them first (:func:`format_position`).
+
+    A key is replaced in every section of that name, at any depth, wherever
+    it appears (the server and the reader take different occurrences of a
+    repeated key, so all of them get the new value). A key missing from a
+    section is added before that section's closing tag. Raises WorkflowError
+    when a section to edit is not in the text at all: where the stage goes is
+    never guessed.
+    """
+    from py2flamingo.utils.file_handlers import (
+        _KEY_VAL,
+        _SECTION_CLOSE,
+        _SECTION_OPEN,
+    )
+
+    lines = text.splitlines(keepends=True)
+    newline = "\r\n" if "\r\n" in text else "\n"
+    pending = {s: dict(keys) for s, keys in edits.items()}
+    seen_sections = set()
+    out: List[str] = []
+    stack: List[str] = []
+    for raw in lines:
+        body = raw.rstrip("\r\n")
+        ending = raw[len(body) :]
+        line = body.strip()
+        opened = _SECTION_OPEN.match(line)
+        if opened:
+            stack.append(opened.group("name").strip())
+            seen_sections.add(stack[-1])
+            out.append(raw)
+            continue
+        closed = _SECTION_CLOSE.match(line)
+        if closed:
+            name = stack.pop() if stack else ""
+            missing = pending.get(name)
+            if missing:
+                indent = body[: len(body) - len(body.lstrip())]
+                for key, value in missing.items():
+                    out.append(f"{indent}{key} = {value}{ending or newline}")
+                missing.clear()
+            out.append(raw)
+            continue
+        kv = _KEY_VAL.match(line)
+        section = stack[-1] if stack else ""
+        if kv and section in edits and kv.group("k").strip() in edits[section]:
+            key = kv.group("k").strip()
+            head = body[: body.index("=")].rstrip()
+            out.append(f"{head} = {edits[section][key]}{ending}")
+            pending[section].pop(key, None)
+            continue
+        out.append(raw)
+    absent = sorted(set(edits) - seen_sections)
+    if absent:
+        from py2flamingo.core.errors import ErrorCodes, WorkflowError
+
+        raise WorkflowError(
+            f"The workflow has no <{absent[0]}> section to edit; the stage "
+            "position it holds is not filled in with a default.",
+            error_code=ErrorCodes.WORKFLOW_INVALID,
+            context={"sections": absent},
+        )
+    return "".join(out)
+
+
 def _position_lines(lines: List[str], position: Dict[str, Any], name: str) -> None:
-    for key, fmt in (
-        ("X (mm)", ".6f"),
-        ("Y (mm)", ".6f"),
-        ("Z (mm)", ".6f"),
-        ("Angle (degrees)", ".2f"),
-    ):
-        value = float(_required(position, name, key))
-        lines.append(f"    {key} = {value:{fmt}}")
+    for key, text in format_position(position, name).items():
+        lines.append(f"    {key} = {text}")
 
 
 def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:

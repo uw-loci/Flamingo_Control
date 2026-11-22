@@ -120,15 +120,29 @@ class TestWorkflowRefusesAnUnknownPosition:
         obj = _analyze(blob).objects[0]
         assert obj.stage_coords_available is False
 
-        source = Path(
-            Path(__file__).resolve().parents[1]
-            / "src/py2flamingo/pipeline/engine/node_runners/workflow_runner.py"
-        ).read_text()
-        # The guard must sit before the unpack, not after it.
-        guard = source.index("stage_coords_available")
-        unpack = source.index("sx, sy, sz = position_data.centroid_stage")
-        assert guard < unpack
-        assert WorkflowRunner is not None
+        from py2flamingo.pipeline.engine.context import ExecutionContext
+        from py2flamingo.pipeline.models.pipeline import (
+            NodeType,
+            Pipeline,
+            create_node,
+        )
+        from tests.pipeline_helpers import FakeWorkflowFacade
+
+        pipeline = Pipeline()
+        node = create_node(
+            NodeType.WORKFLOW,
+            name="WORKFLOW",
+            config={"template_file": "t.txt", "use_input_position": True},
+        )
+        pipeline.add_node(node)
+        facade = FakeWorkflowFacade()
+        runner = WorkflowRunner()
+        runner._get_input = lambda n, p, c, name: obj if name == "position" else None
+        with pytest.raises(RuntimeError, match="no stage coordinates"):
+            runner.run(
+                node, pipeline, ExecutionContext(services={"workflow_facade": facade})
+            )
+        assert facade.started_workflows == []
 
 
 class TestOverviewSaysWhenItDropsPlanes:

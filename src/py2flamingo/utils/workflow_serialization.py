@@ -113,7 +113,7 @@ def build_workflow_section_dict(
     # Stack settings (copy so the caller's dict is never mutated).
     stack_dict: Dict[str, Any] = dict(stack)
     if workflow_type == WorkflowType.TILE:
-        stack_dict.update(_tile_stack_fields(tiling))
+        stack_dict.update(tile_stack_fields(tiling))
     stack_dict["Camera 1 capture percentage"] = camera["cam1_capture_percentage"]
     stack_dict["Camera 1 capture mode"] = camera["cam1_capture_mode"]
     stack_dict["Camera 2 capture percentage"] = camera["cam2_capture_percentage"]
@@ -124,7 +124,7 @@ def build_workflow_section_dict(
     return workflow_dict
 
 
-def _tile_stack_fields(tiling: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def tile_stack_fields(tiling: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Stack-option fields for a Tile workflow.
 
     Emits ``Stack option = Tile`` and X/Y ``Stack option settings 1/2`` as the
