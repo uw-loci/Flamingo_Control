@@ -78,7 +78,12 @@ class TestTheStopIsLatchedForEveryMovePath(SyntheticScopeCase):
         self.scope.clear_received()
 
         controller.clear_emergency_stop()
-        StageService(self.connection).move_to_position(AxisCode.X_AXIS, 6.0)
+        # Another test may have sent this axis to this value; the duplicate
+        # suppression would then drop the move.
+        from py2flamingo.services import stage_command_dedup
+
+        stage_command_dedup.reset()
+        StageService(self.connection).move_to_position(AxisCode.X_AXIS, 6.5)
         self.assertTrue(
             wait_until(
                 lambda: self.scope.received(StageCommands.POSITION_SET)

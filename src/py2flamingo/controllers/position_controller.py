@@ -60,6 +60,34 @@ class PositionController:
     COMMAND_CODES_STAGE_POSITION_SET = 24580
     COMMAND_CODES_STAGE_POSITION_GET = 24584
 
+    @property
+    def _current_position(self) -> Optional[Position]:
+        with self._position_lock:
+            return self._position_value
+
+    @_current_position.setter
+    def _current_position(self, position: Optional[Position]) -> None:
+        with self._position_lock:
+            self._position_value = position
+            if position is not None:
+                self._position_unknown = False
+
+    @property
+    def position_verified(self) -> bool:
+        """True when the tracked position was read from the hardware after the
+        stage reported that motion stopped."""
+        with self._position_lock:
+            return self._position_verified and self._position_value is not None
+
+    def _set_position_after_move(
+        self, position: Optional[Position], verified: bool
+    ) -> None:
+        """Record the read-back after a move. None marks the position unknown."""
+        with self._position_lock:
+            self._position_value = position
+            self._position_unknown = position is None
+            self._position_verified = verified and position is not None
+
     def __init__(self, connection_service, config_service=None):
         """
         Initialize the position controller.
@@ -74,8 +102,14 @@ class PositionController:
         self.logger = logging.getLogger(__name__)
         self.axis = AxisCode()
 
-        # Local position tracking (microscope doesn't report current position)
-        self._current_position: Optional[Position] = None
+        # Local position tracking. Written by the motion-wait thread and read
+        # by the GUI, so it is behind a lock (see the _current_position
+        # property). "Unknown" means a read-back after a move failed: the
+        # position is None and is NOT re-guessed from the home position.
+        self._position_lock = threading.Lock()
+        self._position_value: Optional[Position] = None
+        self._position_unknown = False
+        self._position_verified = False
         self._movement_lock = threading.Lock()
 
         # Motion tracking for waiting for movement completion
@@ -508,6 +542,24 @@ class PositionController:
             self._movement_lock.release()
             raise
 
+    def _position_for_jog(self) -> Optional[Position]:
+        """The position a jog is relative to.
+
+        When the last read-back failed, read all axes once now (an operator
+        action, not a poll) rather than jog from a guess.
+        """
+        if self._current_position is None and self._position_unknown:
+            from py2flamingo.services.stage_service import StageService
+
+            try:
+                read = StageService(self.connection).get_position()
+            except Exception as e:  # noqa: BLE001
+                self.logger.error(f"Could not read the position before a jog: {e}")
+                read = None
+            if read is not None:
+                self._set_position_after_move(read, verified=True)
+        return self._current_position
+
     def jog_x(self, delta_mm: float) -> None:
         """
         Move X axis by relative amount (jog control).
@@ -519,7 +571,7 @@ class PositionController:
             ValueError: If resulting position is out of bounds
             RuntimeError: If not connected or no current position
         """
-        if self._current_position is None:
+        if self._position_for_jog() is None:
             raise RuntimeError("Cannot jog - current position unknown")
 
         self.logger.info(
@@ -540,7 +592,7 @@ class PositionController:
             ValueError: If resulting position is out of bounds
             RuntimeError: If not connected or no current position
         """
-        if self._current_position is None:
+        if self._position_for_jog() is None:
             raise RuntimeError("Cannot jog - current position unknown")
 
         new_y = self._current_position.y + delta_mm
@@ -557,7 +609,7 @@ class PositionController:
             ValueError: If resulting position is out of bounds
             RuntimeError: If not connected or no current position
         """
-        if self._current_position is None:
+        if self._position_for_jog() is None:
             raise RuntimeError("Cannot jog - current position unknown")
 
         new_z = self._current_position.z + delta_mm
@@ -574,7 +626,7 @@ class PositionController:
             ValueError: If resulting rotation is out of bounds
             RuntimeError: If not connected or no current position
         """
-        if self._current_position is None:
+        if self._position_for_jog() is None:
             raise RuntimeError("Cannot jog - current position unknown")
 
         new_r = self._current_position.r + delta_degrees
@@ -647,14 +699,24 @@ class PositionController:
                 f"Z={position.z:.3f}, R={position.r:.2f}°"
             )
 
-            # Determine which axes need to move (only move axes that changed)
+            # Determine which axes need to move (only move axes that changed).
+            # With the position unknown every axis is sent.
             moved_axes = []
             tolerance = 0.001  # 1 micron for linear, will use 0.01 degree for rotation
-
-            if abs(position.x - self._current_position.x) > tolerance:
-                self.logger.info(
-                    f"Moving X axis: {self._current_position.x:.3f} -> {position.x:.3f} mm"
+            known = self._current_position
+            if known is None:
+                self.logger.warning(
+                    "Current position unknown - sending every axis to the target"
                 )
+                known = Position(
+                    x=float("nan"), y=float("nan"), z=float("nan"), r=float("nan")
+                )
+
+            def changed(target, current, tol):
+                return not (abs(target - current) <= tol)  # NaN: changed
+
+            if changed(position.x, known.x, tolerance):
+                self.logger.info(f"Moving X axis: {known.x:.3f} -> {position.x:.3f} mm")
                 self._move_axis(self.axis.X, position.x, "X-axis")
                 from py2flamingo.services.stage_service import AxisCode
 
@@ -662,10 +724,8 @@ class PositionController:
             else:
                 self.logger.debug(f"X axis unchanged: {position.x:.3f} mm")
 
-            if abs(position.y - self._current_position.y) > tolerance:
-                self.logger.info(
-                    f"Moving Y axis: {self._current_position.y:.3f} -> {position.y:.3f} mm"
-                )
+            if changed(position.y, known.y, tolerance):
+                self.logger.info(f"Moving Y axis: {known.y:.3f} -> {position.y:.3f} mm")
                 self._move_axis(self.axis.Y, position.y, "Y-axis")
                 from py2flamingo.services.stage_service import AxisCode
 
@@ -673,10 +733,8 @@ class PositionController:
             else:
                 self.logger.debug(f"Y axis unchanged: {position.y:.3f} mm")
 
-            if abs(position.z - self._current_position.z) > tolerance:
-                self.logger.info(
-                    f"Moving Z axis: {self._current_position.z:.3f} -> {position.z:.3f} mm"
-                )
+            if changed(position.z, known.z, tolerance):
+                self.logger.info(f"Moving Z axis: {known.z:.3f} -> {position.z:.3f} mm")
                 self._move_axis(self.axis.Z, position.z, "Z-axis")
                 from py2flamingo.services.stage_service import AxisCode
 
@@ -685,10 +743,8 @@ class PositionController:
                 self.logger.debug(f"Z axis unchanged: {position.z:.3f} mm")
 
             # Rotation uses larger tolerance (0.01 degrees)
-            if abs(position.r - self._current_position.r) > 0.01:
-                self.logger.info(
-                    f"Moving R axis: {self._current_position.r:.2f} -> {position.r:.2f}°"
-                )
+            if changed(position.r, known.r, 0.01):
+                self.logger.info(f"Moving R axis: {known.r:.2f} -> {position.r:.2f}°")
                 self._move_axis(self.axis.R, position.r, "Rotation")
                 from py2flamingo.services.stage_service import AxisCode
 
@@ -1001,88 +1057,68 @@ class PositionController:
         return False
 
     def _query_position_after_move(
-        self, moved_axes: Optional[List[int]], target_position: Position
-    ) -> Position:
+        self, moved_axes: Optional[List[int]], target_position: Position = None
+    ) -> Tuple[Optional[Position], List[str]]:
         """
-        Query actual position from hardware after a movement completes.
+        Read the position from the hardware after a movement.
+
+        Reads the moved axes (all four when ``moved_axes`` is None or the
+        current position is unknown); the others keep their tracked values.
 
         Args:
-            moved_axes: List of axis codes that were moved, or None for all axes
-            target_position: Target position (used for axes that weren't moved)
+            moved_axes: Axis codes that were moved, or None for all axes
+            target_position: Unused; kept for callers. A failed read is never
+                replaced by the target (until 2026-11-22 it was, and the log
+                then said "confirmed from hardware").
 
         Returns:
-            Position with actual hardware values for moved axes, target values for unmoved axes
+            (position, failed_axes). position is None when any needed axis
+            could not be read; failed_axes names those axes.
         """
         try:
-            # Get the stage service to query positions
             from py2flamingo.services.stage_service import AxisCode, StageService
 
             stage_service = StageService(self.connection)
+            base_position = self._current_position
 
-            # Start with current position (or target if no current)
-            base_position = (
-                self._current_position if self._current_position else target_position
-            )
-
-            # If no axes specified, query all axes
-            if moved_axes is None or len(moved_axes) == 4:
+            if moved_axes is None or len(moved_axes) == 4 or base_position is None:
                 self.logger.debug("Querying all axis positions from hardware...")
                 hardware_position = stage_service.get_position()
                 if hardware_position:
-                    return hardware_position
-                else:
-                    self.logger.warning(
-                        "Failed to query all axes - using target position as fallback"
-                    )
-                    return target_position
+                    return hardware_position, []
+                return None, ["X", "Y", "Z", "R"]
 
-            # Query only the moved axes
-            x = base_position.x
-            y = base_position.y
-            z = base_position.z
-            r = base_position.r
-
+            values = {
+                "x": base_position.x,
+                "y": base_position.y,
+                "z": base_position.z,
+                "r": base_position.r,
+            }
+            names = {
+                AxisCode.X_AXIS: "x",
+                AxisCode.Y_AXIS: "y",
+                AxisCode.Z_AXIS: "z",
+                AxisCode.ROTATION: "r",
+            }
+            failed = []
             for axis_code in moved_axes:
-                if axis_code == AxisCode.X_AXIS:
-                    pos = stage_service.get_axis_position(AxisCode.X_AXIS)
-                    if pos is not None:
-                        x = pos
-                    else:
-                        self.logger.warning("Failed to query X position - using target")
-                        x = target_position.x
-
-                elif axis_code == AxisCode.Y_AXIS:
-                    pos = stage_service.get_axis_position(AxisCode.Y_AXIS)
-                    if pos is not None:
-                        y = pos
-                    else:
-                        self.logger.warning("Failed to query Y position - using target")
-                        y = target_position.y
-
-                elif axis_code == AxisCode.Z_AXIS:
-                    pos = stage_service.get_axis_position(AxisCode.Z_AXIS)
-                    if pos is not None:
-                        z = pos
-                    else:
-                        self.logger.warning("Failed to query Z position - using target")
-                        z = target_position.z
-
-                elif axis_code == AxisCode.ROTATION:
-                    pos = stage_service.get_axis_position(AxisCode.ROTATION)
-                    if pos is not None:
-                        r = pos
-                    else:
-                        self.logger.warning("Failed to query R position - using target")
-                        r = target_position.r
-
-            return Position(x=x, y=y, z=z, r=r)
+                key = names.get(axis_code)
+                if key is None:
+                    continue
+                pos = stage_service.get_axis_position(axis_code)
+                if pos is None:
+                    failed.append(key.upper())
+                else:
+                    values[key] = pos
+            if failed:
+                return None, failed
+            return Position(**values), []
 
         except Exception as e:
             self.logger.error(
-                f"Error querying position from hardware: {e} - using target position",
-                exc_info=True,
+                f"Error querying position from hardware: {e}", exc_info=True
             )
-            return target_position
+            return None, ["X", "Y", "Z", "R"]
 
     def _wait_for_motion_complete_async(
         self, target_position: Position, moved_axes: Optional[List[int]] = None
@@ -1157,21 +1193,37 @@ class PositionController:
 
                 # Query position from hardware to verify movement completed
                 # Add old position to history before updating
-                if self._current_position is not None:
-                    self._add_to_history(self._current_position)
+                previous = self._current_position
+                if previous is not None:
+                    self._add_to_history(previous)
 
-                # Query actual position from hardware
-                actual_position = self._query_position_after_move(
+                actual_position, failed = self._query_position_after_move(
                     moved_axes, target_position
                 )
 
-                # Update current position with hardware-verified values
-                self._current_position = actual_position
-                self.logger.info(
-                    f"Position confirmed from hardware: X={actual_position.x:.3f}, "
-                    f"Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, "
-                    f"R={actual_position.r:.2f}°"
-                )
+                if actual_position is None:
+                    self._set_position_after_move(None, verified=False)
+                    self.logger.error(
+                        f"Position UNKNOWN after the move: could not read "
+                        f"{', '.join(failed)} from the hardware. Jogs read the "
+                        f"position again first; a Go To sends every axis."
+                    )
+                elif not motion_complete:
+                    self._set_position_after_move(actual_position, verified=False)
+                    self.logger.warning(
+                        "Motion stop NOT confirmed (no STAGE_MOTION_STOPPED in "
+                        "time); position read from hardware, may still be "
+                        f"changing: X={actual_position.x:.3f}, "
+                        f"Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, "
+                        f"R={actual_position.r:.2f}°"
+                    )
+                else:
+                    self._set_position_after_move(actual_position, verified=True)
+                    self.logger.info(
+                        f"Position confirmed from hardware: X={actual_position.x:.3f}, "
+                        f"Y={actual_position.y:.3f}, Z={actual_position.z:.3f}, "
+                        f"R={actual_position.r:.2f}°"
+                    )
 
                 # Fire callback if registered
                 if self._motion_complete_callback:
@@ -1275,7 +1327,22 @@ class PositionController:
                 },
             )
 
-            response_bytes = self.connection.send_command(cmd)
+            # Arm the motion tracker BEFORE the move goes out: a short move can
+            # stop (and its STAGE_MOTION_STOPPED arrive) before the wait thread
+            # starts, and an unarmed tracker discards it, so the wait then sat
+            # out its whole timeout (see MotionTracker.arm). The wait disarms.
+            tracker = self._motion_tracker
+            if tracker is not None:
+                try:
+                    tracker.arm()
+                except Exception as arm_error:  # noqa: BLE001
+                    self.logger.warning(f"Could not arm motion tracker: {arm_error}")
+            try:
+                response_bytes = self.connection.send_command(cmd)
+            except Exception:
+                if tracker is not None:
+                    tracker.disarm()
+                raise
 
             # Validate response
             if response_bytes is None:
@@ -1372,6 +1439,10 @@ class PositionController:
             Optional[Position]: Current tracked position, or None if not initialized
         """
         if self._current_position is None:
+            if self._position_unknown:
+                # A read-back failed: do not substitute the home position.
+                self.logger.debug("Current position unknown (read-back failed)")
+                return None
             self.logger.warning("Position not yet initialized")
             # Try to initialize now
             self._initialize_position()
