@@ -746,7 +746,6 @@ def _on_position_changed(self, position):
 | `core/command_codes.py` | Command codes including STACK_COMPLETE |
 | `utils/workflow_parser.py` | Parse workflow files |
 | `utils/file_handlers.py` | Read/write workflow files |
-| `workflows/workflow_repository.py` | Load/save all formats |
 | `controllers/workflow_controller.py` | UI-to-file conversion |
 
 ---

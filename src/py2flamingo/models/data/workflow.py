@@ -359,12 +359,6 @@ class WorkflowStep:
         self.end_time = datetime.now()
         self.image_path = image_path
 
-    def mark_error(self, error: str) -> None:
-        """Mark step as failed."""
-        self.status = "error"
-        self.end_time = datetime.now()
-        self.error_message = error
-
 
 @dataclass
 class Workflow(ValidatedModel):
@@ -418,99 +412,10 @@ class Workflow(ValidatedModel):
         if self.workflow_type == WorkflowType.MULTI_POSITION and not self.positions:
             raise ValidationError("Multi-position workflow requires position list")
 
-    def generate_steps(self) -> List[WorkflowStep]:
-        """Generate execution steps for workflow.
-
-        Returns:
-            List of workflow steps
-        """
-        steps = []
-        step_index = 0
-
-        # Determine iteration order based on workflow type
-        positions = self.positions if self.positions else [self.start_position]
-        channels = self.channels if self.channels else [None]
-
-        # Time-lapse loop (outermost for time-series)
-        timepoints = 1
-        if self.time_lapse_settings:
-            timepoints = self.time_lapse_settings.num_timepoints
-
-        for t in range(timepoints):
-            # Position loop
-            for pos in positions:
-                # Tile loop
-                if self.tile_settings:
-                    tile_positions = self.tile_settings.get_tile_positions(pos)
-                else:
-                    tile_positions = [pos]
-
-                for tile_idx, tile_pos in enumerate(tile_positions):
-                    # Channel loop
-                    for channel in channels:
-                        # Z-stack loop (innermost for speed)
-                        if self.stack_settings:
-                            for z in range(self.stack_settings.num_planes):
-                                z_pos = (
-                                    tile_pos.z
-                                    + z * self.stack_settings.z_step_um / 1000.0
-                                )
-                                step = WorkflowStep(
-                                    index=step_index,
-                                    name=f"T{t}_P{positions.index(pos)}_Tile{tile_idx}_Z{z}",
-                                    position=tile_pos,
-                                    z_position=z_pos,
-                                    timepoint=t if self.time_lapse_settings else None,
-                                    tile_index=tile_idx if self.tile_settings else None,
-                                    channel=channel,
-                                )
-                                steps.append(step)
-                                step_index += 1
-                        else:
-                            step = WorkflowStep(
-                                index=step_index,
-                                name=f"T{t}_P{positions.index(pos)}_Tile{tile_idx}",
-                                position=tile_pos,
-                                timepoint=t if self.time_lapse_settings else None,
-                                tile_index=tile_idx if self.tile_settings else None,
-                                channel=channel,
-                            )
-                            steps.append(step)
-                            step_index += 1
-
-        self.steps = steps
-        return steps
-
-    def start_execution(self) -> None:
-        """Mark workflow as started."""
-        self.state = WorkflowState.PREPARING
-        self.start_time = datetime.now()
-        self.current_step_index = 0
-        self.images_acquired = 0
-
-        if not self.steps:
-            self.generate_steps()
-
     def mark_completed(self) -> None:
         """Mark workflow as completed."""
         self.state = WorkflowState.COMPLETED
         self.end_time = datetime.now()
-
-    def mark_error(self, error: str) -> None:
-        """Mark workflow as failed."""
-        self.state = WorkflowState.ERROR
-        self.end_time = datetime.now()
-        self.error_message = error
-
-    def get_current_step(self) -> Optional[WorkflowStep]:
-        """Get currently executing step.
-
-        Returns:
-            Current step or None
-        """
-        if 0 <= self.current_step_index < len(self.steps):
-            return self.steps[self.current_step_index]
-        return None
 
     def to_workflow_dict(self) -> Dict[str, Any]:
         """Convert to legacy workflow dictionary format.

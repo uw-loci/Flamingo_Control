@@ -113,9 +113,9 @@ reporting success. Pinned by
 ### `workflows/` — templates
 
 `ZStack.txt`, `Snapshot.txt`, `WorkflowZstack.txt`, `PipelineZStack.txt`. Shared, not
-per-microscope. Note `workflow_repository` **globs** this directory, so a template with
-no reference anywhere in the code is still user-selectable — grep is not evidence of
-disuse here.
+per-microscope. Note the Workflow tab's preset list (`views/workflow_view.py`,
+`refresh_presets`) **globs** this directory, so a template with no reference anywhere
+in the code is still user-selectable — grep is not evidence of disuse here.
 
 ### Elsewhere
 
