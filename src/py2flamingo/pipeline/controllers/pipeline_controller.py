@@ -6,7 +6,7 @@ wires signals between executor and editor dialog, and manages lifecycle.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from PyQt5.QtCore import QObject
 
@@ -36,7 +36,6 @@ from py2flamingo.pipeline.engine.node_runners.timed_loop_runner import TimedLoop
 from py2flamingo.pipeline.engine.node_runners.workflow_runner import WorkflowRunner
 from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 from py2flamingo.pipeline.services.pipeline_service import PipelineService
-from py2flamingo.pipeline.ui.pipeline_editor_dialog import PipelineEditorDialog
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +45,26 @@ class PipelineController(QObject):
 
     Attributes:
         service: PipelineService instance
-        editor: PipelineEditorDialog (created lazily)
+        editor: the editor dialog, made by ``editor_factory`` on first open
+
+    ``editor_factory`` is called as ``editor_factory(app=app)`` and returns
+    the editor (``pipeline.ui.pipeline_editor_dialog.PipelineEditorDialog``
+    in the app). It is passed in by the composition root so that this
+    controller does not import the view layer above it.
     """
 
-    def __init__(self, service: PipelineService, app=None, parent=None):
+    def __init__(
+        self,
+        service: PipelineService,
+        app=None,
+        parent=None,
+        editor_factory: Optional[Callable[..., Any]] = None,
+    ):
         super().__init__(parent)
         self._service = service
         self._app = app
-        self._editor: Optional[PipelineEditorDialog] = None
+        self._editor_factory = editor_factory
+        self._editor: Optional[Any] = None
         self._executor: Optional[PipelineExecutor] = None
 
     @property
@@ -63,7 +74,12 @@ class PipelineController(QObject):
     def open_editor(self):
         """Open (or raise) the pipeline editor dialog."""
         if self._editor is None:
-            self._editor = PipelineEditorDialog(app=self._app)
+            if self._editor_factory is None:
+                raise RuntimeError(
+                    "PipelineController has no editor_factory; the composition "
+                    "root passes PipelineEditorDialog"
+                )
+            self._editor = self._editor_factory(app=self._app)
             self._editor.run_requested.connect(self._on_run_requested)
             self._editor.stop_requested.connect(self._on_stop_requested)
 

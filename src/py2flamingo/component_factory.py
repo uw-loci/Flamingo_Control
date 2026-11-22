@@ -308,6 +308,7 @@ def create_pipeline_layer(app=None) -> dict:
     """
     from py2flamingo.pipeline.controllers.pipeline_controller import PipelineController
     from py2flamingo.pipeline.services.pipeline_service import PipelineService
+    from py2flamingo.pipeline.ui.pipeline_editor_dialog import PipelineEditorDialog
 
     logger.debug("Creating pipeline layer components...")
 
@@ -315,6 +316,7 @@ def create_pipeline_layer(app=None) -> dict:
     pipeline_controller = PipelineController(
         service=pipeline_service,
         app=app,
+        editor_factory=PipelineEditorDialog,
     )
 
     return {

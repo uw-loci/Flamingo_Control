@@ -1227,10 +1227,15 @@ class MainWindow(QMainWindow):
                 from py2flamingo.pipeline.services.pipeline_service import (
                     PipelineService,
                 )
+                from py2flamingo.pipeline.ui.pipeline_editor_dialog import (
+                    PipelineEditorDialog,
+                )
 
                 self.app.pipeline_service = PipelineService()
                 self.app.pipeline_controller = PipelineController(
-                    service=self.app.pipeline_service, app=self.app
+                    service=self.app.pipeline_service,
+                    app=self.app,
+                    editor_factory=PipelineEditorDialog,
                 )
                 self.app.pipeline_controller.open_editor()
 
