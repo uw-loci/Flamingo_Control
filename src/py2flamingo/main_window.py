@@ -421,15 +421,26 @@ class MainWindow(QMainWindow):
         # Tools menu (requires connection)
         tools_menu = menubar.addMenu("&Tools")
 
+        # The 3D Voxel Test and Volume Scan items ran scripts from the tests/
+        # package, which is not shipped with the app and replaced the crash
+        # handler (sys.excepthook) when imported. The scan moved the stage
+        # over a fixed, hard-coded volume without the acquisition lock. They
+        # stay listed, always disabled, so the menu explains where they went.
+        tools_menu.setToolTipsVisible(True)
+        unavailable = (
+            "Not available: this test ran a development script that is not part "
+            "of the application, and it moved the stage without the acquisition "
+            "lock."
+        )
         self.voxel_test_action = QAction("3D &Voxel Test", self)
-        self.voxel_test_action.setStatusTip("Run 3D voxel movement and rotation test")
-        self.voxel_test_action.triggered.connect(self._on_voxel_test)
+        self.voxel_test_action.setToolTip(unavailable)
+        self.voxel_test_action.setStatusTip(unavailable)
         self.voxel_test_action.setEnabled(False)
         tools_menu.addAction(self.voxel_test_action)
 
         self.volume_scan_action = QAction("&Volume Scan", self)
-        self.volume_scan_action.setStatusTip("Run volume scan with serpentine movement")
-        self.volume_scan_action.triggered.connect(self._on_volume_scan)
+        self.volume_scan_action.setToolTip(unavailable)
+        self.volume_scan_action.setStatusTip(unavailable)
         self.volume_scan_action.setEnabled(False)
         tools_menu.addAction(self.volume_scan_action)
 
@@ -867,9 +878,8 @@ class MainWindow(QMainWindow):
         Args:
             connected: Whether microscope is connected
         """
-        # Tools menu requires connection
-        self.voxel_test_action.setEnabled(connected)
-        self.volume_scan_action.setEnabled(connected)
+        # Tools menu requires connection. The voxel test and volume scan items
+        # stay disabled (see the Tools menu construction).
         self.calibrate_action.setEnabled(connected)
         self.benchmark_action.setEnabled(connected)
         self.conn_tests_menu.setEnabled(connected)
@@ -883,99 +893,6 @@ class MainWindow(QMainWindow):
         self.pixel_calibrator_action.setEnabled(connected)
         self.stage_repeatability_action.setEnabled(connected)
         self.frame_probe_action.setEnabled(connected)
-
-    def _on_voxel_test(self):
-        """Handle 3D voxel rotation test menu action."""
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.info("3D Voxel Rotation Test menu action triggered")
-
-        if not self.app:
-            QMessageBox.warning(self, "Error", "Application not available")
-            return
-
-        # Disable action during test
-        self.voxel_test_action.setEnabled(False)
-        self.voxel_test_action.setText("3D Voxel Test (Running...)")
-
-        try:
-            from tests.test_3d_voxel_rotation import test_3d_voxel_rotation
-
-            # Ensure Sample View is open
-            if self.app.sample_view is None:
-                self.app._open_sample_view()
-
-            # Run test with FlamingoApplication
-            test_3d_voxel_rotation(self.app)
-
-            # Re-enable action after delay (test runs async)
-            from PyQt5.QtCore import QTimer
-
-            QTimer.singleShot(70000, self._reset_voxel_test_action)
-
-        except ImportError as e:
-            logger.error(f"Could not import test module: {e}")
-            QMessageBox.critical(self, "Error", "Test module not found.")
-            self._reset_voxel_test_action()
-        except Exception as e:
-            logger.error(f"Error starting test: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Failed to start test: {e}")
-            self._reset_voxel_test_action()
-
-    def _reset_voxel_test_action(self):
-        """Reset voxel test action after async test completes."""
-        self.voxel_test_action.setEnabled(True)
-        self.voxel_test_action.setText("3D &Voxel Test")
-
-    def _on_volume_scan(self):
-        """Handle volume scan menu action."""
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.info("Volume Scan menu action triggered")
-
-        if not self.app:
-            QMessageBox.warning(self, "Error", "Application not available")
-            return
-
-        # Disable action during scan
-        self.volume_scan_action.setEnabled(False)
-        self.volume_scan_action.setText("Volume Scan (Running...)")
-
-        try:
-            from tests.test_3d_movement_simple import test_voxel_movement
-
-            # Get position controller from app
-            position_controller = getattr(self.app, "position_controller", None)
-            if not position_controller:
-                raise RuntimeError("Position controller not available")
-
-            # Run the volume scan
-            success = test_voxel_movement(position_controller, self, mode="volume_scan")
-
-            if success:
-                QMessageBox.information(
-                    self, "Success", "Volume scan completed successfully!"
-                )
-            else:
-                QMessageBox.warning(
-                    self, "Warning", "Volume scan completed with warnings."
-                )
-
-        except ImportError as e:
-            logger.error(f"Could not import test module: {e}")
-            QMessageBox.critical(self, "Error", "Test module not found.")
-        except Exception as e:
-            logger.error(f"Error during volume scan: {e}", exc_info=True)
-            QMessageBox.critical(self, "Error", f"Volume scan failed: {e}")
-        finally:
-            self._reset_volume_scan_action()
-
-    def _reset_volume_scan_action(self):
-        """Reset volume scan action after scan completes."""
-        self.volume_scan_action.setEnabled(True)
-        self.volume_scan_action.setText("&Volume Scan")
 
     def _on_calibrate_objective(self):
         """Handle calibrate objective menu action.
