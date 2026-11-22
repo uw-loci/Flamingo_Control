@@ -788,12 +788,20 @@ class PositionController:
 
         return None
 
-    def set_home_position(self, position: Position) -> None:
+    def set_home_position(self, position: Position) -> bool:
         """
-        Set the home position and save to settings.
+        Set the home position and save it to the local ScopeSettings.txt.
+
+        Only the four ``Home ?-axis`` lines in ``<Stage limits>`` change; the
+        rest of the file is kept. This is a local file: on servers from
+        2026-10-06 on the app renders ScopeSettings.txt from the server's
+        metadata document at connect, which replaces it.
 
         Args:
             position: Position to set as home
+
+        Returns:
+            True once the file has been written.
 
         Raises:
             ValueError: If position is outside stage limits
@@ -810,33 +818,30 @@ class PositionController:
         try:
             from pathlib import Path
 
-            from py2flamingo.utils.file_handlers import dict_to_text, text_to_dict
+            from py2flamingo.utils.file_handlers import set_section_values
 
             settings_path = Path("microscope_settings") / "ScopeSettings.txt"
 
             if not settings_path.exists():
                 raise RuntimeError(f"Settings file not found: {settings_path}")
 
-            # Read current settings
-            settings = text_to_dict(str(settings_path))
-
-            # Update home position values
-            if "Stage limits" not in settings:
-                settings["Stage limits"] = {}
-
-            settings["Stage limits"]["Home x-axis"] = f"{position.x:.6f}"
-            settings["Stage limits"]["Home y-axis"] = f"{position.y:.6f}"
-            settings["Stage limits"]["Home z-axis"] = f"{position.z:.6f}"
-            settings["Stage limits"]["Home r-axis"] = f"{position.r:.2f}"
-
-            # Write back to file
-            dict_to_text(settings, str(settings_path))
+            set_section_values(
+                settings_path,
+                "Stage limits",
+                {
+                    "Home x-axis": f"{position.x:.6f}",
+                    "Home y-axis": f"{position.y:.6f}",
+                    "Home z-axis": f"{position.z:.6f}",
+                    "Home r-axis": f"{position.r:.2f}",
+                },
+            )
 
             self.logger.info(
                 f"Home position updated: X={position.x:.3f}, "
                 f"Y={position.y:.3f}, Z={position.z:.3f}, "
                 f"R={position.r:.2f}°"
             )
+            return True
 
         except Exception as e:
             error_msg = f"Failed to save home position: {e}"

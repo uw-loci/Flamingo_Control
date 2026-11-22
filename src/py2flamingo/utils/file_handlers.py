@@ -170,6 +170,51 @@ def dict_to_text(data: Dict[str, Any]) -> str:
     return _emit(data) + ("\n" if data else "")
 
 
+def set_section_values(
+    file_path: Union[str, Path], section: str, values: Dict[str, str]
+) -> None:
+    """Set ``key = value`` lines inside one top-level ``<section>`` of a text file.
+
+    Every other line (comments, indentation, other sections, line endings) is
+    kept as it is. A key already in the section has its value replaced; a
+    missing key is added before ``</section>``; a missing section is appended
+    at the end of the file. The file is rewritten atomically.
+    """
+    p = Path(file_path)
+    raw = p.read_bytes().decode("utf-8", errors="replace")
+    newline = "\r\n" if "\r\n" in raw else "\n"
+    lines = raw.splitlines()
+    pending = dict(values)
+    in_section = False
+    indent = "  "
+    out: List[str] = []
+    for line in lines:
+        stripped = line.strip()
+        m_open = _SECTION_OPEN.match(stripped)
+        m_close = _SECTION_CLOSE.match(stripped)
+        if m_open and m_open.group("name").strip() == section:
+            in_section = True
+        elif in_section and m_close and m_close.group("name").strip() == section:
+            for k, v in pending.items():
+                out.append(f"{indent}{k} = {v}")
+            pending.clear()
+            in_section = False
+        elif in_section:
+            m = _KEY_VAL.match(stripped)
+            if m:
+                indent = line[: len(line) - len(line.lstrip())]
+                key = m.group("k").strip()
+                if key in pending:
+                    out.append(f"{indent}{key} = {pending.pop(key)}")
+                    continue
+        out.append(line)
+    if pending:
+        out.append(f"<{section}>")
+        out.extend(f"  {k} = {v}" for k, v in pending.items())
+        out.append(f"</{section}>")
+    safe_write(p, newline.join(out) + newline, newline="")
+
+
 def dict_comment(wf_dict: Dict[str, Any], comment: str) -> Dict[str, Any]:
     """Set a human-readable comment on a workflow dict (in-place + return)."""
     wf_dict["Comment"] = comment
