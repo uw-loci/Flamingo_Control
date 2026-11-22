@@ -287,7 +287,7 @@ class TestTheOverviewResultsAreATab:
 
         return (
             Path(__file__).resolve().parents[1]
-            / "src/py2flamingo/acquisitions/led_2d_overview.py"
+            / "src/py2flamingo/views/dialogs/led_2d_overview_dialog.py"
         ).read_text(encoding="utf-8")
 
     def test_results_are_shown_as_a_panel(self):
@@ -300,7 +300,7 @@ class TestTheOverviewResultsAreATab:
         src = self._workflow_source()
         i = src.index('"led_2d_overview_results"')
         tail = src[i : i + 900]
-        assert "self._result_window.show()" in tail, (
+        assert "window.show()" in tail, (
             "losing the results because the tab could not be created would be "
             "worse than the layout problem this solves"
         )

@@ -1772,6 +1772,7 @@ class LED2DOverviewDialog(PersistentDialog):
                 app=self._app,
                 config=config,
                 parent=self,  # Parent to dialog so it stays alive
+                results_presenter=self._present_results,
             )
 
             # Connect workflow completion signals to stop live view
@@ -1800,6 +1801,47 @@ class LED2DOverviewDialog(PersistentDialog):
         except Exception as e:
             self._logger.error(f"Error starting scan: {e}", exc_info=True)
             QMessageBox.critical(self, "Error", f"Failed to start scan: {e}")
+
+    def _present_results(self, results, config):
+        """Show a finished scan's results; the acquisition keeps the window.
+
+        Given to LED2DOverviewAcquisition as its ``results_presenter``, which
+        calls it after ``scan_completed`` (and after a cancel with tiles).
+        """
+        from py2flamingo.views.dialogs.led_2d_overview_result import (
+            LED2DOverviewResultWindow,
+        )
+
+        window = LED2DOverviewResultWindow(
+            results=results,
+            config=config,
+            app=self._app,
+            parent=None,  # Make it independent window
+        )
+        self._logger.info(f"Result window created: {window}")
+
+        # Show as a tab in the main window, matching every other tool.
+        # The results view is wide — two rotation panels side by side — so
+        # the full tab width suits it better than a floating window
+        # competing for space with the one you compare it against.
+        #
+        # It is NOT hosted inside Sample View. That would mean making
+        # Sample View a QMainWindow, and its napari canvas is the one
+        # widget in the app that must not be reparented after it is live.
+        main_window = getattr(self._app, "main_window", None)
+        if main_window is not None and hasattr(main_window, "_show_as_panel"):
+            main_window._show_as_panel(
+                "led_2d_overview_results",
+                "LED Overview Results",
+                window,
+            )
+            self._logger.info("Result window shown as a tab")
+        else:
+            window.show()
+            window.raise_()
+            window.activateWindow()
+            self._logger.info("Result window shown as a separate window")
+        return window
 
     def _on_workflow_completed(self, *args) -> None:
         """Handle workflow completion (success or cancel) - stop live view."""

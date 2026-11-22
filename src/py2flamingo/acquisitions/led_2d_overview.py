@@ -92,18 +92,24 @@ class LED2DOverviewAcquisition(QObject):
     # No default FOV - must be queried from hardware to avoid damage
     # If FOV cannot be determined, the workflow will not start
 
-    def __init__(self, app, config, parent=None):
+    def __init__(self, app, config, parent=None, results_presenter=None):
         """Initialize the workflow.
 
         Args:
             app: FlamingoApplication instance
             config: ScanConfiguration from LED2DOverviewDialog
             parent: Parent QObject
+            results_presenter: Called as ``results_presenter(results, config)``
+                when a scan ends with tiles; shows them and returns the window,
+                which this object keeps alive. Passed in by the dialog (the view
+                layer), so this acquisition does not import a view. None means
+                the results are only emitted (``scan_completed``).
         """
         super().__init__(parent)
 
         self._app = app
         self._config = config
+        self._results_presenter = results_presenter
         self._running = False
         self._cancelled = False
         # True only while this scan holds the application's acquisition lock,
@@ -2420,46 +2426,13 @@ class LED2DOverviewAcquisition(QObject):
             logger.warning("Results exist but no tiles were captured!")
             return
 
+        if self._results_presenter is None:
+            logger.warning("No results presenter given; results were only emitted")
+            return
+
         try:
-            from py2flamingo.views.dialogs.led_2d_overview_result import (
-                LED2DOverviewResultWindow,
-            )
-
-            logger.info("LED2DOverviewResultWindow imported successfully")
-
             # Keep reference to prevent garbage collection
-            self._result_window = LED2DOverviewResultWindow(
-                results=self._results,
-                config=self._config,
-                app=self._app,
-                parent=None,  # Make it independent window
-            )
-            logger.info(f"Result window created: {self._result_window}")
-
-            # Show as a tab in the main window, matching every other tool.
-            # The results view is wide — two rotation panels side by side — so
-            # the full tab width suits it better than a floating window
-            # competing for space with the one you compare it against.
-            #
-            # It is NOT hosted inside Sample View. That would mean making
-            # Sample View a QMainWindow, and its napari canvas is the one
-            # widget in the app that must not be reparented after it is live.
-            main_window = getattr(self._app, "main_window", None)
-            if main_window is not None and hasattr(main_window, "_show_as_panel"):
-                main_window._show_as_panel(
-                    "led_2d_overview_results",
-                    "LED Overview Results",
-                    self._result_window,
-                )
-                logger.info("Result window shown as a tab")
-            else:
-                self._result_window.show()
-                self._result_window.raise_()
-                self._result_window.activateWindow()
-                logger.info("Result window shown as a separate window")
-
-        except ImportError as e:
-            logger.error(f"Could not import result window: {e}", exc_info=True)
+            self._result_window = self._results_presenter(self._results, self._config)
         except Exception as e:
             logger.error(f"Error showing results: {e}", exc_info=True)
 
