@@ -42,6 +42,7 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.services.window_geometry_manager import PersistentWidget
+from py2flamingo.utils.stage_limits import clamp_to_limits
 from py2flamingo.views.colors import (
     ERROR_COLOR,
     NEGATIVE_JOG_COLOR,
@@ -443,12 +444,10 @@ class JogPanelWindow(PersistentWidget):
         try:
             limits = self.movement_controller.get_stage_limits()
             axis_limits = limits.get(axis, {})
-            lo = axis_limits.get("min")
-            hi = axis_limits.get("max")
-            if lo is not None:
-                value = max(lo, value)
-            if hi is not None:
-                value = min(hi, value)
+            # clamp (the move it feeds refuses anything still outside)
+            value = clamp_to_limits(
+                value, axis_limits.get("min"), axis_limits.get("max")
+            )
         except Exception:  # pragma: no cover - defensive
             pass
         return value

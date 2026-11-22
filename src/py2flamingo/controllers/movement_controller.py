@@ -21,6 +21,7 @@ from py2flamingo.core.command_codes import CommandDataBits, StageCommands
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.connection_service import MVCConnectionService
 from py2flamingo.services.stage_service import AxisCode, StageService
+from py2flamingo.utils.stage_limits import clamp_to_limits
 
 
 @dataclass
@@ -240,7 +241,7 @@ class MovementController(QObject):
         if lim is None:
             return value, False
         lo, hi = lim
-        clamped = min(max(value, lo), hi)
+        clamped = clamp_to_limits(value, lo, hi)  # clamp; non-finite raises
         return clamped, abs(clamped - value) > 1e-9
 
     def move_relative(self, axis: str, delta_mm: float, verify: bool = True) -> bool:

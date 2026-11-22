@@ -16,6 +16,7 @@ from py2flamingo.core.command_codes import AxisCode, StageCommands
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
 from py2flamingo.models.microscope import MicroscopeState, Position
+from py2flamingo.utils.stage_limits import clamp_to_limits, within_limits
 
 
 @dataclass
@@ -271,7 +272,7 @@ class PositionController:
         # Validate rotation bounds using stage limits
         limits = self.get_stage_limits()
         r_min, r_max = limits["r"]["min"], limits["r"]["max"]
-        if not (r_min <= rotation_degrees <= r_max):
+        if not within_limits(rotation_degrees, r_min, r_max):  # refuse
             error_msg = f"Rotation {rotation_degrees}° is outside valid range [{r_min}, {r_max}]"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
@@ -342,7 +343,7 @@ class PositionController:
         x_min, x_max = limits["x"]["min"], limits["x"]["max"]
 
         # Validate X bounds
-        if not (x_min <= x_mm <= x_max):
+        if not within_limits(x_mm, x_min, x_max):  # refuse
             error_msg = f"X position {x_mm:.3f}mm is outside valid range [{x_min:.3f}, {x_max:.3f}]"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
@@ -413,7 +414,7 @@ class PositionController:
         y_min, y_max = limits["y"]["min"], limits["y"]["max"]
 
         # Validate Y bounds
-        if not (y_min <= y_mm <= y_max):
+        if not within_limits(y_mm, y_min, y_max):  # refuse
             error_msg = f"Y position {y_mm:.3f}mm is outside valid range [{y_min:.3f}, {y_max:.3f}]"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
@@ -487,7 +488,7 @@ class PositionController:
         z_min, z_max = limits["z"]["min"], limits["z"]["max"]
 
         # Validate Z bounds
-        if not (z_min <= z_mm <= z_max):
+        if not within_limits(z_mm, z_min, z_max):  # refuse
             error_msg = f"Z position {z_mm:.3f}mm is outside valid range [{z_min:.3f}, {z_max:.3f}]"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
@@ -657,10 +658,12 @@ class PositionController:
         # move never throws on bounds.
         if validate:
             limits = self.get_stage_limits()
-            cx = min(max(position.x, limits["x"]["min"]), limits["x"]["max"])
-            cy = min(max(position.y, limits["y"]["min"]), limits["y"]["max"])
-            cz = min(max(position.z, limits["z"]["min"]), limits["z"]["max"])
-            cr = min(max(position.r, limits["r"]["min"]), limits["r"]["max"])
+            cx, cy, cz, cr = (
+                clamp_to_limits(
+                    getattr(position, a), limits[a]["min"], limits[a]["max"]
+                )  # clamp; a non-finite target raises ValueError
+                for a in ("x", "y", "z", "r")
+            )
             if (cx, cy, cz, cr) != (position.x, position.y, position.z, position.r):
                 self.logger.warning(
                     "Target position clamped to stage soft limits: "
