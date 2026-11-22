@@ -20,38 +20,10 @@ from py2flamingo.core.queue_manager import QueueManager
 def _receive_full_bytes(
     sock: socket.socket, expected_size: int, timeout: float
 ) -> bytes:
-    """Receive ``expected_size`` bytes from ``sock`` within ``timeout`` seconds.
+    """Receive ``expected_size`` bytes from ``sock`` within ``timeout`` seconds."""
+    from py2flamingo.core.frames import recv_exactly
 
-    Handles partial recvs and restores the socket's original timeout on exit.
-    """
-    data = b""
-    start_time = time.time()
-    original_timeout = sock.gettimeout()
-    try:
-        while len(data) < expected_size:
-            elapsed = time.time() - start_time
-            remaining_time = timeout - elapsed
-            if remaining_time <= 0:
-                raise socket.timeout(
-                    f"Partial receive timeout: got {len(data)}/{expected_size} bytes"
-                )
-            sock.settimeout(min(remaining_time, 1.0))
-            try:
-                chunk = sock.recv(expected_size - len(data))
-            except socket.timeout:
-                if time.time() - start_time >= timeout:
-                    raise socket.timeout(
-                        f"Receive timeout: got {len(data)}/{expected_size} bytes after {timeout}s"
-                    )
-                continue
-            if not chunk:
-                raise ConnectionError(
-                    f"Connection closed during receive: got {len(data)}/{expected_size} bytes"
-                )
-            data += chunk
-        return data
-    finally:
-        sock.settimeout(original_timeout)
+    return recv_exactly(sock, expected_size, timeout=timeout)
 
 
 # ============================================================================
@@ -290,7 +262,7 @@ class MVCConnectionService:
         are logged and skipped; frames after it stay on the socket for the
         background reader, which is paused for the exchange and resumed after.
         """
-        import struct
+        from py2flamingo.core.frames import parse_frame
 
         if self._command_socket is None:
             raise RuntimeError("Not connected to microscope")
@@ -310,8 +282,8 @@ class MVCConnectionService:
                         f"No 0x{want:04X} reply to 0x{code:04X} within {timeout:.1f} s"
                     )
                 header = _receive_full_bytes(self._command_socket, 128, remaining)
-                got = struct.unpack_from("<I", header, 4)[0]
-                size = struct.unpack_from("<I", header, 48)[0]
+                head = parse_frame(header)
+                got, size = head.command_code, head.additional_data_size
                 extra = (
                     _receive_full_bytes(
                         self._command_socket, size, max(deadline - time.time(), 1.0)
@@ -354,10 +326,10 @@ class MVCConnectionService:
             )
             # int32Data0 (bytes 24-27): the server's verdict on our version
             # string, 2 = matches, 1 = does not (logged and otherwise ignored).
-            if len(frame) >= 28:
-                import struct
+            if len(frame) == 128:
+                from py2flamingo.core.frames import parse_frame
 
-                self.server_version_verdict = struct.unpack_from("<i", frame, 24)[0]
+                self.server_version_verdict = parse_frame(frame).int32_data0
         except Exception as e:
             self.logger.warning(
                 f"Could not read the server's version ({e}); assuming the 3.0.0 "
@@ -677,10 +649,12 @@ class MVCConnectionService:
             # Protocol: SCommand (128 bytes) + additionalData (variable length string)
             # The additionalDataBytes field (offset 48) tells us how many bytes follow
             if len(response_bytes) >= 128:
-                import struct
+                from py2flamingo.core.frames import parse_frame
 
                 # Get the additionalDataBytes field to know how many extra bytes follow
-                additional_data_size = struct.unpack_from("I", response_bytes, 48)[0]
+                additional_data_size = parse_frame(
+                    response_bytes[:128]
+                ).additional_data_size
 
                 self.logger.debug(
                     f"STORAGE_PATH_GET: additionalDataBytes={additional_data_size}, "
@@ -780,17 +754,15 @@ class MVCConnectionService:
             response_bytes = self.send_command(cmd, timeout=timeout)
 
             if len(response_bytes) >= 128:
-                import struct
+                from py2flamingo.core.frames import parse_frame
 
-                # Parse response - state is in int32Data0 field (offset 12, 4 bytes)
-                # Protocol: start(4) + code(4) + status(4) + hardwareID(4) + subsystemID(4)
-                #           + clientID(4) + int32Data0(4) ...
-                # Offset 24 = int32Data0
-                state_value = struct.unpack_from("i", response_bytes, 24)[0]
+                # The state is in int32Data0 (bytes 24-27).
+                frame = parse_frame(response_bytes[:128])
+                state_value = frame.int32_data0
 
                 # Also log raw bytes for diagnostics
                 raw_bytes_24_28 = response_bytes[24:28].hex()
-                status_field = struct.unpack_from("i", response_bytes, 8)[0]
+                status_field = frame.status_code
 
                 # Server returns SYSTEM_STATE_IDLE (0xa002 = 40962) when idle
                 # Also accept 0 for backwards compatibility

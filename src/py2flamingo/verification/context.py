@@ -11,7 +11,6 @@ directly rather than through a service.
 from __future__ import annotations
 
 import logging
-import struct
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,13 +18,12 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from py2flamingo.core import server_layout
+from py2flamingo.core.frames import parse_frame
 from py2flamingo.verification import codes
 from py2flamingo.verification.model import Aborted, Failed, Skipped
 
 logger = logging.getLogger(__name__)
 
-START_MARKER = 0xF321E654
-END_MARKER = 0xFEDC4321
 TRIGGER_CALL_BACK = 0x80000000
 
 
@@ -79,23 +77,23 @@ class Message:
 def decode_packet(packet: bytes, direction: str) -> Optional[Message]:
     if len(packet) < 128:
         return None
-    f = struct.unpack("<IIIiiiiiiidI72sI", packet[:128])
-    if f[0] != START_MARKER or f[13] != END_MARKER:
+    f = parse_frame(packet[:128])
+    if not f.is_valid:
         return None
     return Message(
         t=time.time(),
         direction=direction,
-        code=f[1],
-        status=f[2],
-        hardware_id=f[3],
-        subsystem_id=f[4],
-        client_id=f[5],
-        int0=f[6],
-        int1=f[7],
-        int2=f[8],
-        bits=f[9],
-        value=f[10],
-        buffer=f[12],
+        code=f.command_code,
+        status=f.status_code,
+        hardware_id=f.hardware_id,
+        subsystem_id=f.subsystem_id,
+        client_id=f.client_id,
+        int0=f.int32_data0,
+        int1=f.int32_data1,
+        int2=f.int32_data2,
+        bits=f.cmd_data_bits,
+        value=f.value,
+        buffer=f.data_field,
         additional=packet[128:],
     )
 

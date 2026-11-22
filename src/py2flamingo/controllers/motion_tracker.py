@@ -11,7 +11,6 @@ uses the callback dispatch queue instead of blocking socket reads.
 import logging
 import queue
 import socket
-import struct
 import threading
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -402,13 +401,12 @@ class MotionTracker:
         Returns:
             Bytes received or None if socket closed
         """
-        data = b""
-        while len(data) < size:
-            chunk = self.command_socket.recv(size - len(data))
-            if not chunk:
-                return None
-            data += chunk
-        return data
+        from py2flamingo.core.frames import recv_exactly
+
+        try:
+            return recv_exactly(self.command_socket, size)
+        except ConnectionError:
+            return None
 
     def _parse_response(self, response: bytes) -> Dict[str, Any]:
         """
@@ -420,25 +418,8 @@ class MotionTracker:
         Returns:
             Dict with parsed fields
         """
+        from py2flamingo.core.frames import frame_fields, parse_frame
+
         if len(response) != 128:
             raise ValueError(f"Invalid response size: {len(response)} (expected 128)")
-
-        start_marker = struct.unpack("<I", response[0:4])[0]
-        command_code = struct.unpack("<I", response[4:8])[0]
-        status_code = struct.unpack("<I", response[8:12])[0]
-
-        params = []
-        for i in range(7):
-            offset = 12 + (i * 4)
-            param = struct.unpack("<i", response[offset : offset + 4])[0]
-            params.append(param)
-
-        value = struct.unpack("<d", response[40:48])[0]
-
-        return {
-            "start_marker": start_marker,
-            "command_code": command_code,
-            "status_code": status_code,
-            "params": params,
-            "value": value,
-        }
+        return frame_fields(parse_frame(response))

@@ -15,7 +15,6 @@ preventing socket buffer buildup and ensuring callbacks are never missed.
 
 import logging
 import socket
-import struct
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 from py2flamingo.core.tcp_protocol import CommandDataBits, get_command_name
@@ -400,7 +399,6 @@ class MicroscopeCommandService:
         Raises:
             RuntimeError: If not connected or send fails
         """
-        import struct
 
         if not self.connection.is_connected():
             raise RuntimeError("Not connected to microscope")
@@ -626,102 +624,45 @@ class MicroscopeCommandService:
     def _receive_full_bytes(
         self, sock: socket.socket, num_bytes: int, timeout: float = 3.0
     ) -> bytes:
+        """Read exactly ``num_bytes`` (``core.frames.recv_exactly``).
+
+        Raises socket.timeout on timeout and RuntimeError if the socket closes
+        first. Only for when the background reader is not running.
         """
-        Receive exact number of bytes from socket.
+        from py2flamingo.core.frames import recv_exactly
 
-        Args:
-            sock: Socket to read from
-            num_bytes: Number of bytes to read
-            timeout: Timeout in seconds
-
-        Returns:
-            Bytes read from socket
-
-        Raises:
-            socket.timeout: If timeout occurs
-            RuntimeError: If socket closes prematurely
-        """
-        sock.settimeout(timeout)
-        data = b""
-        while len(data) < num_bytes:
-            chunk = sock.recv(num_bytes - len(data))
-            if not chunk:
-                raise RuntimeError(
-                    f"Socket closed while reading "
-                    f"(got {len(data)}/{num_bytes} bytes)"
-                )
-            data += chunk
-        return data
+        try:
+            return recv_exactly(sock, num_bytes, timeout=timeout)
+        except ConnectionError as e:
+            raise RuntimeError(f"Socket closed while reading ({e})") from e
 
     def _parse_response(self, response: bytes) -> Dict[str, Any]:
-        """
-        Parse 128-byte protocol response.
+        """Parse a 128-byte response into the services' dict form.
 
-        Args:
-            response: 128-byte response from microscope
-
-        Returns:
-            Dict with parsed fields:
-                - start_marker: uint32
-                - command_code: uint32 (response code)
-                - status_code: uint32
-                - params: list of 7 int32 values
-                - value: double
-                - reserved: uint32 (addDataBytes field)
-                - data: bytes (72-byte buffer field, may contain response strings)
-                - end_marker: uint32
+        ``core.frames.parse_frame`` reads it; ``frame_fields`` lists the keys.
+        A wrong marker is logged, not raised.
         """
+        from py2flamingo.core.frames import (
+            END_MARKER,
+            START_MARKER,
+            frame_fields,
+            parse_frame,
+        )
+
         if len(response) != 128:
             raise ValueError(f"Invalid response size: {len(response)} (expected 128)")
-
-        start_marker = struct.unpack("<I", response[0:4])[0]
-        response_code = struct.unpack("<I", response[4:8])[0]
-        status_code = struct.unpack("<I", response[8:12])[0]
-
-        # Unpack 7 parameters
-        params = []
-        for i in range(7):
-            offset = 12 + (i * 4)
-            param = struct.unpack("<i", response[offset : offset + 4])[0]
-            params.append(param)
-
-        # Unpack value (double)
-        value = struct.unpack("<d", response[40:48])[0]
-
-        # Get addDataBytes field
-        add_data_bytes = struct.unpack("<I", response[48:52])[0]
-
-        # Extract 72-byte data buffer (bytes 52-123)
-        # This is where responses like laser power strings are stored
-        data_buffer = response[52:124]
-
-        # Get end marker
-        end_marker = struct.unpack("<I", response[124:128])[0]
-
-        # Validate markers
-        expected_start = 0xF321E654
-        expected_end = 0xFEDC4321
-        if start_marker != expected_start:
+        parsed = frame_fields(parse_frame(response))
+        if parsed["start_marker"] != START_MARKER:
             self.logger.warning(
-                f"Invalid start marker: 0x{start_marker:08X} "
-                f"(expected 0x{expected_start:08X})"
+                f"Invalid start marker: 0x{parsed['start_marker']:08X} "
+                f"(expected 0x{START_MARKER:08X})"
             )
-        if end_marker != expected_end:
+        if parsed["end_marker"] != END_MARKER:
             self.logger.warning(
-                f"Invalid end marker: 0x{end_marker:08X} "
-                f"(expected 0x{expected_end:08X})"
+                f"Invalid end marker: 0x{parsed['end_marker']:08X} "
+                f"(expected 0x{END_MARKER:08X})"
             )
-
-        return {
-            "start_marker": start_marker,
-            "command_code": response_code,
-            "status_code": status_code,
-            "params": params,
-            "value": value,
-            "reserved": add_data_bytes,
-            "data": data_buffer,  # ADDED: 72-byte buffer field
-            "end_marker": end_marker,
-        }
+        return parsed
 
     def _send_via_async_reader(
         self,
@@ -808,42 +749,10 @@ class MicroscopeCommandService:
             return {"success": False, "error": str(e)}
 
     def _convert_parsed_message(self, msg: "ParsedMessage") -> Dict[str, Any]:
-        """
-        Convert ParsedMessage from async reader to legacy dict format.
+        """A message from the background reader in the services' dict form."""
+        from py2flamingo.core.frames import frame_fields
 
-        Args:
-            msg: ParsedMessage from socket_reader
-
-        Returns:
-            Dict matching the format from _parse_response()
-        """
-        # Build params list from individual fields
-        params = [
-            msg.hardware_id,
-            msg.subsystem_id,
-            msg.client_id,
-            msg.int32_data0,
-            msg.int32_data1,
-            msg.int32_data2,
-            msg.cmd_data_bits,
-        ]
-
-        result = {
-            "start_marker": msg.start_marker,
-            "command_code": msg.command_code,
-            "status_code": msg.status_code,
-            "params": params,
-            "value": msg.value,
-            "reserved": msg.additional_data_size,
-            "data": msg.data_field,
-            "end_marker": msg.end_marker,
-        }
-
-        # Include additional data if present
-        if hasattr(msg, "additional_data") and msg.additional_data:
-            result["additional_data"] = msg.additional_data
-
-        return result
+        return frame_fields(msg)
 
     # ============================================================================
     # COMPATIBILITY METHODS - For consolidating all send_command implementations

@@ -442,9 +442,6 @@ class ProtocolDecoder:
     START_MARKER = 0xF321E654
     END_MARKER = 0xFEDC4321
 
-    # Command structure format
-    COMMAND_STRUCT = struct.Struct("I I I I I I I I I I d I 72s I")
-
     # Expected size
     COMMAND_SIZE = 128
 
@@ -460,7 +457,7 @@ class ProtocolDecoder:
                 - start_marker: Start marker value
                 - code: Command code
                 - status: Status field
-                - params: List of 7 parameter values
+                - params: List of 7 parameter values (int32Data0-2 signed)
                 - value: Double precision value
                 - reserved: Reserved field
                 - data: Data payload (72 bytes, may contain null padding)
@@ -482,21 +479,20 @@ class ProtocolDecoder:
                 f"Invalid command size: expected {self.COMMAND_SIZE}, got {len(data)}"
             )
 
-        # Unpack structure
-        try:
-            unpacked = self.COMMAND_STRUCT.unpack(data)
-        except struct.error as e:
-            raise ValueError(f"Failed to unpack command structure: {e}")
+        # One parser for every frame (core/frames.py). The three int32Data
+        # fields are signed, as the server declares them; this decoder used to
+        # read every field unsigned, so a -1 came back as 4294967295.
+        from py2flamingo.core.frames import parse_frame
 
-        # Extract fields
-        start_marker = unpacked[0]
-        code = unpacked[1]
-        status = unpacked[2]
-        params = list(unpacked[3:10])  # cmdBits0-6 (7 values)
-        value = unpacked[10]
-        reserved = unpacked[11]
-        data_field = unpacked[12]
-        end_marker = unpacked[13]
+        msg = parse_frame(data)
+        start_marker = msg.start_marker
+        code = msg.command_code
+        status = msg.status_code
+        params = msg.params
+        value = msg.value
+        reserved = msg.additional_data_size
+        data_field = msg.data_field
+        end_marker = msg.end_marker
 
         # Validate markers
         valid = start_marker == self.START_MARKER and end_marker == self.END_MARKER

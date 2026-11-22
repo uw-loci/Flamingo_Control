@@ -22,10 +22,10 @@ import queue
 import socket
 import struct
 import threading
-import time
-from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional, Set
+
+from py2flamingo.core.frames import ParsedMessage, parse_frame
 
 logger = logging.getLogger(__name__)
 
@@ -99,47 +99,6 @@ UNSOLICITED_COMMANDS: Set[int] = {
     0x9004,  # UI_SET_GAUGE_VALUE - Progress bar update
     0x9007,  # UI_IMAGES_SAVED_TO_STORAGE - Images written notification
 }
-
-
-@dataclass
-class ParsedMessage:
-    """Parsed 128-byte protocol message."""
-
-    raw_data: bytes
-    start_marker: int
-    command_code: int
-    status_code: int
-    hardware_id: int
-    subsystem_id: int
-    client_id: int
-    int32_data0: int  # Often axis or laser index
-    int32_data1: int
-    int32_data2: int
-    cmd_data_bits: int
-    value: float  # doubleData field
-    additional_data_size: int
-    data_field: bytes  # 72-byte data buffer
-    end_marker: int
-    timestamp: float = field(default_factory=time.time)
-    additional_data: Optional[bytes] = None  # Extra data following 128-byte message
-
-    @property
-    def is_valid(self) -> bool:
-        """Check if message has valid markers."""
-        return self.start_marker == 0xF321E654 and self.end_marker == 0xFEDC4321
-
-    @property
-    def is_unsolicited(self) -> bool:
-        """Check if this is an unsolicited callback message."""
-        return self.command_code in UNSOLICITED_COMMANDS
-
-    @property
-    def command_name(self) -> str:
-        """Get human-readable command name."""
-        try:
-            return ProtocolCommands(self.command_code).name
-        except ValueError:
-            return f"UNKNOWN_0x{self.command_code:04X}"
 
 
 class MessageDispatcher:
@@ -713,61 +672,8 @@ class SocketReader:
             return None
 
     def _parse_message(self, data: bytes) -> ParsedMessage:
-        """
-        Parse 128-byte protocol message.
-
-        Args:
-            data: 128 bytes of raw message data
-
-        Returns:
-            ParsedMessage object
-        """
-        if len(data) != self.MESSAGE_SIZE:
-            raise ValueError(f"Invalid message size: {len(data)}")
-
-        # Unpack header fields
-        start_marker = struct.unpack("<I", data[0:4])[0]
-        command_code = struct.unpack("<I", data[4:8])[0]
-        status_code = struct.unpack("<I", data[8:12])[0]
-
-        # Unpack parameter fields (7 x 4 bytes = 28 bytes at offset 12-39)
-        hardware_id = struct.unpack("<I", data[12:16])[0]
-        subsystem_id = struct.unpack("<I", data[16:20])[0]
-        client_id = struct.unpack("<I", data[20:24])[0]
-        int32_data0 = struct.unpack("<i", data[24:28])[0]  # Signed - often axis
-        int32_data1 = struct.unpack("<i", data[28:32])[0]
-        int32_data2 = struct.unpack("<i", data[32:36])[0]
-        cmd_data_bits = struct.unpack("<I", data[36:40])[0]
-
-        # Unpack value (double at offset 40-47)
-        value = struct.unpack("<d", data[40:48])[0]
-
-        # Additional data size (at offset 48-51)
-        additional_data_size = struct.unpack("<I", data[48:52])[0]
-
-        # Data field (72 bytes at offset 52-123)
-        data_field = data[52:124]
-
-        # End marker (at offset 124-127)
-        end_marker = struct.unpack("<I", data[124:128])[0]
-
-        return ParsedMessage(
-            raw_data=data,
-            start_marker=start_marker,
-            command_code=command_code,
-            status_code=status_code,
-            hardware_id=hardware_id,
-            subsystem_id=subsystem_id,
-            client_id=client_id,
-            int32_data0=int32_data0,
-            int32_data1=int32_data1,
-            int32_data2=int32_data2,
-            cmd_data_bits=cmd_data_bits,
-            value=value,
-            additional_data_size=additional_data_size,
-            data_field=data_field,
-            end_marker=end_marker,
-        )
+        """Parse one 128-byte message (``core.frames.parse_frame``)."""
+        return parse_frame(data)
 
     def get_stats(self) -> Dict[str, int]:
         """Get reader statistics."""
