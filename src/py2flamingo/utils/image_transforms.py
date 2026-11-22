@@ -8,33 +8,13 @@ This module provides functions for transforming microscope images:
 - Colormap application
 """
 
-from enum import Enum
 from typing import Optional, Tuple
 
 import numpy as np
 
-
-class Rotation(Enum):
-    """Rotation angles for image display."""
-
-    NONE = 0
-    CW_90 = 90
-    CW_180 = 180
-    CW_270 = 270
-
-
-class Colormap(Enum):
-    """Available colormaps for image display."""
-
-    GRAY = "gray"
-    VIRIDIS = "viridis"
-    PLASMA = "plasma"
-    INFERNO = "inferno"
-    MAGMA = "magma"
-    TURBO = "turbo"
-    JET = "jet"
-    HOT = "hot"
-    COOL = "cool"
+# The display enums are data, so they live with the display model; they are
+# imported here because every function below takes one.
+from py2flamingo.models.image_display import Colormap, Rotation
 
 
 def rotate_image(image: np.ndarray, rotation: Rotation) -> np.ndarray:

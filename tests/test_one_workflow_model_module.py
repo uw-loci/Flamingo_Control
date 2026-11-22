@@ -33,7 +33,7 @@ def test_each_workflow_model_class_is_defined_once():
 
 
 def test_the_run_state():
-    from py2flamingo.models import WorkflowModel
+    from py2flamingo.models.data.workflow import WorkflowModel
 
     model = WorkflowModel()
     assert not model.is_running() and model.get_execution_time() is None

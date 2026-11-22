@@ -6,8 +6,30 @@ used by the live feed viewer.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 
-from ..utils.image_transforms import Colormap, Rotation
+
+class Rotation(Enum):
+    """Rotation angles for image display."""
+
+    NONE = 0
+    CW_90 = 90
+    CW_180 = 180
+    CW_270 = 270
+
+
+class Colormap(Enum):
+    """Available colormaps for image display."""
+
+    GRAY = "gray"
+    VIRIDIS = "viridis"
+    PLASMA = "plasma"
+    INFERNO = "inferno"
+    MAGMA = "magma"
+    TURBO = "turbo"
+    JET = "jet"
+    HOT = "hot"
+    COOL = "cool"
 
 
 @dataclass

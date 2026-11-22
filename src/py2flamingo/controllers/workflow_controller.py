@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
-from ..models import ConnectionModel, ConnectionState, WorkflowModel
+from ..models import ConnectionModel, ConnectionState
+from ..models.data.workflow import WorkflowModel
 from ..utils.workflow_keys import number, whole_number
 from ..utils.workflow_parser import WorkflowTextFormatter
 

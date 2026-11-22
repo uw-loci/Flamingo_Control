@@ -6,20 +6,9 @@ This module defines the core data structures used throughout
 the application for representing microscope state and coordinates.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
-
-# Load default optics values from hardware config
-try:
-    from py2flamingo.configs.config_loader import get_hardware_config as _get_hw
-
-    _hw = _get_hw()
-    _DEFAULT_MAGNIFICATION = _hw.objective_magnification
-    _DEFAULT_PIXEL_SIZE_MM = _hw.effective_pixel_size_um / 1000.0
-except Exception:
-    _DEFAULT_MAGNIFICATION = 16.0
-    _DEFAULT_PIXEL_SIZE_MM = 0.000488
+from typing import Dict, List
 
 
 class MicroscopeState(Enum):
@@ -161,48 +150,3 @@ class StageLimits:
             r_min=limits_dict["r"]["min"],
             r_max=limits_dict["r"]["max"],
         )
-
-
-@dataclass
-class MicroscopeModel:
-    """
-    Complete model of microscope state and configuration.
-
-    Attributes:
-        name: Name of the microscope
-        ip_address: IP address for connection
-        port: Port number for connection
-        current_position: Current stage position
-        home_position: Home position for stage
-        state: Current microscope state
-        stage_limits: Movement limits for each axis
-        lasers: List of available laser channels
-        selected_laser: Currently selected laser
-        laser_power: Current laser power (0-100)
-        objective_magnification: Objective lens magnification
-        pixel_size_mm: Image pixel size in millimeters
-        metadata: Additional metadata dictionary
-    """
-
-    name: str
-    ip_address: str
-    port: int
-    current_position: Position
-    home_position: Optional[Position] = None
-    state: MicroscopeState = MicroscopeState.DISCONNECTED
-    stage_limits: Optional[StageLimits] = None
-    lasers: List[str] = field(default_factory=list)
-    selected_laser: Optional[str] = None
-    laser_power: float = 0.0
-    objective_magnification: float = _DEFAULT_MAGNIFICATION
-    pixel_size_mm: float = _DEFAULT_PIXEL_SIZE_MM
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    def is_connected(self) -> bool:
-        """
-        Check if microscope is connected.
-
-        Returns:
-            bool: True if connected
-        """
-        return self.state != MicroscopeState.DISCONNECTED

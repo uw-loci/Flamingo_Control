@@ -38,11 +38,8 @@ def create_models_layer() -> dict:
     Returns:
         Dict with keys: connection_model, workflow_model, display_model
     """
-    from py2flamingo.models import (
-        ConnectionModel,
-        ImageDisplayModel,
-        WorkflowModel,
-    )
+    from py2flamingo.models import ConnectionModel, ImageDisplayModel
+    from py2flamingo.models.data.workflow import WorkflowModel
 
     logger.debug("Creating models layer components...")
     return {
