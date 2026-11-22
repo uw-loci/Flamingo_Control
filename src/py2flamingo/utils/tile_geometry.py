@@ -519,6 +519,45 @@ def _clamp_overlap(value: float) -> float:
     return value
 
 
+def tile_step_mm(fov_mm: float, overlap_percent: float) -> float:
+    """Distance between adjacent tile centers, mm, for the client's own grids
+    (the LED overview walk, the acquisition-profile generator, the overview
+    dialog's preview). THE definition, shared.
+
+    ``fov * (1 - overlap / 100)`` with the overlap clamped to the server's
+    [0, 50] %. A step that is not positive falls back to the field, never to
+    zero. :func:`compute_tile_geometry` keeps its own line-for-line copy of
+    the server's arithmetic (CheckStackTile), which this agrees with.
+
+    The profile generator used to write ``step = fov_mm`` in two places, a 0%
+    overlap no matter what the user asked for: a 97-tile brain acquisition
+    shipped that way (measured 0.25% against 20% requested).
+    """
+    overlap = _clamp_overlap(float(overlap_percent))
+    step = float(fov_mm) * (1.0 - overlap / 100.0)
+    return step if step > 0 else float(fov_mm)
+
+
+def corner_span_for_tiles(n_tiles: int, fov_mm: float, overlap_percent: float) -> float:
+    """``|End - Start|`` for which the server lays exactly ``n_tiles`` along
+    one axis.
+
+    The server reads Start/End as corner-tile CENTERS and lays
+    ``ceil((|End - Start| + FOV) / step)`` tiles centered between them
+    (:func:`compute_tile_geometry`). So a scan width (``FOV + (n - 1) * step``)
+    used as ``|End - Start|`` images two extra tiles. This returns the span
+    whose count is ``n - 0.5`` steps, the middle of the range that rounds up
+    to ``n``; one tile is ``Start == End``.
+    """
+    if n_tiles <= 1:
+        return 0.0
+    step = fov_mm * (100.0 - _clamp_overlap(overlap_percent)) / 100.0
+    span = (n_tiles - 0.5) * step - fov_mm
+    # At a large overlap two tiles need a span below zero; any span just above
+    # zero still rounds up to two (Start == End would be one tile).
+    return max(span, 1e-3 * step)
+
+
 def compute_tile_geometry(
     start_x: float,
     end_x: float,

@@ -217,8 +217,10 @@ class WorkflowRunner(AbstractNodeRunner):
                             overlap = 10.0
                             if workflow.tile_settings:
                                 overlap = workflow.tile_settings.overlap_percent
-                            effective_fov_x = fov_x * (1 - overlap / 100.0)
-                            effective_fov_y = fov_y * (1 - overlap / 100.0)
+                            from py2flamingo.utils.tile_geometry import tile_step_mm
+
+                            effective_fov_x = tile_step_mm(fov_x, overlap)
+                            effective_fov_y = tile_step_mm(fov_y, overlap)
 
                             import math
 
@@ -240,22 +242,31 @@ class WorkflowRunner(AbstractNodeRunner):
                                 overlap_percent=overlap,
                             )
 
-                            # Compute scan area and set start/end positions
+                            # Start/End are the corner tiles' CENTERS (the
+                            # server adds half a field each side). Using the
+                            # scan width here imaged two extra rows and
+                            # columns.
+                            from py2flamingo.utils.tile_geometry import (
+                                corner_span_for_tiles,
+                            )
+
                             scan_w, scan_h = (
                                 workflow.tile_settings.calculate_scan_area()
                             )
+                            span_x = corner_span_for_tiles(num_tiles_x, fov_x, overlap)
+                            span_y = corner_span_for_tiles(num_tiles_y, fov_y, overlap)
                             cx, cy, cz = detected_obj.centroid_stage
                             from py2flamingo.models import Position
 
                             workflow.start_position = Position(
-                                x=cx - scan_w / 2,
-                                y=cy - scan_h / 2,
+                                x=cx - span_x / 2,
+                                y=cy - span_y / 2,
                                 z=workflow.start_position.z,
                                 r=workflow.start_position.r,
                             )
                             workflow.end_position = Position(
-                                x=cx + scan_w / 2,
-                                y=cy + scan_h / 2,
+                                x=cx + span_x / 2,
+                                y=cy + span_y / 2,
                                 z=workflow.start_position.z,
                                 r=workflow.start_position.r,
                             )

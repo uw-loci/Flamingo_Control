@@ -1130,12 +1130,20 @@ class LED2DOverviewDialog(PersistentDialog):
         The single source of the step for every count/preview in this dialog,
         so none of them can drift from what the workflow actually scans.
         """
+        from py2flamingo.utils.tile_geometry import tile_step_mm
+
         fov = self._get_actual_fov()
         if fov is None:
             return None
+        # Before the overlap row is built, the config default (10 %), which is
+        # also what the scan falls back to.
         overlap = getattr(self, "tile_overlap", None)
-        pct = overlap.value() if overlap is not None else 10.0
-        return fov * (1.0 - pct / 100.0)
+        pct = (
+            overlap.value()
+            if overlap is not None
+            else ScanConfiguration.tile_overlap_percent
+        )
+        return tile_step_mm(fov, pct)
 
     def _calculate_tile_count(self, bbox: BoundingBox) -> Optional[Tuple[int, int]]:
         """Calculate number of tiles needed at the configured overlap.

@@ -222,10 +222,6 @@ class LED2DOverviewWorkflow(QObject):
             return 10.0
         return max(OVERLAP_PERCENT_MIN, min(OVERLAP_PERCENT_MAX, value))
 
-    def _tile_overlap_fraction(self) -> float:
-        """Tile overlap as a fraction of a FOV (0.0-0.5)."""
-        return self._tile_overlap_percent() / 100.0
-
     def _tile_step_mm(self) -> Optional[float]:
         """Centre-to-centre tile pitch. The ONE place this is computed.
 
@@ -241,10 +237,12 @@ class LED2DOverviewWorkflow(QObject):
         Duplicated arithmetic that must agree is a standing invitation for it
         not to. One method, one answer.
         """
+        from py2flamingo.utils.tile_geometry import tile_step_mm
+
         fov = self._actual_fov_mm
         if fov is None:
             return None
-        return fov * (1.0 - self._tile_overlap_fraction())
+        return tile_step_mm(fov, self._tile_overlap_percent())
 
     @staticmethod
     def tile_positions_1d(lo: float, hi: float, step: float) -> List[float]:

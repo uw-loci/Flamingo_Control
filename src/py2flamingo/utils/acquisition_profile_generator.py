@@ -13,11 +13,7 @@ from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 
-from py2flamingo.utils.tile_geometry import (
-    OVERLAP_PERCENT_MAX,
-    OVERLAP_PERCENT_MIN,
-    tile_positions_1d,
-)
+from py2flamingo.utils.tile_geometry import tile_positions_1d, tile_step_mm
 
 logger = logging.getLogger(__name__)
 
@@ -25,21 +21,6 @@ logger = logging.getLogger(__name__)
 # TileSettings). A caller that forgets to pass one gets a usable grid rather
 # than the edge-to-edge one this module used to hardcode.
 DEFAULT_OVERLAP_PERCENT = 10.0
-
-
-def tile_step_mm(fov_mm: float, overlap_percent: float) -> float:
-    """Distance between adjacent tile centres, mm. THE definition, shared.
-
-    This module used to write ``step = fov_mm`` in two places, which is a 0%
-    overlap no matter what the user asked for — tiles butt edge to edge, the
-    stitcher has nothing to register on, and every stage repeatability error
-    becomes a visible seam. A 97-tile brain acquisition shipped that way
-    (measured 0.25% against 20% requested) because the overlap never reached
-    this arithmetic: the parameter did not exist.
-    """
-    overlap = min(max(float(overlap_percent), OVERLAP_PERCENT_MIN), OVERLAP_PERCENT_MAX)
-    step = float(fov_mm) * (1.0 - overlap / 100.0)
-    return step if step > 0 else float(fov_mm)
 
 
 @dataclass

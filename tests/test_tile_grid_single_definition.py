@@ -49,9 +49,11 @@ def _cls():
 
 class TestThereIsOneDefinitionOfTheStep:
     def test_the_step_is_not_computed_inline_anywhere(self):
-        """`fov * (1 - overlap)` must appear only inside _tile_step_mm."""
+        """`fov * (1 - overlap)` is utils.tile_geometry.tile_step_mm; the
+        workflow calls it from _tile_step_mm only."""
         src = WORKFLOW.read_text(encoding="utf-8")
-        occurrences = src.count("(1.0 - self._tile_overlap_fraction())")
+        assert "(1.0 - self._tile_overlap_fraction())" not in src
+        occurrences = src.count("tile_step_mm(fov, ")
         assert occurrences == 1, (
             f"the step is computed in {occurrences} places; it diverged at "
             "runtime once already. Route every caller through _tile_step_mm()"

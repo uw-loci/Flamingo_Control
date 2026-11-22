@@ -65,13 +65,6 @@ class TestOverlapResolution:
             == 10.0
         )
 
-    @pytest.mark.parametrize(
-        "pct,expected_fraction", [(0.0, 0.0), (10.0, 0.1), (25.0, 0.25), (50.0, 0.5)]
-    )
-    def test_fraction_matches_percent(self, pct, expected_fraction):
-        wf = _workflow(_Config(tile_overlap_percent=pct))
-        assert wf._tile_overlap_fraction() == pytest.approx(expected_fraction)
-
 
 class TestTheStepShrinksByTheOverlap:
     """step = FOV x (1 - overlap) — the arithmetic the grid actually uses."""
@@ -84,8 +77,8 @@ class TestTheStepShrinksByTheOverlap:
     )
     def test_step_for_a_real_fov(self, pct, expected_step):
         wf = _workflow(_Config(tile_overlap_percent=pct))
-        step = self.FOV * (1.0 - wf._tile_overlap_fraction())
-        assert step == pytest.approx(expected_step, abs=1e-5)
+        wf._actual_fov_mm = self.FOV
+        assert wf._tile_step_mm() == pytest.approx(expected_step, abs=1e-5)
 
     def test_more_overlap_means_more_tiles_over_the_same_region(self):
         """The user-visible consequence: denser sampling, longer run."""
@@ -93,7 +86,8 @@ class TestTheStepShrinksByTheOverlap:
 
         def tiles(pct):
             wf = _workflow(_Config(tile_overlap_percent=pct))
-            step = self.FOV * (1.0 - wf._tile_overlap_fraction())
+            wf._actual_fov_mm = self.FOV
+            step = wf._tile_step_mm()
             return max(1, int(span / step) + 1)
 
         assert tiles(0.0) == 3
