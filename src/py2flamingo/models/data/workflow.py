@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ..base import ValidatedModel, ValidationError
-from ..hardware.stage import Position
+from ..microscope import Position
 
 
 class WorkflowType(Enum):
@@ -366,7 +366,9 @@ class Workflow(ValidatedModel):
 
     workflow_type: WorkflowType = WorkflowType.SNAPSHOT
     name: str = ""
-    start_position: Position = field(default_factory=Position)
+    start_position: Position = field(
+        default_factory=lambda: Position(0.0, 0.0, 0.0, 0.0)
+    )
     end_position: Optional[Position] = None
 
     # Settings for different workflow types

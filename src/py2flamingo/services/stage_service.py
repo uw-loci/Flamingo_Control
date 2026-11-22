@@ -5,6 +5,7 @@ Handles all stage-related commands including position queries,
 movement control, and motion monitoring.
 """
 
+import math
 from typing import Any, Callable, Dict, Optional
 
 from py2flamingo.core.command_codes import AxisCode, StageCommands  # noqa: F401
@@ -412,6 +413,12 @@ class StageService(MicroscopeCommandService):
             raise ValueError(
                 f"Invalid position for axis {axis}: {position_mm!r} - must be numeric"
             ) from e
+        # NaN passes every min/max clamp unchanged (min(max(nan, lo), hi) is
+        # nan), so refuse it here, where every move goes.
+        if not math.isfinite(position_mm):
+            raise ValueError(
+                f"Invalid position for axis {axis}: {position_mm!r} - must be finite"
+            )
 
         # Drop a command the stage is already executing. One UI intent can
         # produce two events (Enter then focus-loss), and re-sending an

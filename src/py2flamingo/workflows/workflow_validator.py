@@ -20,7 +20,7 @@ from ..models.data.workflow import (
     WorkflowType,
 )
 from ..models.frame_delivery import check_sweep_feasible
-from ..models.hardware.stage import Position, StageLimits
+from ..models.hardware.stage import StageLimits
 
 logger = logging.getLogger(__name__)
 

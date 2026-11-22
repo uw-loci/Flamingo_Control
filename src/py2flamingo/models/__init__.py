@@ -12,7 +12,7 @@ from .acquisition_timing import (
     LearnedOverheadComponents,
     TimingHistory,
 )
-from .command import Command, PositionCommand, StatusCommand, WorkflowCommand
+from .command import Command, StatusCommand, WorkflowCommand
 from .connection import (
     ConnectionConfig,
     ConnectionModel,
@@ -59,7 +59,6 @@ __all__ = [
     "Command",
     "WorkflowCommand",
     "StatusCommand",
-    "PositionCommand",
     # Image Display
     "ImageDisplayModel",
     # Workflow Templates

@@ -9,7 +9,6 @@ Test coverage:
     - Command: base class, serialization
     - WorkflowCommand: inheritance, workflow data
     - StatusCommand: query type handling
-    - PositionCommand: coordinate handling
 """
 
 import unittest
@@ -19,7 +18,6 @@ from unittest.mock import Mock
 
 from py2flamingo.models.command import (
     Command,
-    PositionCommand,
     StatusCommand,
     WorkflowCommand,
 )
@@ -410,48 +408,6 @@ class TestStatusCommand(unittest.TestCase):
         self.assertIsInstance(cmd, Command)
 
 
-class TestPositionCommand(unittest.TestCase):
-    """Tests for PositionCommand class."""
-
-    def test_create_position_command_defaults(self):
-        """Test creating position command with default coordinates."""
-        cmd = PositionCommand(code=24580)
-        self.assertEqual(cmd.code, 24580)
-        self.assertEqual(cmd.x, 0.0)
-        self.assertEqual(cmd.y, 0.0)
-        self.assertEqual(cmd.z, 0.0)
-
-    def test_create_position_command_with_coordinates(self):
-        """Test creating position command with coordinates."""
-        cmd = PositionCommand(code=24580, x=100.5, y=200.3, z=50.0)
-        self.assertEqual(cmd.x, 100.5)
-        self.assertEqual(cmd.y, 200.3)
-        self.assertEqual(cmd.z, 50.0)
-
-    def test_position_command_to_dict(self):
-        """Test position command serialization."""
-        cmd = PositionCommand(code=24580, x=10.0, y=20.0, z=30.0)
-        result = cmd.to_dict()
-
-        self.assertEqual(result["code"], 24580)
-        self.assertEqual(result["x"], 10.0)
-        self.assertEqual(result["y"], 20.0)
-        self.assertEqual(result["z"], 30.0)
-        self.assertEqual(result["type"], "PositionCommand")
-
-    def test_position_command_inherits_from_command(self):
-        """Test that PositionCommand is a Command."""
-        cmd = PositionCommand(code=24580)
-        self.assertIsInstance(cmd, Command)
-
-    def test_negative_coordinates(self):
-        """Test position command with negative coordinates."""
-        cmd = PositionCommand(code=24580, x=-10.5, y=-20.3, z=-30.0)
-        self.assertEqual(cmd.x, -10.5)
-        self.assertEqual(cmd.y, -20.3)
-        self.assertEqual(cmd.z, -30.0)
-
-
 class TestCommandInheritance(unittest.TestCase):
     """Tests for command class inheritance."""
 
@@ -460,9 +416,8 @@ class TestCommandInheritance(unittest.TestCase):
         cmd1 = Command(code=1)
         cmd2 = WorkflowCommand(code=2)
         cmd3 = StatusCommand(code=3)
-        cmd4 = PositionCommand(code=4)
 
-        for cmd in [cmd1, cmd2, cmd3, cmd4]:
+        for cmd in [cmd1, cmd2, cmd3]:
             self.assertIsInstance(cmd.timestamp, datetime)
 
     def test_all_commands_have_parameters(self):
@@ -470,9 +425,8 @@ class TestCommandInheritance(unittest.TestCase):
         cmd1 = Command(code=1)
         cmd2 = WorkflowCommand(code=2)
         cmd3 = StatusCommand(code=3)
-        cmd4 = PositionCommand(code=4)
 
-        for cmd in [cmd1, cmd2, cmd3, cmd4]:
+        for cmd in [cmd1, cmd2, cmd3]:
             self.assertIsInstance(cmd.parameters, dict)
 
     def test_all_commands_can_serialize(self):
@@ -480,9 +434,8 @@ class TestCommandInheritance(unittest.TestCase):
         cmd1 = Command(code=1)
         cmd2 = WorkflowCommand(code=2)
         cmd3 = StatusCommand(code=3)
-        cmd4 = PositionCommand(code=4)
 
-        for cmd in [cmd1, cmd2, cmd3, cmd4]:
+        for cmd in [cmd1, cmd2, cmd3]:
             result = cmd.to_dict()
             self.assertIn("code", result)
             self.assertIn("timestamp", result)

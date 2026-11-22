@@ -1,13 +1,15 @@
-"""Stage models for microscope positioning system.
+"""Stage limit models (per-axis hard and soft limits).
 
-This module provides models for representing stage positions,
-movement limits, and stage configuration.
+The stage position is ``py2flamingo.models.microscope.Position`` (mm, r in
+degrees); there is no second Position class.
 """
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from py2flamingo.models.microscope import Position
 
 from ..base import ValidatedModel, ValidationError, validate_range
 
@@ -203,97 +205,3 @@ class StageLimits:
             and self.z_axis.is_within_limits(position.z, use_soft)
             and self.r_axis.is_within_limits(position.r, use_soft)
         )
-
-
-@dataclass
-class Position(ValidatedModel):
-    """Represents a position in the microscope coordinate system.
-
-    Enhanced version of the original Position class that includes
-    validation and metadata support.
-
-    Note: Default values are required because this class inherits from
-    ValidatedModel/BaseModel which have fields with defaults. Python 3.12+
-    enforces that non-default fields cannot follow default fields.
-    """
-
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    r: float = 0.0  # Rotation in degrees
-    name: Optional[str] = None  # Optional position name/label
-    stage_limits: Optional[StageLimits] = field(default=None, repr=False)
-
-    def validate(self) -> None:
-        """Validate position coordinates."""
-        # Check for NaN or infinity
-        for axis, value in [("x", self.x), ("y", self.y), ("z", self.z), ("r", self.r)]:
-            if math.isnan(value) or math.isinf(value):
-                raise ValidationError(f"Invalid {axis} coordinate: {value}")
-
-        # Validate against stage limits if provided
-        if self.stage_limits and not self.stage_limits.is_position_valid(self):
-            raise ValidationError(f"Position {self} is outside stage limits")
-
-    @classmethod
-    def from_list(cls, coords: List[float], name: Optional[str] = None) -> "Position":
-        """Create Position from list of coordinates.
-
-        Args:
-            coords: List of [x, y, z, r] coordinates
-            name: Optional position name
-
-        Returns:
-            New Position instance
-        """
-        if len(coords) < 3:
-            raise ValueError(f"Expected at least 3 coordinates, got {len(coords)}")
-
-        # Handle both 3 and 4 coordinate lists
-        x, y, z = coords[:3]
-        r = coords[3] if len(coords) > 3 else 0.0
-
-        return cls(x=float(x), y=float(y), z=float(z), r=float(r), name=name)
-
-    def __str__(self) -> str:
-        """String representation of position."""
-        name_str = f"'{self.name}' " if self.name else ""
-        return f"Position {name_str}(x={self.x:.3f}, y={self.y:.3f}, z={self.z:.3f}, r={self.r:.1f}°)"
-
-
-@dataclass
-class StageVelocity:
-    """Stage movement velocity settings."""
-
-    x_velocity: float = 1.0  # mm/s
-    y_velocity: float = 1.0  # mm/s
-    z_velocity: float = 1.0  # mm/s
-    r_velocity: float = 10.0  # degrees/s
-
-
-@dataclass
-class Stage(ValidatedModel):
-    """Complete stage model with position, limits, and configuration."""
-
-    current_position: Position = field(default_factory=Position)
-    home_position: Optional[Position] = None
-    limits: Optional[StageLimits] = None
-    velocity: StageVelocity = field(default_factory=StageVelocity)
-    is_homed: bool = False
-    is_moving: bool = False
-    backlash_compensation: Dict[str, float] = field(default_factory=dict)
-
-    def validate(self) -> None:
-        """Validate stage configuration."""
-        # Validate current position
-        if self.limits and not self.limits.is_position_valid(self.current_position):
-            raise ValidationError(
-                f"Current position {self.current_position} is outside stage limits"
-            )
-
-        # Validate home position if set
-        if self.home_position and self.limits:
-            if not self.limits.is_position_valid(self.home_position):
-                raise ValidationError(
-                    f"Home position {self.home_position} is outside stage limits"
-                )

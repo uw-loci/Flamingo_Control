@@ -8,7 +8,6 @@ Classes:
     Command: Base class for all commands
     WorkflowCommand: Command to start a workflow
     StatusCommand: Command to query microscope status
-    PositionCommand: Command to move stage to a position
 """
 
 from dataclasses import dataclass, field
@@ -138,48 +137,4 @@ class StatusCommand(Command):
         """
         result = super().to_dict()
         result["query_type"] = self.query_type
-        return result
-
-
-@dataclass
-class PositionCommand(Command):
-    """
-    Command to move the microscope stage to a specific position.
-
-    Attributes:
-        code: Command code (inherited)
-        timestamp: Creation timestamp (inherited)
-        parameters: Additional parameters (inherited)
-        x: X-axis position in micrometers
-        y: Y-axis position in micrometers
-        z: Z-axis position in micrometers
-
-    Example:
-        >>> cmd = PositionCommand(code=24580, x=100.5, y=200.3, z=50.0)
-        >>> print(f"Moving to ({cmd.x}, {cmd.y}, {cmd.z})")
-        Moving to (100.5, 200.3, 50.0)
-    """
-
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Serialize position command to dictionary.
-
-        Returns:
-            Dictionary with position coordinates
-
-        Example:
-            >>> cmd = PositionCommand(code=24580, x=10.0, y=20.0, z=30.0)
-            >>> d = cmd.to_dict()
-            >>> assert d['x'] == 10.0
-            >>> assert d['y'] == 20.0
-            >>> assert d['z'] == 30.0
-        """
-        result = super().to_dict()
-        result["x"] = self.x
-        result["y"] = self.y
-        result["z"] = self.z
         return result

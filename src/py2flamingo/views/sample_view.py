@@ -2423,7 +2423,7 @@ class SampleView(QWidget):
             return
 
         try:
-            from py2flamingo.models.hardware.stage import Position
+            from py2flamingo.models.microscope import Position
 
             current = self.last_stage_position or {"x": 0, "y": 0, "z": 0, "r": 0}
 
@@ -5189,7 +5189,7 @@ class SampleView(QWidget):
                 return
 
             # Import Position class
-            from py2flamingo.models.hardware.stage import Position
+            from py2flamingo.models.microscope import Position
 
             if use_focal:
                 # Focal mode: move stage so clicked data point ends up at focal plane
