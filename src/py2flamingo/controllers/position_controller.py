@@ -8,7 +8,6 @@ movement, validation, and position tracking.
 """
 
 import logging
-import socket
 import threading
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
@@ -16,7 +15,6 @@ from typing import Callable, Dict, List, Optional, Tuple
 from py2flamingo.core.command_codes import AxisCode, StageCommands
 from py2flamingo.core.events import EventManager
 from py2flamingo.core.queue_manager import QueueManager
-from py2flamingo.core.tcp_protocol import CommandDataBits
 from py2flamingo.models.microscope import MicroscopeState, Position
 
 
@@ -1250,7 +1248,13 @@ class PositionController:
         """
         Move a specific axis to the specified value.
 
-        This is the refactored version of move_axis from microscope_connect.py.
+        The funnel for move_x/y/z/r and move_to_position. The move itself is
+        StageService.move_to_position, the one move implementation, which
+        applies the motion gate (an unconfigured scope or a latched
+        emergency stop refuses it) and drops a duplicate of the move in
+        flight. The limits were checked by the caller. Not used by
+        emergency_stop, which sends HALT directly (services/safe_state), so
+        stopping motion is always possible.
 
         Args:
             axis_code: The code of the axis to move (1-4)
@@ -1259,108 +1263,49 @@ class PositionController:
 
         Raises:
             ValueError: If axis_code or value is invalid
+            EmergencyStopActiveError, MicroscopeNotConfiguredError: refused
             RuntimeError: If command fails or response invalid
-            ConnectionError: If communication fails
         """
-        # Refuse to move an instrument whose limits we do not know. This is the
-        # funnel for move_x/y/z/r and move_to_position; StageService.move_to_position
-        # carries the same check for the paths that bypass this controller.
-        # Not gated: emergency_stop sends HALT directly and never comes through
-        # here, so stopping motion is always possible.
-        from py2flamingo.services.stage_motion_gate import ensure_motion_allowed
+        from py2flamingo.services.stage_motion_gate import (
+            EmergencyStopActiveError,
+            MicroscopeNotConfiguredError,
+        )
+        from py2flamingo.services.stage_service import StageService
 
-        ensure_motion_allowed()
+        self.logger.debug(f"Moving {axis_name} (axis {axis_code}) to {value}")
 
-        # Drop a command the stage is already executing. One UI intent can
-        # produce two events (Enter then focus-loss), and re-sending an
-        # identical target makes the server tear down the in-flight motion and
-        # start over. See services/stage_command_dedup.
-        from py2flamingo.services import stage_command_dedup
+        # Arm the motion tracker just BEFORE the move goes out: a short move
+        # can stop (and its STAGE_MOTION_STOPPED arrive) before the wait
+        # thread starts, and an unarmed tracker discards it, so the wait then
+        # sat out its whole timeout (see MotionTracker.arm). The wait disarms.
+        tracker = self._motion_tracker
+        armed = []
 
-        if not stage_command_dedup.should_send(axis_code, value):
-            return
-
-        # Validate inputs
-        if not isinstance(axis_code, int) or axis_code not in [1, 2, 3, 4]:
-            error_msg = f"Invalid axis_code {axis_code}, must be 1-4"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
-
-        try:
-            value_float = float(value)
-        except (ValueError, TypeError) as e:
-            error_msg = f"Invalid value for {axis_name}: {value} - must be numeric"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg) from e
-
-        self.logger.debug(f"Moving {axis_name} (axis {axis_code}) to {value_float}")
-
-        try:
-            # Movement command protocol from working stage_service.py
-            # CRITICAL: Axis code must be in params[3] (int32Data0), NOT params[0]
-            # CRITICAL: Must set TRIGGER_CALL_BACK flag in params[6] for response
-            from py2flamingo.models.command import Command
-
-            cmd = Command(
-                code=self.COMMAND_CODES_STAGE_POSITION_SET,
-                parameters={
-                    "params": [
-                        0,  # Param[0] (hardwareID) - not used
-                        0,  # Param[1] (subsystemID) - not used
-                        0,  # Param[2] (clientID) - not used
-                        axis_code,  # Param[3] (int32Data0) = axis (1=X, 2=Y, 3=Z, 4=R)
-                        0,  # Param[4] (int32Data1) - unused
-                        0,  # Param[5] (int32Data2) - unused
-                        CommandDataBits.TRIGGER_CALL_BACK,  # Param[6] = 0x80000000 flag
-                    ],
-                    "value": value_float,  # Position value in mm or degrees (doubleData field)
-                },
-            )
-
-            # Arm the motion tracker BEFORE the move goes out: a short move can
-            # stop (and its STAGE_MOTION_STOPPED arrive) before the wait thread
-            # starts, and an unarmed tracker discards it, so the wait then sat
-            # out its whole timeout (see MotionTracker.arm). The wait disarms.
-            tracker = self._motion_tracker
-            if tracker is not None:
-                try:
-                    tracker.arm()
-                except Exception as arm_error:  # noqa: BLE001
-                    self.logger.warning(f"Could not arm motion tracker: {arm_error}")
+        def arm() -> None:
+            if tracker is None:
+                return
             try:
-                response_bytes = self.connection.send_command(cmd)
-            except Exception:
-                if tracker is not None:
-                    tracker.disarm()
-                raise
+                tracker.arm()
+                armed.append(True)
+            except Exception as arm_error:  # noqa: BLE001
+                self.logger.warning(f"Could not arm motion tracker: {arm_error}")
 
-            # Validate response
-            if response_bytes is None:
-                error_msg = f"No response received for {axis_name} movement"
-                self.logger.error(error_msg)
-                raise RuntimeError(error_msg)
-
-            if len(response_bytes) == 0:
-                error_msg = f"Empty response received for {axis_name} movement"
-                self.logger.error(error_msg)
-                raise RuntimeError(error_msg)
-
-            # TODO: Parse response_bytes for error codes
-            # For now, just verify we got a response
-            self.logger.debug(
-                f"{axis_name} move command completed - received {len(response_bytes)} byte response"
+        try:
+            StageService(self.connection).move_to_position(
+                axis_code, value, before_send=arm
             )
-
-        except ValueError as e:
-            self.logger.error(f"Invalid command parameters for {axis_name}: {e}")
+        except (
+            EmergencyStopActiveError,
+            MicroscopeNotConfiguredError,
+            ValueError,
+        ) as e:
+            if armed:
+                tracker.disarm()
+            self.logger.error(f"{axis_name} move refused: {e}")
             raise
-
-        except socket.error as e:
-            error_msg = f"Communication error moving {axis_name}: {e}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg) from e
-
         except Exception as e:
+            if armed:
+                tracker.disarm()
             error_msg = f"Failed to move {axis_name}: {e}"
             self.logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e

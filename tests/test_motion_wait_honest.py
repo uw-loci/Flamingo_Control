@@ -89,28 +89,51 @@ def _pc_with(tracker):
     pc = _controller(connection)
     pc._motion_tracker = tracker
     pc._current_position = Position(x=1.0, y=2.0, z=3.0, r=0.0)
+    connection.is_connected.return_value = True
+    connection.has_async_reader = True
     return pc, connection
 
 
 def test_tracker_is_armed_before_the_move_is_sent():
+    from py2flamingo.services import stage_command_dedup
+
+    stage_command_dedup.reset()
     order = []
     tracker = _Tracker(True)
     tracker.arm = lambda: order.append("arm")
     pc, connection = _pc_with(tracker)
-    connection.send_command.side_effect = lambda cmd: order.append("send") or b"x"
-    pc._move_axis(1, 5.0, "X-axis")
+    connection.send_command_async.side_effect = lambda *a, **k: order.append("send")
+    try:
+        pc._move_axis(1, 5.0, "X-axis")
+    except RuntimeError:
+        pass  # no reply from the mock: the order is what is tested
     assert order == ["arm", "send"]
 
 
 def test_a_failed_send_disarms():
+    from py2flamingo.services import stage_command_dedup
+
+    stage_command_dedup.reset()
     tracker = _Tracker(True)
     pc, connection = _pc_with(tracker)
-    connection.send_command.side_effect = OSError("gone")
+    connection.send_command_async.side_effect = OSError("gone")
     try:
         pc._move_axis(1, 6.0, "X-axis")
     except RuntimeError:
         pass
     assert tracker.calls == ["arm", "disarm"]
+
+
+def test_a_dropped_duplicate_is_not_armed():
+    from py2flamingo.services import stage_command_dedup
+
+    stage_command_dedup.reset()
+    tracker = _Tracker(True)
+    pc, connection = _pc_with(tracker)
+    with patch.object(stage_command_dedup, "should_send", return_value=False):
+        pc._move_axis(1, 6.5, "X-axis")
+    assert tracker.calls == []
+    connection.send_command_async.assert_not_called()
 
 
 def _run_wait(pc, moved_axes, stage):

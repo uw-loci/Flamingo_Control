@@ -130,9 +130,12 @@ class TestItIsWiredIntoBothEmitters:
         return (Path(__file__).resolve().parents[1] / "src" / rel).read_text()
 
     def test_the_controller_funnel_checks_it(self):
+        # Through the one move implementation, StageService.move_to_position
+        # (checked below); tests/test_one_move_path.py drives it.
         src = self._src("py2flamingo/controllers/position_controller.py")
-        assert "stage_command_dedup" in src
-        assert "should_send" in src
+        body = src[src.index("def _move_axis") :]
+        body = body[: body.index("\n    def ")]
+        assert "StageService(self.connection).move_to_position(" in body
 
     def test_the_workflow_bypass_path_checks_it(self):
         # workflow_queue_service and led_2d_overview_workflow reach the stage

@@ -156,14 +156,19 @@ class TestBothEmittersAreGated(_Base):
         return (_SRC / "py2flamingo" / rel).read_text(encoding="utf-8")
 
     def test_position_controller_move_axis_is_gated(self):
+        # Its moves go through StageService.move_to_position, the one move
+        # implementation, which carries the gate (checked below).
         body = self._src("controllers/position_controller.py")
         i = body.index("def _move_axis")
-        self.assertIn("ensure_motion_allowed()", body[i : i + 1200])
+        j = body.index("\n    def ", i + 10)
+        self.assertIn("StageService(self.connection).move_to_position(", body[i:j])
+        self.assertNotIn(".send_command(", body[i:j])
 
     def test_stage_service_move_to_position_is_gated(self):
         body = self._src("services/stage_service.py")
         i = body.index("def move_to_position")
-        self.assertIn("ensure_motion_allowed()", body[i : i + 1600])
+        j = body.index("self._send_movement_command(", i)
+        self.assertIn("ensure_motion_allowed()", body[i:j])
 
     def test_the_emergency_stop_is_not_gated(self):
         """Stopping motion must always be possible."""

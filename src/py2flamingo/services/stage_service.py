@@ -5,7 +5,7 @@ Handles all stage-related commands including position queries,
 movement control, and motion monitoring.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from py2flamingo.core.command_codes import AxisCode, StageCommands  # noqa: F401
 from py2flamingo.models.microscope import Position
@@ -347,9 +347,21 @@ class StageService(MicroscopeCommandService):
 
         return position
 
-    def move_to_position(self, axis: int, position_mm: float) -> None:
+    def move_to_position(
+        self,
+        axis: int,
+        position_mm: float,
+        before_send: Optional[Callable[[], None]] = None,
+    ) -> bool:
         """
         Move stage to absolute position on specified axis.
+
+        This is the one move implementation: PositionController (the GUI,
+        volume scans), the workflow queue and the LED overview all send
+        their moves here, so the motion gate, the emergency-stop latch and
+        the duplicate suppression are applied once, the same way, for every
+        move. Stage limits are the caller's: PositionController checks them
+        before it calls this.
 
         This command returns immediately while stage moves asynchronously.
         Use motion monitoring to detect completion.
@@ -357,8 +369,19 @@ class StageService(MicroscopeCommandService):
         Args:
             axis: Axis code (AxisCode.X_AXIS, Y_AXIS, Z_AXIS, ROTATION)
             position_mm: Target position in millimeters
+            before_send: Called just before the move goes out, and only if
+                it does (not for a suppressed duplicate). PositionController
+                arms its motion tracker here, so that a fast stop is not
+                missed.
+
+        Returns:
+            True if the move was sent, False if it was a duplicate of the
+            move in flight and was dropped.
 
         Raises:
+            EmergencyStopActiveError / MicroscopeNotConfiguredError: the
+                motion gate refused the move (nothing sent).
+            ValueError: The axis is not 1-4 or the position is not a number.
             RuntimeError: If command fails or microscope not connected
 
         Example:
@@ -366,32 +389,51 @@ class StageService(MicroscopeCommandService):
             >>> # Stage begins moving asynchronously
             >>> # Wait for motion stopped callback or poll is_motion_stopped()
         """
-        # Refuse to move an instrument whose limits we do not know. This check
-        # is here and not only in the controllers because workflow_queue_service
-        # and led_2d_overview_workflow call THIS method directly, never touching
-        # PositionController — so gating the controllers alone would have left
-        # the LED overview free to drive an unconfigured stage.
+        # Refuse to move an instrument whose limits we do not know, or while
+        # the emergency stop is latched.
         from py2flamingo.services.stage_motion_gate import ensure_motion_allowed
 
         ensure_motion_allowed()
 
-        # Same duplicate suppression the controller path gets. This is the
-        # route workflow_queue_service and led_2d_overview_workflow take, and
-        # they never touch PositionController.
+        try:
+            axis_number = int(axis)
+        except (TypeError, ValueError):
+            axis_number = None
+        if (
+            axis_number is None
+            or axis_number != axis
+            or axis_number not in (1, 2, 3, 4)
+        ):
+            raise ValueError(f"Invalid axis_code {axis}, must be 1-4")
+        axis = axis_number
+        try:
+            position_mm = float(position_mm)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Invalid position for axis {axis}: {position_mm!r} - must be numeric"
+            ) from e
+
+        # Drop a command the stage is already executing. One UI intent can
+        # produce two events (Enter then focus-loss), and re-sending an
+        # identical target makes the server tear down the in-flight motion
+        # and start over. See services/stage_command_dedup.
         from py2flamingo.services import stage_command_dedup
 
-        if not stage_command_dedup.should_send(int(axis), float(position_mm)):
-            return
+        if not stage_command_dedup.should_send(int(axis), position_mm):
+            return False
 
         self.logger.debug(f"Moving axis {axis} to {position_mm} mm...")
 
-        # POSITION_SET (0x6004), as PositionController sends. The server
-        # sends no reply of its own to a move; what this waits for is the
-        # stage monitor's first position frame. 3.0.0 coded those frames with
-        # the code that was sent, but builds from 2026-10 code every one
-        # 0x6004 (StageControl.cpp threadMotionWaitForStop), so the slider
-        # variant (0x6005) this used to send timed out after 3 s on every move
-        # while the stage moved anyway (verification run, CTLSM1, 2026-11-20).
+        if before_send is not None:
+            before_send()
+
+        # POSITION_SET (0x6004). The server sends no reply of its own to a
+        # move; what this waits for is the stage monitor's first position
+        # frame. 3.0.0 coded those frames with the code that was sent, but
+        # builds from 2026-10 code every one 0x6004 (StageControl.cpp
+        # threadMotionWaitForStop), so the slider variant (0x6005) this used
+        # to send timed out after 3 s on every move while the stage moved
+        # anyway (verification run, CTLSM1, 2026-11-20).
         result = self._send_movement_command(
             StageCommandCode.POSITION_SET,
             "STAGE_POSITION_SET",
@@ -410,6 +452,7 @@ class StageService(MicroscopeCommandService):
         self.logger.debug(
             "Motion is asynchronous - use motion monitoring to detect completion"
         )
+        return True
 
     def is_motion_stopped(self) -> Optional[bool]:
         """
