@@ -1692,6 +1692,39 @@ class MainWindow(QMainWindow):
                 )
             self._geometry_restored = True
 
+    def _confirm_close_while_running(self) -> bool:
+        """True to go on closing. Asks when an acquisition or the queue runs."""
+        app = self.app
+        if app is None:
+            return True
+        queue = getattr(app, "workflow_queue_service", None)
+        queue_running = bool(queue is not None and queue.is_running)
+        acquiring = bool(getattr(app, "is_acquisition_in_progress", False))
+        if not (queue_running or acquiring):
+            return True
+        what = "The workflow queue" if queue_running else "An acquisition"
+        reply = QMessageBox.question(
+            self,
+            "Acquisition running",
+            f"{what} is still running.\n\nClosing stops it: the stage is "
+            "halted, the server workflow is stopped and the lights are turned "
+            "off. Close anyway?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        self._close_stops_acquisition = True
+        # Cancel the client side first (queue, LED overview), so nothing sends
+        # a next step while the safe state goes out.
+        try:
+            from py2flamingo.services import stage_motion_gate
+
+            stage_motion_gate.run_stop_hooks()
+        except Exception:  # noqa: BLE001 - closing must go on
+            pass
+        return True
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """Handle window close event.
 
@@ -1705,6 +1738,15 @@ class MainWindow(QMainWindow):
         import logging
 
         logger = logging.getLogger(__name__)
+
+        # A running client acquisition or workflow queue is stopped by a
+        # close (stage halted, workflow stopped, lights off): ask first.
+        self._close_stops_acquisition = False
+        if not self._confirm_close_while_running():
+            event.ignore()
+            logger.info("Close cancelled: an acquisition is still running")
+            return
+
         logger.info("Main window closing - cleaning up...")
 
         # Close sample_view first so it can save its dialog state
@@ -1748,7 +1790,11 @@ class MainWindow(QMainWindow):
 
             connection = getattr(self.app, "connection_service", None)
             if connection is not None:
-                safe_state.leave_safe(connection, "main window closed")
+                safe_state.leave_safe(
+                    connection,
+                    "main window closed",
+                    stop_everything=getattr(self, "_close_stops_acquisition", False),
+                )
         except Exception as e:
             logger.error(f"Error putting the instrument in a safe state: {e}")
 

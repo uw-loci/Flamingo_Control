@@ -445,11 +445,19 @@ class FlamingoApplication(QObject):
             if self.workflow_queue_service is None:
                 return
 
+            queue = self.workflow_queue_service
             self.workflow_queue_service.queue_completed.connect(
                 lambda: svc.notify(
                     "workflow_queue_completed",
                     title="Flamingo: workflow queue done",
-                    message="The workflow queue has finished.",
+                    message=(
+                        "The workflow queue has finished"
+                        + (
+                            f" ({queue.failed_count} failed)."
+                            if queue.failed_count
+                            else "."
+                        )
+                    ),
                     tags="white_check_mark",
                 )
             )

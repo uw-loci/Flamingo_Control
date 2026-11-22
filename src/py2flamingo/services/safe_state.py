@@ -196,7 +196,9 @@ def _activity() -> Activity:
         return Activity()
 
 
-def leave_safe(connection, reason: str, once: bool = True) -> Optional[SafeStateResult]:
+def leave_safe(
+    connection, reason: str, once: bool = True, stop_everything: bool = False
+) -> Optional[SafeStateResult]:
     """Put the instrument in a safe state as this client lets go of it.
 
     * A client acquisition is running: HALT, WORKFLOW_STOP and lights off.
@@ -206,6 +208,9 @@ def leave_safe(connection, reason: str, once: bool = True) -> Optional[SafeState
       running after the client closes; turning its light off would ruin it.
     * Otherwise: lights off (live view stop, every laser line, LED). No HALT:
       a move the client sent was checked against the limits and may finish.
+
+    ``stop_everything`` sends the full safe state whatever is running (the
+    operator confirmed closing during an acquisition).
 
     With ``once`` (the close, quit and disconnect paths, which follow one
     another on exit) it is sent once per open socket. Returns None when
@@ -218,6 +223,8 @@ def leave_safe(connection, reason: str, once: bool = True) -> Optional[SafeState
     if once and getattr(connection, "_left_safe_socket", None) is sock:
         return None
     activity = _activity()
+    if stop_everything:
+        activity.client_acquisition = True
     if activity.server_workflow and not activity.client_acquisition:
         logger.warning(
             f"Leaving ({reason}) while a server workflow runs: stage and lights "

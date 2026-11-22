@@ -152,7 +152,12 @@ class TestMainWindowClose(LitScopeCase):
         from py2flamingo.main_window import MainWindow
 
         window = MainWindow.__new__(MainWindow)
-        window.app = MagicMock(sample_view=None, connection_service=self.connection)
+        window.app = MagicMock(
+            sample_view=None,
+            connection_service=self.connection,
+            is_acquisition_in_progress=False,
+        )
+        window.app.workflow_queue_service.is_running = False
         window._geometry_manager = None
         window.camera_live_viewer = None
         window.image_controls_window = None

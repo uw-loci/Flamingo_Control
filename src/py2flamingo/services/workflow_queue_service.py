@@ -84,7 +84,10 @@ class WorkflowQueueService(QObject):
         workflow_completed: Emitted when individual workflow completes (index, total, path)
         workflow_progress: Emitted with image progress (acquired, expected)
         queue_completed: Emitted when all workflows complete
-        queue_cancelled: Emitted if queue is cancelled
+        queue_summary: Emitted just before queue_completed (succeeded, failed)
+        queue_cancelled: Emitted if queue is cancelled, and when it stops on
+            its own after a failure (queue_failed says why)
+        queue_failed: Emitted when the queue stops itself (message)
         progress_updated: Emitted with progress info (current, total, message)
         error_occurred: Emitted on error (message)
     """
@@ -94,7 +97,9 @@ class WorkflowQueueService(QObject):
     workflow_completed = pyqtSignal(int, int, str)  # index, total, path
     workflow_progress = pyqtSignal(int, int)  # images_acquired, images_expected
     queue_completed = pyqtSignal()
+    queue_summary = pyqtSignal(int, int)  # workflows succeeded, failed
     queue_cancelled = pyqtSignal()
+    queue_failed = pyqtSignal(str)
     progress_updated = pyqtSignal(int, int, str)  # current, total, message
     error_occurred = pyqtSignal(str)
     # A direct (non-queue) workflow run finished — the scope returned to idle
@@ -120,6 +125,12 @@ class WorkflowQueueService(QObject):
     # Delay after sending workflow before polling for start (seconds)
     # Gives server time to receive and begin processing the workflow
     POST_WORKFLOW_SEND_DELAY = 2.0
+
+    # After a workflow timed out: WORKFLOW_STOP is sent and the server must
+    # report idle within this long (seconds), polled this often, before the
+    # next workflow may be sent. Otherwise the queue stops.
+    STOP_IDLE_TIMEOUT = 60.0
+    STOP_IDLE_POLL_INTERVAL = 5.0
 
     def __init__(
         self,
@@ -760,6 +771,7 @@ class WorkflowQueueService(QObject):
                 self._capture_origin_position()
 
             total = len(self._queue)
+            aborted = False
             logger.info(f"Queue contains {total} workflows to execute")
 
             for i, item in enumerate(self._queue):
@@ -799,6 +811,31 @@ class WorkflowQueueService(QObject):
                     item.error = error
                     logger.error(f"Workflow {i + 1}/{total} FAILED: {error}")
                     self.error_occurred.emit(f"Workflow {item.file_path.name}: {error}")
+
+                    # A timed-out workflow may still be acquiring. Stop it and
+                    # see the server idle before anything else is sent; if
+                    # idle is not seen, the queue stops here (no next
+                    # workflow, no return to origin).
+                    if getattr(self, "_last_wait_timed_out", False):
+                        if not self._stop_and_confirm_idle():
+                            abort_msg = (
+                                f"Workflow {item.file_path.name} timed out and "
+                                f"the server did not report idle within "
+                                f"{self.STOP_IDLE_TIMEOUT:.0f} s of WORKFLOW_STOP. "
+                                f"The queue was stopped: workflows "
+                                f"{i + 2}-{total} were not sent and the stage "
+                                f"was not returned. Check the microscope."
+                            )
+                            logger.error(f"[QUEUE] {abort_msg}")
+                            aborted = True
+                            self.error_occurred.emit(abort_msg)
+                            self.queue_failed.emit(abort_msg)
+                            self.queue_cancelled.emit()
+                            break
+                        logger.warning(
+                            "[QUEUE] Timed-out workflow stopped; server reports "
+                            "idle, continuing with the next workflow"
+                        )
 
                     # If failure was connection-related, attempt reconnect before
                     # next workflow. The existing start_workflow() → _ensure_connected()
@@ -844,13 +881,17 @@ class WorkflowQueueService(QObject):
             logger.info(
                 f"=== Queue loop finished, cancel_requested={self._cancel_requested} ==="
             )
-            if not self._cancel_requested:
+            if not self._cancel_requested and not aborted:
                 # Firmware is idle now (last workflow reached SYSTEM_STATE_IDLE),
                 # so it is safe to drive the stage back to where it started.
                 if self._return_to_origin_after_queue:
                     self._return_to_origin()
+                failed = self.failed_count
+                self.queue_summary.emit(total - failed, failed)
                 self.queue_completed.emit()
-                logger.info(f"Queue execution completed: {total} workflows")
+                logger.info(
+                    f"Queue execution completed: {total} workflows, " f"{failed} failed"
+                )
 
         except Exception as e:
             logger.exception("Error during queue execution")
@@ -863,6 +904,47 @@ class WorkflowQueueService(QObject):
 
             stage_motion_gate.unregister_stop_hook("workflow queue")
 
+    @property
+    def failed_count(self) -> int:
+        """Workflows of the current (or last) queue that failed."""
+        return sum(1 for item in self._queue if item.error)
+
+    def _stop_and_confirm_idle(self) -> bool:
+        """Send WORKFLOW_STOP and wait for the server to report idle.
+
+        Idle counts only when the server says so: the SYSTEM_STATE_IDLE
+        callback, or a SYSTEM_STATE_GET answer. Returns False when neither
+        came within STOP_IDLE_TIMEOUT.
+        """
+        logger.warning("[QUEUE] Sending WORKFLOW_STOP after the timeout")
+        self._completion_event.clear()
+        self._workflow_running = True  # so the idle callback is accepted
+        try:
+            ok, msg = self._workflow_controller.stop_workflow()
+            if not ok:
+                logger.error(f"[QUEUE] WORKFLOW_STOP failed: {msg}")
+        except Exception as e:  # noqa: BLE001 - idle is still checked
+            logger.error(f"[QUEUE] WORKFLOW_STOP raised: {e}")
+        if self._connection_service is None:
+            # The controller flag is set by our own stop, not by the server.
+            logger.error("[QUEUE] No connection to ask the server for its state")
+            return False
+        deadline = time.monotonic() + self.STOP_IDLE_TIMEOUT
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            if self._completion_event.wait(
+                timeout=min(self.STOP_IDLE_POLL_INTERVAL, remaining)
+            ):
+                return True
+            try:
+                if self._is_system_idle():
+                    return True
+            except ConnectionError as e:
+                logger.error(f"[QUEUE] Connection lost waiting for idle: {e}")
+                return False
+
     def _execute_single_workflow(self, item: WorkflowQueueItem) -> tuple:
         """
         Execute a single workflow and wait for completion.
@@ -874,6 +956,7 @@ class WorkflowQueueService(QObject):
             Tuple of (success: bool, error_message: Optional[str])
         """
         file_path = item.file_path
+        self._last_wait_timed_out = False
         logger.info(f"[QUEUE] Loading workflow: {file_path.name}")
 
         # Load the workflow
@@ -948,6 +1031,7 @@ class WorkflowQueueService(QObject):
         """
         start_time = time.time()
         self._consecutive_poll_failures = 0
+        self._last_wait_timed_out = False
         logger.info(
             f"[QUEUE] Waiting for SYSTEM_STATE_IDLE callback: {item.file_path.name}"
         )
@@ -962,6 +1046,7 @@ class WorkflowQueueService(QObject):
             elapsed = time.time() - start_time
             if elapsed > self.MAX_WORKFLOW_TIMEOUT:
                 logger.error(f"[QUEUE] Workflow timeout after {elapsed:.1f}s")
+                self._last_wait_timed_out = True
                 return (False, f"Timeout after {elapsed:.1f}s")
 
             # Wait for SYSTEM_STATE_IDLE callback (primary completion signal)
