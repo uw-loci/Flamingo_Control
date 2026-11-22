@@ -6,7 +6,7 @@ pywt/scipy/scikit-image. The full ``pystripe`` package is not used by the
 pipeline at all — it imports dcimg/imageio/tqdm at module load, which is
 exactly why the filter was vendored.
 
-This dialog kept probing ``import pystripe``. That was correct while
+The stitching dialog kept probing ``import pystripe``. That was correct while
 requirements pinned flamingo-stitcher v0.4.2, and became wrong the moment the
 pin moved to v0.10.1: ``update_and_run.bat`` installs pystripe with
 ``--no-deps``, so the package is importable-in-name-only and the probe fails.
@@ -19,22 +19,26 @@ Run: QT_QPA_PLATFORM=offscreen ./.venv/bin/python -m pytest \\
 """
 
 import ast
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-DIALOG = (
-    Path(__file__).resolve().parents[1]
-    / "src"
-    / "py2flamingo"
-    / "views"
-    / "dialogs"
-    / "stitching_dialog.py"
-)
+
+def _dialog_path():
+    """The stitching dialog the app actually opens (main_window imports
+    ``flamingo_stitcher.gui.StitchingDialog``), located without importing it."""
+    spec = importlib.util.find_spec("flamingo_stitcher")
+    if spec is None or not spec.submodule_search_locations:
+        pytest.skip("flamingo_stitcher is not installed")
+    path = Path(spec.submodule_search_locations[0]) / "gui" / "stitching_dialog.py"
+    if not path.exists():
+        pytest.fail(f"flamingo_stitcher has no gui/stitching_dialog.py at {path}")
+    return path
 
 
 def _source():
-    return DIALOG.read_text(encoding="utf-8")
+    return _dialog_path().read_text(encoding="utf-8")
 
 
 class TestTheGateProbesTheRealBackend:
