@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
 from ..models import ConnectionModel, ConnectionState, WorkflowModel
+from ..utils.workflow_keys import number, whole_number
 from ..utils.workflow_parser import WorkflowTextFormatter
 
 if TYPE_CHECKING:
@@ -869,31 +870,19 @@ class WorkflowController(QObject):
         camera = workflow_dict.get("Camera Settings", {}) or {}
         exp = workflow_dict.get("Experiment Settings", {}) or {}
 
-        def _f(d, key, default):
-            try:
-                return float(str(d.get(key, default)).replace(",", ""))
-            except (TypeError, ValueError):
-                return float(default)
-
-        def _i(d, key, default):
-            try:
-                return int(round(float(str(d.get(key, default)).replace(",", ""))))
-            except (TypeError, ValueError):
-                return int(default)
-
-        num_planes = max(1, _i(stack, "Number of planes", 1))
+        num_planes = max(1, whole_number(stack.get("Number of planes", 1), 1))
         # "Change in Z axis (mm)" is the TOTAL Z range (planes * step), NOT the
         # per-plane step. (The previous code treated it as the step and then did
         # (planes-1) * it, inflating the range ~hundredfold -> absurd times.)
-        z_range_mm = _f(stack, "Change in Z axis (mm)", 0.0)
-        z_velocity = _f(stack, "Z stage velocity (mm/s)", 0.1) or 0.1
+        z_range_mm = number(stack.get("Change in Z axis (mm)", 0.0), 0.0)
+        z_velocity = number(stack.get("Z stage velocity (mm/s)", 0.1), 0.1) or 0.1
         # Exposure lives under Camera Settings, but real files often leave it
         # blank there and store it under Experiment Settings.
-        exposure_us = _f(camera, "Exposure time (us)", 0.0) or _f(
-            exp, "Exposure time (us)", 1000.0
+        exposure_us = number(camera.get("Exposure time (us)", 0.0), 0.0) or number(
+            exp.get("Exposure time (us)", 1000.0), 1000.0
         )
-        aoi_width = _i(camera, "AOI width", 2048)
-        aoi_height = _i(camera, "AOI height", 2048)
+        aoi_width = whole_number(camera.get("AOI width", 2048), 2048)
+        aoi_height = whole_number(camera.get("AOI height", 2048), 2048)
 
         # Number of independent stacks (these MULTIPLY the per-stack cost — the
         # previous estimate ignored them entirely, undercounting data by N).
@@ -908,11 +897,11 @@ class WorkflowController(QObject):
             if geom is not None:
                 num_stacks = geom.total_tiles
             else:
-                num_stacks = max(1, _i(stack, "Stack option settings 1", 1)) * max(
-                    1, _i(stack, "Stack option settings 2", 1)
-                )
+                num_stacks = max(
+                    1, whole_number(stack.get("Stack option settings 1", 1), 1)
+                ) * max(1, whole_number(stack.get("Stack option settings 2", 1), 1))
         elif "Number of angles" in exp:
-            num_stacks = max(1, _i(exp, "Number of angles", 1))
+            num_stacks = max(1, whole_number(exp.get("Number of angles", 1), 1))
         else:
             num_stacks = 1
         timepoints = self._timepoints_from_exp(exp)

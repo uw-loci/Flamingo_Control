@@ -49,6 +49,7 @@ from py2flamingo.services.tiff_size_validator import (
 from py2flamingo.services.window_geometry_manager import (
     _default_geometry_manager,
 )
+from py2flamingo.utils.workflow_keys import number, whole_number
 from py2flamingo.utils.workflow_parser import (
     dict_to_workflow_text,
     infer_workflow_type,
@@ -1503,19 +1504,6 @@ class WorkflowView(QWidget):
         section is isolated so one bad/absent section doesn't abort the rest.
         """
 
-        def _num(v, default=0.0):
-            # workflow.txt may use a thousands comma (e.g. "9,002" us).
-            try:
-                return float(str(v).strip().replace(",", ""))
-            except (TypeError, ValueError):
-                return default
-
-        def _int(v, default=0):
-            try:
-                return int(round(float(str(v).strip().replace(",", ""))))
-            except (TypeError, ValueError):
-                return default
-
         def _bool(v, default=False):
             s = str(v).strip().lower()
             if s in ("true", "1", "yes"):
@@ -1555,20 +1543,20 @@ class WorkflowView(QWidget):
                 p = _section("Start Position")
                 self._position_panel.set_position_a(
                     Position(
-                        x=_num(p.get("X (mm)")),
-                        y=_num(p.get("Y (mm)")),
-                        z=_num(p.get("Z (mm)")),
-                        r=_num(p.get("Angle (degrees)")),
+                        x=number(p.get("X (mm)"), 0.0),
+                        y=number(p.get("Y (mm)"), 0.0),
+                        z=number(p.get("Z (mm)"), 0.0),
+                        r=number(p.get("Angle (degrees)"), 0.0),
                     )
                 )
             if "End Position" in workflow_dict:
                 p = _section("End Position")
                 self._position_panel.set_position_b(
                     Position(
-                        x=_num(p.get("X (mm)")),
-                        y=_num(p.get("Y (mm)")),
-                        z=_num(p.get("Z (mm)")),
-                        r=_num(p.get("Angle (degrees)")),
+                        x=number(p.get("X (mm)"), 0.0),
+                        y=number(p.get("Y (mm)"), 0.0),
+                        z=number(p.get("Z (mm)"), 0.0),
+                        r=number(p.get("Angle (degrees)"), 0.0),
                     )
                 )
         except Exception:  # noqa: BLE001
@@ -1585,23 +1573,23 @@ class WorkflowView(QWidget):
                 frame_rate = cam.get("Frame rate (f/s)") or exp.get("Frame rate (f/s)")
                 self._camera_panel.set_settings(
                     {
-                        "exposure_us": _num(exposure_us, 0.0),
-                        "frame_rate": _num(frame_rate, 0.0),
-                        "aoi_width": _int(cam.get("AOI width"), 2048),
-                        "aoi_height": _int(cam.get("AOI height"), 2048),
-                        "cam1_capture_percentage": _int(
+                        "exposure_us": number(exposure_us, 0.0),
+                        "frame_rate": number(frame_rate, 0.0),
+                        "aoi_width": whole_number(cam.get("AOI width"), 2048),
+                        "aoi_height": whole_number(cam.get("AOI height"), 2048),
+                        "cam1_capture_percentage": whole_number(
                             stack.get("Camera 1 capture percentage"), 100
                         ),
                         # Capture-mode keys carry a parenthetical in real files
                         # ("...capture mode (0 full, 1 from front, ...)"), so match
                         # by prefix rather than exact key.
-                        "cam1_capture_mode": _int(
+                        "cam1_capture_mode": whole_number(
                             _by_prefix(stack, "Camera 1 capture mode"), 0
                         ),
-                        "cam2_capture_percentage": _int(
+                        "cam2_capture_percentage": whole_number(
                             stack.get("Camera 2 capture percentage"), 100
                         ),
-                        "cam2_capture_mode": _int(
+                        "cam2_capture_mode": whole_number(
                             _by_prefix(stack, "Camera 2 capture mode"), 0
                         ),
                     }
@@ -1622,8 +1610,12 @@ class WorkflowView(QWidget):
                 current_overlap = self._tiling_panel.get_settings().overlap_percent
                 self._tiling_panel.set_settings(
                     TileSettings(
-                        num_tiles_x=_int(stack.get("Stack option settings 1"), 1),
-                        num_tiles_y=_int(stack.get("Stack option settings 2"), 1),
+                        num_tiles_x=whole_number(
+                            stack.get("Stack option settings 1"), 1
+                        ),
+                        num_tiles_y=whole_number(
+                            stack.get("Stack option settings 2"), 1
+                        ),
                         overlap_percent=current_overlap,
                     )
                 )

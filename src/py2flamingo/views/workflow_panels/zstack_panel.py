@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.models.data.workflow import StackSettings
+from py2flamingo.utils.workflow_keys import number, whole_number
 
 # System limits for Z velocity (from C++ SystemLimits.h)
 # Matches the server's own floor (Teensy SystemLimits.h:13, Z_VELOCITY_MIN).
@@ -641,25 +642,13 @@ class ZStackPanel(QWidget):
         """
         exp_dict = exp_dict or {}
 
-        def _num(v, default=0.0):
-            try:
-                return float(str(v).strip().replace(",", ""))
-            except (TypeError, ValueError):
-                return default
-
-        def _int(v, default=0):
-            try:
-                return int(round(float(str(v).strip().replace(",", ""))))
-            except (TypeError, ValueError):
-                return default
-
-        num_planes = max(1, _int(stack_dict.get("Number of planes"), 1))
+        num_planes = max(1, whole_number(stack_dict.get("Number of planes"), 1))
         # Prefer the explicit plane spacing; else derive step = range / planes
         # (the C++ convention, range = planes * step).
         if exp_dict.get("Plane spacing (um)") is not None:
-            z_step_um = _num(exp_dict.get("Plane spacing (um)"), self._z_step.value())
+            z_step_um = number(exp_dict.get("Plane spacing (um)"), self._z_step.value())
         else:
-            z_range_um = _num(stack_dict.get("Change in Z axis (mm)")) * 1000.0
+            z_range_um = number(stack_dict.get("Change in Z axis (mm)"), 0.0) * 1000.0
             z_step_um = (
                 z_range_um / num_planes if num_planes > 0 else self._z_step.value()
             )
@@ -668,14 +657,14 @@ class ZStackPanel(QWidget):
         try:
             if z_step_um > 0:
                 self._z_step.setValue(z_step_um)
-            vel = _num(
+            vel = number(
                 stack_dict.get("Z stage velocity (mm/s)"), self._z_velocity.value()
             )
             if vel > 0:
                 self._z_velocity.setValue(vel)
             if stack_dict.get("Rotational stage velocity (°/s)") is not None:
                 self._rotational_velocity.setValue(
-                    _num(
+                    number(
                         stack_dict.get("Rotational stage velocity (°/s)"),
                         self._rotational_velocity.value(),
                     )
@@ -687,12 +676,12 @@ class ZStackPanel(QWidget):
                     self._stack_option.setCurrentIndex(idx)
             if opt.lower() == "tile":
                 self._tiles_x.setValue(
-                    _int(
+                    whole_number(
                         stack_dict.get("Stack option settings 1"), self._tiles_x.value()
                     )
                 )
                 self._tiles_y.setValue(
-                    _int(
+                    whole_number(
                         stack_dict.get("Stack option settings 2"), self._tiles_y.value()
                     )
                 )

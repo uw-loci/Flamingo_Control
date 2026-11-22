@@ -1,4 +1,4 @@
-"""Workflow text files: parse (parse_workflow_file) and write (dict_to_workflow).
+"""Workflow text files: parse (parse_workflow_file).
 
 The TCP/protocol tests that used to live here went with the legacy
 ConnectionService and TCPClient; the live protocol is tested in
@@ -57,51 +57,6 @@ Comments = Test workflow
             self.assertEqual(float(result["End Position"]["Z (mm)"]), 15.0)
             self.assertEqual(int(result["Stack Settings"]["Number of planes"]), 100)
             self.assertEqual(result["Experiment Settings"]["Save image data"], "Tiff")
-
-        finally:
-            os.unlink(temp_file)
-
-    def test_dict_to_workflow(self):
-        """Test converting dictionary back to workflow text."""
-        from py2flamingo.utils.file_handlers import dict_to_workflow
-
-        # Create workflow dict
-        workflow_dict = {
-            "Work Flow Type": "Snap",
-            "Start Position": {
-                "X (mm)": "5.0",
-                "Y (mm)": "10.0",
-                "Z (mm)": "2.0",
-                "Angle (degrees)": "0.0",
-            },
-            "End Position": {
-                "X (mm)": "5.0",
-                "Y (mm)": "10.0",
-                "Z (mm)": "2.01",
-                "Angle (degrees)": "0.0",
-            },
-            "Experiment Settings": {
-                "Save image data": "NotSaved",
-                "Comments": "Unit test",
-            },
-        }
-
-        # Write to temp file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            temp_file = f.name
-
-        try:
-            dict_to_workflow(temp_file, workflow_dict)
-
-            # Read back and verify
-            with open(temp_file, "r") as f:
-                content = f.read()
-
-            self.assertIn("<Workflow Settings>", content)
-            self.assertIn("Work Flow Type", content)
-            self.assertIn("Snap", content)
-            self.assertIn("X (mm) = 5.0", content)
-            self.assertIn("</Workflow Settings>", content)
 
         finally:
             os.unlink(temp_file)

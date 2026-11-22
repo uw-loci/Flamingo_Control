@@ -13,6 +13,7 @@ from py2flamingo.utils.workflow_keys import (
     PATH_SECTION,
     SIDES,
     find_value,
+    number,
     path_recording,
     read_workflow_sections,
 )
@@ -50,14 +51,6 @@ def parse_workflow_position(workflow_file: Path) -> Optional[Dict]:
     return None
 
 
-def _float(value: Optional[str]) -> Optional[float]:
-    """A workflow number, or None when it is blank or not a number."""
-    try:
-        return float(str(value).replace(",", "").strip())
-    except (TypeError, ValueError):
-        return None
-
-
 def read_xy_position_from_workflow(
     workflow_file: Path,
 ) -> Optional[Tuple[float, float]]:
@@ -73,7 +66,7 @@ def read_xy_position_from_workflow(
     """
     try:
         start = read_workflow_sections(workflow_file).get("Start Position", {})
-        x, y = _float(start.get("X (mm)")), _float(start.get("Y (mm)"))
+        x, y = number(start.get("X (mm)")), number(start.get("Y (mm)"))
         if x is not None and y is not None:
             return x, y
     except Exception as e:
@@ -96,8 +89,8 @@ def read_z_range_from_workflow(workflow_file: Path) -> Tuple[float, float]:
     except Exception as e:
         logger.error(f"Failed to read Z range from {workflow_file.name}: {e}")
         return (0.0, 10.0)
-    z_min = _float(sections.get("Start Position", {}).get("Z (mm)"))
-    z_max = _float(sections.get("End Position", {}).get("Z (mm)"))
+    z_min = number(sections.get("Start Position", {}).get("Z (mm)"))
+    z_max = number(sections.get("End Position", {}).get("Z (mm)"))
     return (z_min or 0.0, z_max or 0.0)
 
 
@@ -248,7 +241,7 @@ def read_z_velocity_from_workflow(workflow_file: Path) -> float:
         Z velocity in mm/s (default 1.0)
     """
     try:
-        velocity = _float(
+        velocity = number(
             find_value(read_workflow_sections(workflow_file), "Z stage velocity (mm/s)")
         )
         if velocity is not None and velocity >= 0:

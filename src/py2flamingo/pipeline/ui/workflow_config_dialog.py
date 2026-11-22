@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.workflow_keys import number, whole_number
 from py2flamingo.utils.workflow_parser import dict_to_workflow_text, parse_workflow_file
 from py2flamingo.views.workflow_panels import (
     CameraPanel,
@@ -195,18 +196,6 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
         stack = wf.get("Stack Settings", {})
         exp = wf.get("Experiment Settings", {})
 
-        def _f(d, key, default=0.0):
-            try:
-                return float(str(d.get(key, default)).replace(",", ""))
-            except (TypeError, ValueError):
-                return default
-
-        def _i(d, key, default=0):
-            try:
-                return int(float(str(d.get(key, default))))
-            except (TypeError, ValueError):
-                return default
-
         specs = [
             FieldSpec(
                 key="illum_summary",
@@ -224,7 +213,7 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
                 label="Exposure (µs)",
                 widget_type="float",
                 current_value=0.0,
-                parsed_value=_f(cam, "Exposure time (us)", 10000.0),
+                parsed_value=number(cam.get("Exposure time (us)", 10000.0), 10000.0),
                 group="Camera",
             ),
             FieldSpec(
@@ -232,7 +221,7 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
                 label="Frame rate (f/s)",
                 widget_type="float",
                 current_value=0.0,
-                parsed_value=_f(cam, "Frame rate (f/s)", 40.0),
+                parsed_value=number(cam.get("Frame rate (f/s)", 40.0), 40.0),
                 group="Camera",
             ),
             FieldSpec(
@@ -240,7 +229,7 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
                 label="Number of planes",
                 widget_type="int",
                 current_value=0,
-                parsed_value=_i(stack, "Number of planes", 100),
+                parsed_value=whole_number(stack.get("Number of planes", 100), 100),
                 group="Z-Stack",
             ),
             FieldSpec(
@@ -248,7 +237,7 @@ class PipelineWorkflowConfigDialog(PersistentDialog):
                 label="Z range (mm)",
                 widget_type="float",
                 current_value=0.0,
-                parsed_value=_f(stack, "Change in Z axis (mm)", 0.25),
+                parsed_value=number(stack.get("Change in Z axis (mm)", 0.25), 0.25),
                 group="Z-Stack",
             ),
             FieldSpec(

@@ -344,6 +344,35 @@ class WorkflowParser:
         return validate_workflow(workflow_dict)
 
 
+def _required(section: Dict[str, Any], section_name: str, key: str) -> Any:
+    """``section[key]``, or a WorkflowError naming what is missing.
+
+    For the values that move the stage or set its speed, where a default would
+    send the stage somewhere nobody asked for."""
+    value = section.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        from py2flamingo.core.errors import ErrorCodes, WorkflowError
+
+        raise WorkflowError(
+            f"The workflow has no '{key}' in <{section_name}>; it sets where or "
+            "how fast the stage moves, so it is not filled in with a default.",
+            error_code=ErrorCodes.WORKFLOW_INVALID,
+            context={"section": section_name, "key": key},
+        )
+    return value
+
+
+def _position_lines(lines: List[str], position: Dict[str, Any], name: str) -> None:
+    for key, fmt in (
+        ("X (mm)", ".6f"),
+        ("Y (mm)", ".6f"),
+        ("Z (mm)", ".6f"),
+        ("Angle (degrees)", ".2f"),
+    ):
+        value = float(_required(position, name, key))
+        lines.append(f"    {key} = {value:{fmt}}")
+
+
 def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     """Convert workflow dictionary to workflow file text format.
 
@@ -392,8 +421,9 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     plane_spacing = exp.get("Plane spacing (um)", 1.0)
     lines.append(f"    Plane spacing (um) = {plane_spacing}")
 
-    # Frame rate and exposure
-    frame_rate = exp.get("Frame rate (f/s)", 100.0)
+    # Frame rate and exposure. The frame rate and the Z velocity set how fast
+    # the stage sweeps (the server reads both), so neither has a default.
+    frame_rate = float(_required(exp, "Experiment Settings", "Frame rate (f/s)"))
     exposure_time = exp.get("Exposure time (us)", 10000)
     lines.append(f"    Frame rate (f/s) = {frame_rate:.1f}")
     lines.append(f"    Exposure time (us) = {int(exposure_time)}")
@@ -469,9 +499,8 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
         f"    Change in Z axis (mm) = {stack.get('Change in Z axis (mm)', 0.001):.6f}"
     )
     lines.append(f"    Number of planes = {stack.get('Number of planes', 1)}")
-    lines.append(
-        f"    Z stage velocity (mm/s) = {stack.get('Z stage velocity (mm/s)', 0.4)}"
-    )
+    z_velocity = _required(stack, "Stack Settings", "Z stage velocity (mm/s)")
+    lines.append(f"    Z stage velocity (mm/s) = {z_velocity}")
     lines.append(
         f"    Rotational stage velocity (°/s) = {stack.get('Rotational stage velocity (°/s)', 0)}"
     )
@@ -508,21 +537,16 @@ def dict_to_workflow_text(workflow_dict: Dict[str, Any]) -> str:
     # Start Position section
     lines.append("")
     lines.append("    <Start Position>")
+    # Where the stage goes: no defaults (a missing Z used to read as 10.0 mm).
     start_pos = workflow_dict.get("Start Position", {})
-    lines.append(f"    X (mm) = {start_pos.get('X (mm)', 0.0):.6f}")
-    lines.append(f"    Y (mm) = {start_pos.get('Y (mm)', 0.0):.6f}")
-    lines.append(f"    Z (mm) = {start_pos.get('Z (mm)', 10.0):.6f}")
-    lines.append(f"    Angle (degrees) = {start_pos.get('Angle (degrees)', 0.0):.2f}")
+    _position_lines(lines, start_pos, "Start Position")
     lines.append("    </Start Position>")
 
     # End Position section
     lines.append("")
     lines.append("    <End Position>")
     end_pos = workflow_dict.get("End Position", start_pos)
-    lines.append(f"    X (mm) = {end_pos.get('X (mm)', 0.0):.6f}")
-    lines.append(f"    Y (mm) = {end_pos.get('Y (mm)', 0.0):.6f}")
-    lines.append(f"    Z (mm) = {end_pos.get('Z (mm)', 10.0):.6f}")
-    lines.append(f"    Angle (degrees) = {end_pos.get('Angle (degrees)', 0.0):.2f}")
+    _position_lines(lines, end_pos, "End Position")
     lines.append("    </End Position>")
 
     # Illumination Source section

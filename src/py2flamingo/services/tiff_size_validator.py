@@ -154,15 +154,18 @@ def parse_workflow_file(workflow_path: Path) -> Optional[TiffSizeEstimate]:
         TiffSizeEstimate if parseable, None otherwise
     """
     try:
-        from py2flamingo.utils.workflow_keys import find_value, read_workflow_sections
+        from py2flamingo.utils.workflow_keys import (
+            find_value,
+            read_workflow_sections,
+            whole_number,
+        )
 
         # In the app's keys: "ROI width" (servers from 2026-10-06) reads as
         # "AOI width".
         sections = read_workflow_sections(workflow_path)
 
         def _int(key: str, default: int) -> int:
-            m = re.match(r"\d+", str(find_value(sections, key) or "").strip())
-            return int(m.group(0)) if m else default
+            return whole_number(find_value(sections, key), default)
 
         num_planes = _int("Number of planes", 1)
         image_width = _int("AOI width", 2048)

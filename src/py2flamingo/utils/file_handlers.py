@@ -111,25 +111,6 @@ def text_to_dict(file_path: Union[str, Path]) -> Dict[str, Any]:
         return parse_settings_text(f.read())
 
 
-def dict_to_workflow(path, wf_dict):
-    p = Path(path)
-    ensure_dir(p.parent)
-    lines = ["<Workflow Settings>"]
-
-    def _emit(d, out):
-        for k, v in d.items():
-            if isinstance(v, dict):
-                out.append(f"<{k}>")
-                _emit(v, out)
-                out.append(f"</{k}>")
-            else:
-                out.append(f"{k} = {v}")
-
-    _emit(wf_dict, lines)
-    lines.append("</Workflow Settings>")
-    safe_write(p, "\n".join(lines) + "\n")
-
-
 def set_section_values(
     file_path: Union[str, Path], section: str, values: Dict[str, str]
 ) -> None:

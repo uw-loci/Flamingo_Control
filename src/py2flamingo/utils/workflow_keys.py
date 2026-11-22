@@ -54,6 +54,32 @@ _TRUE = ("true", "1", "on", "yes")
 _FALSE = ("false", "0", "off", "no")
 
 
+def number(value: Any, default: Any = None) -> Any:
+    """A workflow value as a float: ``"9,002"`` (a thousands comma) is 9002.0.
+    ``default`` when the value is missing, blank or not a number."""
+    try:
+        return float(str(value).strip().replace(",", ""))
+    except (TypeError, ValueError):
+        return default
+
+
+def whole_number(value: Any, default: Any = None) -> Any:
+    """A workflow value as an int, rounded: ``"2,048"`` is 2048, ``"2.6"`` is 3.
+    ``default`` when the value is missing, blank or not a number."""
+    as_float = number(value)
+    if (
+        as_float is None
+        or as_float != as_float
+        or as_float
+        in (
+            float("inf"),
+            float("-inf"),
+        )
+    ):
+        return default
+    return int(round(as_float))
+
+
 def setting_bool(text: Any, default: Optional[bool] = False) -> Optional[bool]:
     """The server's reading of a setting word (``SystemSupport::settingBool``)."""
     value = str(text).strip().lower()
