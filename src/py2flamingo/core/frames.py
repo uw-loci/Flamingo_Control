@@ -80,19 +80,16 @@ class ParsedMessage:
     @property
     def is_unsolicited(self) -> bool:
         """Check if this is an unsolicited callback message."""
-        from py2flamingo.core.socket_reader import UNSOLICITED_COMMANDS
+        from py2flamingo.core.command_codes import UNSOLICITED_COMMANDS
 
         return self.command_code in UNSOLICITED_COMMANDS
 
     @property
     def command_name(self) -> str:
         """Get human-readable command name."""
-        from py2flamingo.core.socket_reader import ProtocolCommands
+        from py2flamingo.core.command_codes import command_name
 
-        try:
-            return ProtocolCommands(self.command_code).name
-        except ValueError:
-            return f"UNKNOWN_0x{self.command_code:04X}"
+        return command_name(self.command_code)
 
     @property
     def params(self) -> List[int]:

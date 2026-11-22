@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 
 from py2flamingo.core import server_layout
+from py2flamingo.core.command_codes import StageCommands
 from py2flamingo.core.frames import END_MARKER, START_MARKER
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class PositionDebugHelper:
     """
 
     # Command codes
-    COMMAND_CODES_STAGE_POSITION_GET = 0x6008
+    COMMAND_CODES_STAGE_POSITION_GET = StageCommands.POSITION_GET
 
     # Frame markers bracketing every 128-byte command/response
     # (core/frames.py). A response is only trustworthy when BOTH

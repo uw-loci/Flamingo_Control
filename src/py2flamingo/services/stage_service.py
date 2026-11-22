@@ -7,42 +7,22 @@ movement control, and motion monitoring.
 
 from typing import Any, Dict, Optional
 
+from py2flamingo.core.command_codes import AxisCode, StageCommands  # noqa: F401
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
 
 class StageCommandCode:
-    """Stage subsystem command codes from CommandCodes.h (0x6000 range)."""
+    """Stage codes (aliases of core.command_codes.StageCommands)."""
 
     # Query commands
-    POSITION_GET = 24584  # 0x6008
-    MOTION_STOPPED = 24592  # 0x6010
+    POSITION_GET = StageCommands.POSITION_GET  # 0x6008
+    MOTION_STOPPED = StageCommands.MOTION_STOPPED  # 0x6010
 
-    # Movement commands
-    POSITION_SET = 24580  # 0x6004
-    POSITION_SET_SLIDER = 24581  # 0x6005 - from GUI slider
-    POSITION_SET_TEXT = 24582  # 0x6006 - from GUI text entry
-
-
-class AxisCode:
-    """
-    Stage axis codes for movement commands.
-
-    From oldcodereference/microscope_connect.py lines 108-111:
-    - move_axis(..., 1, x)  # X-axis
-    - move_axis(..., 2, y)  # Y-axis
-    - move_axis(..., 3, z)  # Z-axis
-    - move_axis(..., 4, r)  # Rotation
-    """
-
-    X_AXIS = 1
-    Y_AXIS = 2
-    Z_AXIS = 3
-    ROTATION = 4
-    # STAGE_AXIS_ALL in the server's SystemIDs.h. HALT and HOME act only on a
-    # valid axis (1-4) or on this; axis 0 is STAGE_AXIS_NONE, and the server
-    # drops a stage command carrying it before any stage sees it.
-    ALL = 0xFF
+    # Movement commands. POSITION_SET (0x6004) is the one this client sends.
+    POSITION_SET = StageCommands.POSITION_SET  # 0x6004
+    POSITION_SET_SLIDER = StageCommands.POSITION_SET_SLIDER  # 0x6005
+    POSITION_SET_TEXT = StageCommands.POSITION_SET_TEXT_CTRL  # 0x6006
 
 
 def _reply_for_axis(axis: int):

@@ -17,6 +17,7 @@ import logging
 import socket
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
+from py2flamingo.core.command_codes import FIXED
 from py2flamingo.core.tcp_protocol import CommandDataBits, get_command_name
 
 if TYPE_CHECKING:
@@ -29,20 +30,21 @@ if TYPE_CHECKING:
 #: that failed part way may still have reached the server, and repeating a
 #: move or a workflow start is not safe. Those report the failure instead.
 RESEND_AFTER_RECONNECT = frozenset(
-    {
-        0x6008,  # STAGE_POSITION_GET
-        0x600A,  # STAGE_VELOCITY_GET
-        0x300A,  # CAMERA_EXPOSURE_GET
-        0x300E,  # CAMERA_TRIGGER_MODE_GET
-        0x3010,  # CAMERA_ROI_LEFT_GET
-        0x3012,  # CAMERA_ROI_TOP_GET
-        0x3018,  # CAMERA_FPS_GET
-        0x3027,  # CAMERA_IMAGE_SIZE_GET
-        0x302C,  # CAMERA_READ_OUT_TIME_GET
-        0x3037,  # CAMERA_PIXEL_FIELD_OF_VIEW_GET
-        0x2002,  # LASER_LEVEL_GET
-        0xA007,  # SYSTEM_STATE_GET
-    }
+    FIXED[name]
+    for name in (
+        "STAGE_POSITION_GET",
+        "STAGE_VELOCITY_GET",
+        "CAMERA_EXPOSURE_GET",
+        "CAMERA_TRIGGER_MODE_GET",
+        "CAMERA_ROI_LEFT_GET",
+        "CAMERA_ROI_TOP_GET",
+        "CAMERA_FPS_GET",
+        "CAMERA_IMAGE_SIZE_GET",
+        "CAMERA_READ_OUT_TIME_GET",
+        "CAMERA_PIXEL_FIELD_OF_VIEW_GET",
+        "LASER_LEVEL_GET",
+        "SYSTEM_STATE_GET",
+    )
 )
 
 DEFAULT_REPLY_TIMEOUT_S = 3.0

@@ -23,13 +23,12 @@ mistaken for an instrument.
 What it models, because these are the behaviours that have actually caused
 faults:
 
-* **Motion takes time.** ``POSITION_SET_MOVE`` returns immediately and the
+* **Motion takes time.** ``POSITION_SET`` returns immediately and the
   axis travels at a finite speed, so a caller that assumes a move is finished
   when the ack arrives sees the same stale position it would see on the rig.
-* **Two codes command a move.** ``POSITION_SET_MOVE`` (0x6004) and
-  ``POSITION_SET`` (0x6005) both move an axis here, because the application
-  sends the second one from :mod:`py2flamingo.services.stage_service` while
-  the command-code module documents the first as the client's.
+* **Three codes command a move.** ``STAGE_POSITION_SET`` (0x6004, what the
+  client sends) and the vendor GUI's ``_SLIDER`` (0x6005) and ``_TEXT_CTRL``
+  (0x6006) all move an axis, as on the server.
 
 * **HALT and HOME are different commands.** ``HALT`` (0x6003) stops motion
   where it is; ``HOME`` (0x6002) drives to the reference. They are recorded
@@ -623,15 +622,14 @@ class SyntheticMicroscope:
             **self._layout_handlers(),
             SystemCommands.STATE_GET: self._on_state_get,
             SystemCommands.STATE_IDLE: self._on_state_idle,
-            # Both move codes. command_codes.py documents POSITION_SET_MOVE
-            # (0x6004) as "the code the Python GUI uses", but
-            # StageService.move_to_position sends POSITION_SET_SLIDER (0x6005)
-            # from its own local enum, with the comment "Use slider variant
-            # from logs" (stage_service.py:390). A synthetic scope that
-            # modelled only the documented one would silently ack every real
-            # move and move nothing, which is how this was found.
-            StageCommands.POSITION_SET_MOVE: self._on_move,
+            # The server moves for all three position-set codes: the client
+            # sends POSITION_SET (0x6004); the vendor GUI's slider and text
+            # box send 0x6005 and 0x6006. A client once sent the slider code,
+            # and a scope that modelled only one would have acked its moves
+            # and moved nothing.
             StageCommands.POSITION_SET: self._on_move,
+            StageCommands.POSITION_SET_SLIDER: self._on_move,
+            StageCommands.POSITION_SET_TEXT_CTRL: self._on_move,
             StageCommands.POSITION_GET: self._on_position_get,
             StageCommands.HALT: self._on_halt,
             StageCommands.HOME: self._on_home,
@@ -828,9 +826,7 @@ class SyntheticMicroscope:
         # sent; later builds code every one 0x6004 (StageControl.cpp,
         # threadMotionWaitForStop), so a client waiting for 0x6005 times out.
         frame_code = (
-            code
-            if self.layout is layouts.REFERENCE
-            else StageCommands.POSITION_SET_MOVE
+            code if self.layout is layouts.REFERENCE else StageCommands.POSITION_SET
         )
         self._reply(client, frame_code, value=float(value))
         arrival = self.stage.arrives_at.get(axis, time.monotonic())

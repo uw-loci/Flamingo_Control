@@ -1133,7 +1133,11 @@ class MVCConnectionService:
             self.logger.info(f"Loaded {len(scope_settings)} setting sections")
 
             # Step 3: Get pixel size from microscope
-            COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = 12343  # Fixed: was 12347
+            from py2flamingo.core.command_codes import CameraCommands
+
+            COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = (
+                CameraCommands.PIXEL_FIELD_OF_VIEW_GET
+            )
             cmd_pixel = Command(code=COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET)
 
             self.logger.debug("Sending PIXEL_FIELD_OF_VIEW_GET command")

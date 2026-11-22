@@ -32,10 +32,13 @@ from typing import (
     Iterable,
     List,
     Optional,
-    Set,
     Union,
 )
 
+from py2flamingo.core.command_codes import (  # noqa: F401 - re-exported
+    FIXED,
+    UNSOLICITED_COMMANDS,
+)
 from py2flamingo.core.frames import ParsedMessage, parse_frame
 
 logger = logging.getLogger(__name__)
@@ -45,74 +48,58 @@ ADDITIONAL_DATA_TIMEOUT_S = 10.0
 
 
 class ProtocolCommands(IntEnum):
-    """Known command codes from the Flamingo protocol (for socket reader use)."""
+    """Command codes the reader names in its own log lines.
 
-    # Stage commands
-    # Values checked against the server header 2026-08-28. This table is what
-    # `_command_name` resolves received codes through, so a wrong entry does not
-    # just mislabel a log line -- it mislabels it *plausibly*, which is worse.
-    STAGE_HOME = 0x6002  # 24578 (was 0x6001 = FIND_REFERENCE)
-    STAGE_HALT = 0x6003  # 24579 (was 0x6002 = HOME)
-    STAGE_POSITION_SET_MOVE = 0x6004  # 24580 - the code that actually moves
-    STAGE_POSITION_SET_SLIDER = 0x6005  # 24581 - server's name for this one
-    STAGE_VELOCITY_SET = 0x6009  # 24585 (was 0x6006 = POSITION_SET_TEXT_CTRL)
-    STAGE_POSITION_GET = 0x6008  # 24584
-    STAGE_VELOCITY_GET = 0x600A  # 24586 (slot previously called SAVE_LOCATIONS_SET)
-    STAGE_WAIT_FOR_MOTION = 0x600F  # 24591
-    STAGE_MOTION_STOPPED = 0x6010  # 24592 - UNSOLICITED CALLBACK
+    Values are the one table's (core/command_codes.FIXED, from the server
+    header). Names for received codes come from
+    ``command_codes.command_name``, which also knows the COMMON block of the
+    connected build; this enum is kept for the code that names members.
+    """
 
-    # System commands
-    SYSTEM_STATE_GET = 0xA007  # 40967
-    SYSTEM_STATE_IDLE = 0xA002  # 40962
-    SYSTEM_SCOPE_SETTINGS = 0x1007  # 4103
+    STAGE_HOME = FIXED["STAGE_HOME"]
+    STAGE_HALT = FIXED["STAGE_HALT"]
+    STAGE_POSITION_SET_MOVE = FIXED["STAGE_POSITION_SET"]  # the move
+    STAGE_POSITION_SET_SLIDER = FIXED["STAGE_POSITION_SET_SLIDER"]
+    STAGE_VELOCITY_SET = FIXED["STAGE_VELOCITY_SET"]
+    STAGE_POSITION_GET = FIXED["STAGE_POSITION_GET"]
+    STAGE_VELOCITY_GET = FIXED["STAGE_VELOCITY_GET"]
+    STAGE_WAIT_FOR_MOTION = FIXED["STAGE_WAIT_FOR_MOTION_TO_STOP"]
+    STAGE_MOTION_STOPPED = FIXED["STAGE_MOTION_STOPPED"]  # unsolicited
 
-    # Camera commands
-    CAMERA_EXPOSURE_SET = 0x3009  # 12297 (was 0x3001 = ALL_SETTINGS_GET)
-    CAMERA_STACK_COMPLETE = 0x3014  # 12308 (was tracked as 0x3011 = ROI_TOP_SET)
-    CAMERA_EXPOSURE_GET = 0x300A  # 12298
-    CAMERA_WORKFLOW_START = 0x3004  # 12292
-    CAMERA_WORKFLOW_STOP = 0x3005  # 12293
-    CAMERA_SNAPSHOT = 0x3006  # 12294
-    CAMERA_LIVE_VIEW_START = 0x3007  # 12295
-    CAMERA_LIVE_VIEW_STOP = 0x3008  # 12296
-    CAMERA_IMAGE_SIZE_GET = 0x3027  # 12327
-    CAMERA_PIXEL_SIZE_GET = 0x3042  # 12354
-    CAMERA_FIELD_OF_VIEW_GET = 0x3037  # 12343
+    SYSTEM_STATE_GET = FIXED["SYSTEM_STATE_GET"]
+    SYSTEM_STATE_IDLE = FIXED["SYSTEM_STATE_IDLE"]
 
-    # Laser commands
-    LASER_LEVEL_SET = 0x2001  # 8193
-    LASER_LEVEL_GET = 0x2002  # 8194 - Also sent as unsolicited status during workflow
-    LASER_PREVIEW_ENABLE = 0x2004  # 8196
-    LASER_PREVIEW_DISABLE = 0x2005  # 8197
-    LASER_ALL_DISABLE = 0x2007  # 8199
+    CAMERA_EXPOSURE_SET = FIXED["CAMERA_EXPOSURE_SET"]
+    CAMERA_STACK_COMPLETE = FIXED["CAMERA_STACK_COMPLETE"]
+    CAMERA_EXPOSURE_GET = FIXED["CAMERA_EXPOSURE_GET"]
+    CAMERA_WORKFLOW_START = FIXED["CAMERA_WORK_FLOW_START"]
+    CAMERA_WORKFLOW_STOP = FIXED["CAMERA_WORK_FLOW_STOP"]
+    CAMERA_SNAPSHOT = FIXED["CAMERA_SNAPSHOT_GET"]
+    CAMERA_LIVE_VIEW_START = FIXED["CAMERA_LIVE_VIEW_START"]
+    CAMERA_LIVE_VIEW_STOP = FIXED["CAMERA_LIVE_VIEW_STOP"]
+    CAMERA_IMAGE_SIZE_GET = FIXED["CAMERA_IMAGE_SIZE_GET"]
+    CAMERA_PIXEL_FIELD_OF_VIEW_GET = FIXED["CAMERA_PIXEL_FIELD_OF_VIEW_GET"]
 
-    # LED commands
-    LED_SET = 0x4001  # 16385
-    LED_ENABLE = 0x4002  # 16386
-    LED_DISABLE = 0x4003  # 16387
+    LASER_LEVEL_SET = FIXED["LASER_LEVEL_SET"]
+    # Also sent as unsolicited status during a workflow
+    LASER_LEVEL_GET = FIXED["LASER_LEVEL_GET"]
+    LASER_PREVIEW_ENABLE = FIXED["LASER_ENABLE_PREVIEW"]
+    # 0x2005: the server's LASER_ENABLE_LINE (was named LASER_PREVIEW_DISABLE)
+    LASER_ENABLE_LINE = FIXED["LASER_ENABLE_LINE"]
+    LASER_ALL_DISABLE = FIXED["LASER_DISABLE_ALL"]
 
-    # Filter wheel. The server puts these in the SERVO block: 0x5001/0x5002 are
-    # TRIGGER_EXE_CMD / TRIGGER_END. Nothing sends either, but a received 0x5001
-    # would have been logged as a filter-wheel message.
-    FILTER_POSITION_SET = 0x8001  # 32769 - SERVO_FILTER_WHEEL_POSITION_SET
-    FILTER_MOTION_STOPPED = 0x8002  # 32770 - SERVO_FILTER_WHEEL_MOTION_STOPPED
+    LED_SET = FIXED["LED_SET"]
+    LED_ENABLE = FIXED["LED_PREVIEW_ENABLE"]
+    LED_DISABLE = FIXED["LED_PREVIEW_DISABLE"]
 
-    # Illumination (TSPIM)
-    ILLUMINATION_LEFT_ENABLE = 0x7004  # 28676
-    ILLUMINATION_LEFT_DISABLE = 0x7005  # 28677
-    ILLUMINATION_RIGHT_ENABLE = 0x7006  # 28678
-    ILLUMINATION_RIGHT_DISABLE = 0x7007  # 28679
+    # The server's SERVO block (0x5001/0x5002 are TRIGGER codes)
+    FILTER_POSITION_SET = FIXED["SERVO_FILTER_WHEEL_POSITION_SET"]
+    FILTER_MOTION_STOPPED = FIXED["SERVO_FILTER_WHEEL_MOTION_STOPPED"]
 
-
-# Set of command codes that are unsolicited (sent by microscope without request)
-UNSOLICITED_COMMANDS: Set[int] = {
-    ProtocolCommands.STAGE_MOTION_STOPPED,
-    ProtocolCommands.SYSTEM_STATE_IDLE,  # 0xa002 - System became idle (workflow complete)
-    0x3014,  # CAMERA_STACK_COMPLETE - Workflow/stack acquisition complete
-    0x9003,  # UI_SET_GAUGE_SIZE - Progress bar maximum
-    0x9004,  # UI_SET_GAUGE_VALUE - Progress bar update
-    0x9007,  # UI_IMAGES_SAVED_TO_STORAGE - Images written notification
-}
+    ILLUMINATION_LEFT_ENABLE = FIXED["ILLUMINATION_CONTROL_LEFT_ENABLED"]
+    ILLUMINATION_LEFT_DISABLE = FIXED["ILLUMINATION_CONTROL_LEFT_DISABLED"]
+    ILLUMINATION_RIGHT_ENABLE = FIXED["ILLUMINATION_CONTROL_RIGHT_ENABLED"]
+    ILLUMINATION_RIGHT_DISABLE = FIXED["ILLUMINATION_CONTROL_RIGHT_DISABLED"]
 
 
 class PendingRequest:

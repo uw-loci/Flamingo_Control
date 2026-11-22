@@ -1123,10 +1123,10 @@ def t3_led(ctx: RunContext) -> None:
     area="light",
     after=("t0.state",),
     sends=(
-        "ILLUMINATION_LEFT_ENABLED",
-        "ILLUMINATION_LEFT_DISABLED",
-        "ILLUMINATION_RIGHT_ENABLED",
-        "ILLUMINATION_RIGHT_DISABLED",
+        "ILLUMINATION_CONTROL_LEFT_ENABLED",
+        "ILLUMINATION_CONTROL_LEFT_DISABLED",
+        "ILLUMINATION_CONTROL_RIGHT_ENABLED",
+        "ILLUMINATION_CONTROL_RIGHT_DISABLED",
     ),
 )
 def t3_illumination_paths(ctx: RunContext) -> None:
@@ -1136,7 +1136,7 @@ def t3_illumination_paths(ctx: RunContext) -> None:
     missing = []
     for side in ("LEFT", "RIGHT"):
         for state in ("ENABLED", "DISABLED"):
-            name = f"ILLUMINATION_{side}_{state}"
+            name = f"ILLUMINATION_CONTROL_{side}_{state}"
             mark = ctx.tap.mark()
             ctx.exchange(name, reply=None)
             if ctx.wait_for(name, mark, timeout=3.0) is None:

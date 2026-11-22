@@ -22,19 +22,21 @@ import sys
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, List, Optional
 
+from py2flamingo.core.command_codes import FIXED, AxisCode
+
 logger = logging.getLogger(__name__)
 
 # Codes outside the COMMON block keep their numbers in every known server
-# build (see verification/codes.py FIXED).
-STAGE_HALT = 0x6003
-CAMERA_WORK_FLOW_STOP = 0x3005
-CAMERA_LIVE_VIEW_STOP = 0x3008
-LASER_DISABLE_ALL = 0x2007
-LED_PREVIEW_DISABLE = 0x4003
+# build (core/command_codes.py FIXED).
+STAGE_HALT = FIXED["STAGE_HALT"]
+CAMERA_WORK_FLOW_STOP = FIXED["CAMERA_WORK_FLOW_STOP"]
+CAMERA_LIVE_VIEW_STOP = FIXED["CAMERA_LIVE_VIEW_STOP"]
+LASER_DISABLE_ALL = FIXED["LASER_DISABLE_ALL"]
+LED_PREVIEW_DISABLE = FIXED["LED_PREVIEW_DISABLE"]
 
 #: int32Data0 for HALT: every axis. 0 is STAGE_AXIS_NONE and the server drops
 #: it (StageControl::exeCommandValidAxis).
-STAGE_AXIS_ALL = 0xFF
+STAGE_AXIS_ALL = AxisCode.ALL
 #: The most laser lines any Flamingo server knows.
 ALL_LASER_LINES = tuple(range(1, 8))
 TRIGGER_CALL_BACK = 0x80000000

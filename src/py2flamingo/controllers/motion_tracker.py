@@ -14,6 +14,8 @@ import socket
 import threading
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from py2flamingo.core.command_codes import StageCommands
+
 if TYPE_CHECKING:
     from py2flamingo.core.socket_reader import ParsedMessage
     from py2flamingo.core.tcp_connection import TCPConnection
@@ -35,7 +37,7 @@ class MotionTracker:
     - Sync mode: Blocking socket reads (legacy fallback)
     """
 
-    STAGE_MOTION_STOPPED = 24592  # 0x6010
+    STAGE_MOTION_STOPPED = StageCommands.MOTION_STOPPED  # 0x6010
 
     def __init__(
         self,

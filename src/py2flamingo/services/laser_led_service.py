@@ -8,6 +8,7 @@ and switching between light sources for imaging.
 from dataclasses import dataclass
 from typing import Dict, List
 
+from py2flamingo.core.command_codes import FIXED
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
 
@@ -30,26 +31,36 @@ class LaserLEDCommandCode:
     """Laser and LED command codes from CommandCodes.h."""
 
     # Laser commands (0x2000 range)
-    LASER_LEVEL_SET = 0x2001  # 8193 - Set laser power level
-    LASER_LEVEL_GET = 0x2002  # 8194 - Get laser power level
-    LASER_ENABLE = 0x2003  # 8195 - Enable laser (emission on)
-    LASER_ENABLE_PREVIEW = 0x2004  # 8196 - Enable laser preview mode (external trigger)
-    LASER_ENABLE_LINE = 0x2005  # 8197 - Enable laser line
-    LASER_DISABLE = 0x2006  # 8198 - Disable laser
-    LASER_DISABLE_ALL = 0x2007  # 8199 - Disable all lasers
+    LASER_LEVEL_SET = FIXED["LASER_LEVEL_SET"]  # 8193 - Set laser power level
+    LASER_LEVEL_GET = FIXED["LASER_LEVEL_GET"]  # 8194 - Get laser power level
+    LASER_ENABLE = FIXED["LASER_ENABLE"]  # 8195 - Enable laser (emission on)
+    LASER_ENABLE_PREVIEW = FIXED[
+        "LASER_ENABLE_PREVIEW"
+    ]  # 8196 - Enable laser preview mode (external trigger)
+    LASER_ENABLE_LINE = FIXED["LASER_ENABLE_LINE"]  # 8197 - Enable laser line
+    LASER_DISABLE = FIXED["LASER_DISABLE"]  # 8198 - Disable laser
+    LASER_DISABLE_ALL = FIXED["LASER_DISABLE_ALL"]  # 8199 - Disable all lasers
 
     # LED commands (0x4000 range)
-    LED_SET = 0x4001  # 16385 - Set LED intensity
-    LED_PREVIEW_ENABLE = 0x4002  # 16386 - Enable LED preview
-    LED_PREVIEW_DISABLE = 0x4003  # 16387 - Disable LED preview
+    LED_SET = FIXED["LED_SET"]  # 16385 - Set LED intensity
+    LED_PREVIEW_ENABLE = FIXED["LED_PREVIEW_ENABLE"]  # 16386 - Enable LED preview
+    LED_PREVIEW_DISABLE = FIXED["LED_PREVIEW_DISABLE"]  # 16387 - Disable LED preview
 
     # Illumination commands (0x7000 range)
     # These control the illumination waveform for synchronized imaging
     # For TSPIM systems, controls left and right light paths
-    ILLUMINATION_LEFT_ENABLE = 0x7004  # 28676 - Enable left illumination path
-    ILLUMINATION_LEFT_DISABLE = 0x7005  # 28677 - Disable left illumination path
-    ILLUMINATION_RIGHT_ENABLE = 0x7006  # 28678 - Enable right illumination path
-    ILLUMINATION_RIGHT_DISABLE = 0x7007  # 28679 - Disable right illumination path
+    ILLUMINATION_LEFT_ENABLE = FIXED[
+        "ILLUMINATION_CONTROL_LEFT_ENABLED"
+    ]  # 28676 - Enable left illumination path
+    ILLUMINATION_LEFT_DISABLE = FIXED[
+        "ILLUMINATION_CONTROL_LEFT_DISABLED"
+    ]  # 28677 - Disable left illumination path
+    ILLUMINATION_RIGHT_ENABLE = FIXED[
+        "ILLUMINATION_CONTROL_RIGHT_ENABLED"
+    ]  # 28678 - Enable right illumination path
+    ILLUMINATION_RIGHT_DISABLE = FIXED[
+        "ILLUMINATION_CONTROL_RIGHT_DISABLED"
+    ]  # 28679 - Disable right illumination path
 
 
 class LaserLEDService(MicroscopeCommandService):

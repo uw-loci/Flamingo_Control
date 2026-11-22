@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 
+from py2flamingo.core.command_codes import FIXED
 from py2flamingo.services.microscope_command_service import MicroscopeCommandService
 
 # Bytes before each frame's pixels on the live-view socket: the server's
@@ -97,9 +98,11 @@ class CameraCommandCode:
     """Camera subsystem command codes from CommandCodes.h (0x3000 range)."""
 
     # Query commands
-    IMAGE_SIZE_GET = 12327  # 0x3027
-    PIXEL_FIELD_OF_VIEW_GET = 12343  # 0x3037
-    EXPOSURE_GET = 12298  # 0x300A - exposure time, int32Data0 in MILLISECONDS
+    IMAGE_SIZE_GET = FIXED["CAMERA_IMAGE_SIZE_GET"]  # 0x3027
+    PIXEL_FIELD_OF_VIEW_GET = FIXED["CAMERA_PIXEL_FIELD_OF_VIEW_GET"]  # 0x3037
+    EXPOSURE_GET = FIXED[
+        "CAMERA_EXPOSURE_GET"
+    ]  # 0x300A - exposure time, int32Data0 in MILLISECONDS
 
     # The only way to confirm a light-sheet line time actually took effect.
     #
@@ -109,20 +112,24 @@ class CameraCommandCode:
     # shutter reads one row per line time, so `readout / rows` IS the line time,
     # and the line time is the setting that matters most because it alone sets
     # the frame rate and therefore the stage speed.
-    READ_OUT_TIME_GET = 12332  # 0x302C - returns readout time (microseconds)
+    READ_OUT_TIME_GET = FIXED[
+        "CAMERA_READ_OUT_TIME_GET"
+    ]  # 0x302C - returns readout time (microseconds)
 
     # The camera's own idea of its frame rate. In an external trigger mode this
     # is its FREE-RUNNING period, not what it is delivering -- it has no way to
     # know the master clock. Worth reading precisely so it can be compared
     # against measured delivery rather than trusted.
-    FPS_GET = 12312  # 0x3018
+    FPS_GET = FIXED["CAMERA_FPS_GET"]  # 0x3018
 
     # Action commands
-    SNAPSHOT = 12294  # 0x3006 - take single image
-    LIVE_VIEW_START = 12295  # 0x3007 - start continuous imaging
-    LIVE_VIEW_STOP = 12296  # 0x3008 - stop continuous imaging
-    WORKFLOW_START = 12292  # 0x3004
-    WORKFLOW_STOP = 12293  # 0x3005
+    SNAPSHOT = FIXED["CAMERA_SNAPSHOT_GET"]  # 0x3006 - take single image
+    LIVE_VIEW_START = FIXED[
+        "CAMERA_LIVE_VIEW_START"
+    ]  # 0x3007 - start continuous imaging
+    LIVE_VIEW_STOP = FIXED["CAMERA_LIVE_VIEW_STOP"]  # 0x3008 - stop continuous imaging
+    WORKFLOW_START = FIXED["CAMERA_WORK_FLOW_START"]  # 0x3004
+    WORKFLOW_STOP = FIXED["CAMERA_WORK_FLOW_STOP"]  # 0x3005
 
     # Camera ROI / AOI (hardware crop on the PCO sensor). Codes per
     # oldcodereference/CommandCodes_Reference.txt (IMAGE_SIZE_GET=12327,
@@ -147,30 +154,36 @@ class CameraCommandCode:
     # "Exposure Time (ns)" is the **line time**, not the exposure. The exposure
     # is lines x line_time, which the GUI shows separately. Sending a real
     # exposure here would set an absurd line time.
-    LIGHT_SHEET_MODE_ON_OFF = 12336  # 0x3030 - int32Data0: 1 = on, anything else = off
-    LIGHT_SHEET_MODE_LINES = 12337  # 0x3031 - slit width in sensor rows
-    LIGHT_SHEET_MODE_DELAY_LINES = 12338  # 0x3032 - delay lines (0 in normal use)
-    LIGHT_SHEET_MODE_EXPOSURE_TIME = (
-        12339  # 0x3033 - LINE time, in the camera's timebase
-    )
+    LIGHT_SHEET_MODE_ON_OFF = FIXED[
+        "CAMERA_LIGHT_SHEET_MODE_ON_OFF"
+    ]  # 0x3030 - int32Data0: 1 = on, anything else = off
+    LIGHT_SHEET_MODE_LINES = FIXED[
+        "CAMERA_LIGHT_SHEET_MODE_LINES"
+    ]  # 0x3031 - slit width in sensor rows
+    LIGHT_SHEET_MODE_DELAY_LINES = FIXED[
+        "CAMERA_LIGHT_SHEET_MODE_DELAY_LINES"
+    ]  # 0x3032 - delay lines (0 in normal use)
+    LIGHT_SHEET_MODE_EXPOSURE_TIME = FIXED[
+        "CAMERA_LIGHT_SHEET_MODE_EXPOSURE_TIME"
+    ]  # 0x3033 - LINE time, in the camera's timebase
 
     # Settable. 0x0002 is "external exposure start & software trigger", which
     # the vendor GUI calls "Ext-Exp. Start" -- the mode real ASLM experiments run in.
-    TRIGGER_MODE_SET = 12301  # 0x300D
-    TRIGGER_MODE_GET = 12302  # 0x300E
+    TRIGGER_MODE_SET = FIXED["CAMERA_TRIGGER_MODE_SET"]  # 0x300D
+    TRIGGER_MODE_GET = FIXED["CAMERA_TRIGGER_MODE_GET"]  # 0x300E
 
     # READ-ONLY over the socket, despite the names. PCOBase::ShutterModeSet and
     # ::ReadoutFormatSet both just call their Get counterpart and report the
     # camera's current state -- they set nothing. "Rolling Shutter" and
     # "Single Top Down" have to be selected in the vendor software; this client
     # can only read them back and say whether they are right.
-    SHUTTER_MODE_GET = 12334  # 0x302E
-    READOUT_FORMAT_GET = 12335  # 0x302F
+    SHUTTER_MODE_GET = FIXED["CAMERA_SHUTTER_MODE"]  # 0x302E
+    READOUT_FORMAT_GET = FIXED["CAMERA_READOUT_FORMAT"]  # 0x302F
 
-    ROI_LEFT_SET = 12303  # 0x300F
-    ROI_LEFT_GET = 12304  # 0x3010
-    ROI_TOP_SET = 12305  # 0x3011
-    ROI_TOP_GET = 12306  # 0x3012
+    ROI_LEFT_SET = FIXED["CAMERA_ROI_LEFT_SET"]  # 0x300F
+    ROI_LEFT_GET = FIXED["CAMERA_ROI_LEFT_GET"]  # 0x3010
+    ROI_TOP_SET = FIXED["CAMERA_ROI_TOP_SET"]  # 0x3011
+    ROI_TOP_GET = FIXED["CAMERA_ROI_TOP_GET"]  # 0x3012
 
 
 class CameraService(MicroscopeCommandService):

@@ -25,115 +25,24 @@ Protocol Structure (128 bytes total):
 import struct
 from typing import Any, Dict, List, Optional
 
-# Import all command code classes for name lookup
-from py2flamingo.core.command_codes import (
-    CameraCommands,
-    FilterCommands,
-    IlluminationCommands,
-    LaserCommands,
-    LEDCommands,
-    StageCommands,
-    SystemCommands,
+# One code table (core/command_codes.py). CommandCode and CommandDataBits
+# are the names this module always exported.
+from py2flamingo.core.command_codes import (  # noqa: F401 - re-exported
+    CommandCode,
+    CommandDataBits,
+    command_name,
 )
 
 
-class CommandCode:
-    """Command codes for microscope operations."""
-
-    CMD_SCOPE_SETTINGS_LOAD = 4105
-    CMD_WORKFLOW_START = 12292
-    CMD_WORKFLOW_STOP = 12293
-    CMD_STAGE_POSITION_GET = 24584
-    CMD_STAGE_POSITION_SET = 24580
-    CMD_SYSTEM_STATE_GET = 40967
-    CMD_SYSTEM_STATE_IDLE = 40962
-
-
-class CommandDataBits:
-    """
-    Command data bits flags for the cmdBits6 (params[6]) parameter field.
-
-    These are bit flags that can be combined using bitwise OR (|) operations.
-    From CommandCodes.h enum COMMAND_DATA_BITS.
-
-    Usage Examples:
-        # For query commands that need a response:
-        params[6] = CommandDataBits.TRIGGER_CALL_BACK
-
-        # For Z-stack workflow with max projection saved to disk:
-        params[6] = (CommandDataBits.STAGE_ZSWEEP |
-                     CommandDataBits.MAX_PROJECTION |
-                     CommandDataBits.SAVE_TO_DISK)
-
-        # For multi-position timelapse with buffered positions:
-        params[6] = (CommandDataBits.STAGE_POSITIONS_IN_BUFFER |
-                     CommandDataBits.SAVE_TO_DISK |
-                     CommandDataBits.EXPERIMENT_TIME_REMAINING)
-    """
-
-    # === Response Control ===
-    # Trigger callback/response from microscope (CRITICAL for query/GET commands)
-    # Without this flag, query commands receive no response and timeout
-    # USE FOR: All *_GET commands (STAGE_POSITION_GET, CAMERA_IMAGE_SIZE_GET, etc.)
-    TRIGGER_CALL_BACK = 0x80000000
-
-    # === Workflow/Experiment Flags ===
-    # Request/indicate experiment time remaining information
-    # USE FOR: Long-running workflows, timelapse experiments
-    EXPERIMENT_TIME_REMAINING = 0x00000001
-
-    # Stage positions are buffered for multi-position acquisition
-    # USE FOR: Workflows with multiple XYZ positions (multi-well plates, tiles, etc.)
-    STAGE_POSITIONS_IN_BUFFER = 0x00000002
-
-    # Compute Maximum Intensity Projection from Z-stack
-    # USE FOR: Z-stack workflows when you want MIP instead of full stack
-    # NOTE: Old code used this extensively for sample finding
-    MAX_PROJECTION = 0x00000004
-
-    # Save acquired images to disk (vs. only sending to live view)
-    # USE FOR: Actual experiments/acquisitions (not live preview)
-    SAVE_TO_DISK = 0x00000008
-
-    # Don't send stage position updates to client during movement
-    # USE FOR: Rapid multi-position movements to reduce network traffic
-    STAGE_NOT_UPDATE_CLIENT = 0x00000010
-
-    # Indicates a Z-sweep/Z-stack operation
-    # USE FOR: Workflows that acquire multiple Z planes
-    # COMBINE WITH: MAX_PROJECTION for MIP, SAVE_TO_DISK for saving
-    STAGE_ZSWEEP = 0x00000020
-
-
 def get_command_name(code: int) -> str:
+    """The server's name for ``code`` on the connected build, for logs.
+
+    Resolved through the one table (``core.command_codes.command_name``):
+    COMMON names from the active server layout, so 0x1007 reads
+    COMMON_SCOPE_SETTINGS on 3.0.0 and COMMON_DEVICE_RESET on 2026-11-13.
+    ``UNKNOWN_0x....`` for a code no table has.
     """
-    Get human-readable command name from command code.
-
-    Args:
-        code: Command code (numeric)
-
-    Returns:
-        Command name string (e.g., "STAGE_POSITION_SET" or "Unknown (12345)")
-    """
-    # Build reverse mapping from all command classes
-    command_classes = [
-        ("System", SystemCommands),
-        ("Stage", StageCommands),
-        ("Laser", LaserCommands),
-        ("LED", LEDCommands),
-        ("Camera", CameraCommands),
-        ("Illumination", IlluminationCommands),
-        ("Filter", FilterCommands),
-    ]
-
-    for category, cmd_class in command_classes:
-        for attr_name in dir(cmd_class):
-            if not attr_name.startswith("_"):
-                attr_value = getattr(cmd_class, attr_name)
-                if isinstance(attr_value, int) and attr_value == code:
-                    return f"{attr_name}"
-
-    return f"Unknown"
+    return command_name(code)
 
 
 class ProtocolEncoder:
