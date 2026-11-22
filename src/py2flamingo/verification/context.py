@@ -399,24 +399,15 @@ class RunContext:
         if additional:
             packet = packet + additional
         want = code if reply == "same" else (self.code(reply) if reply else None)
+        # The connection's one locked writer, so the frame and any payload
+        # go out together (MVCConnectionService.send_raw_bytes).
         send = getattr(self.connection, "send_raw_bytes", None)
-        if callable(send):
+        if not callable(send):
+            raise Failed("the connection has no command-socket writer")
+        try:
             send(packet)
-        else:
-            sock = getattr(self.connection, "_command_socket", None)
-            if sock is None:
-                raise Failed("command socket not available")
-            client = getattr(
-                getattr(self.connection, "tcp_connection", None),
-                "_command_client",
-                None,
-            )
-            lock = getattr(client, "_send_lock", None)
-            if lock is not None:
-                with lock:
-                    sock.sendall(packet)
-            else:
-                sock.sendall(packet)
+        except ConnectionError as e:
+            raise Failed(f"command socket not available ({e})")
         if want is None:
             return None
         reply_msg = self.tap.wait_for(want, mark, timeout, self.abort)

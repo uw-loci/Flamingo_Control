@@ -69,7 +69,8 @@ def safe_state(ctx: RunContext, reason: str) -> List[str]:
     sends = [("STAGE_HALT", 0xFF), ("CAMERA_WORK_FLOW_STOP", 0)]
     sends += [("LASER_DISABLE", line) for line in range(1, 8)]
     sends += [("LED_PREVIEW_DISABLE", 0), ("CAMERA_LIVE_VIEW_STOP", 0)]
-    sock = getattr(ctx.connection, "_command_socket", None)
+    from py2flamingo.services.safe_state import send_packet_now
+
     for name, int0 in sends:
         try:
             code = codes.resolve(name)
@@ -80,9 +81,9 @@ def safe_state(ctx: RunContext, reason: str) -> List[str]:
                 value=0.0,
                 data=b"",
             )
-            if sock is not None:
-                sock.sendall(packet)
-                done.append(name if not int0 else f"{name}({int0})")
+            label = name if not int0 else f"{name}({int0})"
+            if send_packet_now(ctx.connection, packet, label):
+                done.append(label)
         except Exception as e:  # noqa: BLE001 - must keep going
             logger.warning(f"safe state: {name} not sent: {e}")
     logger.warning(f"Verification safe state ({reason}): sent {', '.join(done)}")

@@ -44,35 +44,28 @@ SEND_LOCK_WAIT_S = 0.5
 
 
 def _send_lock(connection):
+    """The command socket's one send lock (``TCPConnection.send_lock``)."""
     tcp = getattr(connection, "tcp_connection", None)
-    client = getattr(tcp, "_command_client", None)
-    return getattr(client, "_send_lock", None)
+    lock = getattr(tcp, "send_lock", None)
+    if lock is None:
+        client = getattr(tcp, "_command_client", None)
+        lock = getattr(client, "_send_lock", None)
+    return lock
 
 
-def send_now(connection, code: int, int0: int = 0, name: str = "") -> bool:
-    """Send one command on the open command socket. True if it was sent.
+def send_packet_now(connection, packet: bytes, label: str) -> bool:
+    """Write an encoded stop command on the open command socket. True if sent.
 
-    Never reconnects and never waits for a reply. Returns False (and logs)
-    when there is no open socket or the send raised.
+    Takes the command socket's send lock like every other write, but waits
+    at most ``SEND_LOCK_WAIT_S`` for it and then sends anyway: a stop must
+    not wait behind another thread's send. Never reconnects, never raises.
     """
-    label = name or f"0x{code:04X}"
     if connection is None:
         logger.error(f"{label} NOT sent: no connection")
         return False
     sock = getattr(connection, "_command_socket", None)
     if sock is None:
         logger.error(f"{label} NOT sent: the command socket is not open")
-        return False
-    try:
-        packet = connection.encoder.encode_command(
-            code=code,
-            status=0,
-            params=[0, 0, 0, int0, 0, 0, TRIGGER_CALL_BACK],
-            value=0.0,
-            data=b"",
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"{label} NOT sent: could not encode it: {e}")
         return False
     lock = _send_lock(connection)
     locked = False
@@ -92,6 +85,33 @@ def send_now(connection, code: int, int0: int = 0, name: str = "") -> bool:
     finally:
         if locked:
             lock.release()
+
+
+def send_now(connection, code: int, int0: int = 0, name: str = "") -> bool:
+    """Send one command on the open command socket. True if it was sent.
+
+    Never reconnects and never waits for a reply. Returns False (and logs)
+    when there is no open socket or the send raised.
+    """
+    label = name or f"0x{code:04X}"
+    if connection is None:
+        logger.error(f"{label} NOT sent: no connection")
+        return False
+    if getattr(connection, "_command_socket", None) is None:
+        logger.error(f"{label} NOT sent: the command socket is not open")
+        return False
+    try:
+        packet = connection.encoder.encode_command(
+            code=code,
+            status=0,
+            params=[0, 0, 0, int0, 0, 0, TRIGGER_CALL_BACK],
+            value=0.0,
+            data=b"",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"{label} NOT sent: could not encode it: {e}")
+        return False
+    return send_packet_now(connection, packet, label)
 
 
 def halt_all_axes(connection) -> bool:

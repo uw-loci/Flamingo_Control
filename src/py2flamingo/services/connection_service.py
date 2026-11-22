@@ -273,7 +273,7 @@ class MVCConnectionService:
             packet = self.encoder.encode_command(
                 code=code, additional_data_size=len(additional)
             )
-            self._command_socket.sendall(packet + additional)
+            self.send_raw_bytes(packet + additional)
             deadline = time.time() + timeout
             while True:
                 remaining = deadline - time.time()
@@ -830,6 +830,17 @@ class MVCConnectionService:
             self.tcp_connection.unregister_callback(command_code, handler)
             self.logger.info(f"Unregistered callback for 0x{command_code:04X}")
 
+    def send_raw_bytes(self, data: bytes, lock_wait: Optional[float] = None) -> bool:
+        """Write encoded bytes on the command socket, under the one send lock.
+
+        A frame and the payload after it are passed together so that no
+        other thread's frame lands between them. ``lock_wait`` is for the
+        stop commands only (``TCPConnection.send_command_bytes``).
+        """
+        if self.tcp_connection is None:
+            raise ConnectionError("Not connected to microscope")
+        return self.tcp_connection.send_command_bytes(data, lock_wait=lock_wait)
+
     def send_command_async(
         self, command_bytes: bytes, expected_response_code: int, timeout: float = 3.0
     ):
@@ -948,7 +959,7 @@ class MVCConnectionService:
                 data=b"",
             )
 
-            self._command_socket.sendall(cmd_bytes)
+            self.send_raw_bytes(cmd_bytes)
             self.logger.debug(f"Sent command {cmd.code}, reading text response...")
 
             # Read 128-byte acknowledgment first

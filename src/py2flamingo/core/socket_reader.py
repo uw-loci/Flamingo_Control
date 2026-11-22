@@ -692,6 +692,7 @@ class CommandClient:
         self,
         command_socket: socket.socket,
         on_closed: Optional[Callable[[str], None]] = None,
+        send_lock: Optional[threading.Lock] = None,
     ):
         """
         Initialize the command client.
@@ -700,11 +701,14 @@ class CommandClient:
             command_socket: Socket connected to microscope command port
             on_closed: Optional callback invoked (with a reason string) when
                 the background reader detects the socket has been closed.
+            send_lock: The lock every write on this socket takes
+                (``TCPConnection.send_lock``). A private one if not given.
         """
         self._socket = command_socket
         self._dispatcher = MessageDispatcher()
         self._reader = SocketReader(command_socket, self._dispatcher, on_closed)
-        self._send_lock = threading.Lock()  # Serialize command sends
+        # Shared with TCPConnection.send_command_bytes: one writer.
+        self._send_lock = send_lock or threading.Lock()
 
     def start(self):
         """Start the background reader."""

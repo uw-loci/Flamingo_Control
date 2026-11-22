@@ -51,6 +51,10 @@ class TCPConnection:
         self._command_socket: Optional[socket.socket] = None
         self._live_socket: Optional[socket.socket] = None
         self._lock = threading.Lock()
+        # The one lock every write on the command socket takes, so a frame
+        # and the payload that follows it are never split by another
+        # thread's frame. The background reader's CommandClient shares it.
+        self._send_lock = threading.Lock()
         self._connected = False
         self.logger = logging.getLogger(__name__)
 
@@ -373,6 +377,9 @@ class TCPConnection:
         """
         Send bytes through the specified socket.
 
+        Writes on the command socket take :attr:`send_lock`, like every other
+        command-socket write (see :meth:`send_command_bytes`).
+
         Args:
             data: Bytes to send
             socket_type: Which socket to use - "command" or "live" (default: "command")
@@ -381,38 +388,83 @@ class TCPConnection:
             ConnectionError: If not connected
             ValueError: If socket_type is invalid or data is not bytes
             OSError: If send fails
-
-        Example:
-            >>> connection.send_bytes(command_bytes, socket_type="command")
         """
         if not isinstance(data, bytes):
             raise ValueError(f"Data must be bytes, got {type(data)}")
+        if socket_type == "command":
+            self.send_command_bytes(data)
+            return
 
         with self._lock:
             if not self._connected:
                 raise ConnectionError("Not connected to microscope")
-
-            # Select socket
-            if socket_type == "command":
-                sock = self._command_socket
-            elif socket_type == "live":
-                sock = self._live_socket
-            else:
+            if socket_type != "live":
                 raise ValueError(
                     f"Invalid socket_type: {socket_type}. Must be 'command' or 'live'"
                 )
-
+            sock = self._live_socket
             if sock is None:
                 raise ConnectionError(f"{socket_type} socket is not connected")
-
             try:
                 sock.sendall(data)
                 self.logger.debug(f"Sent {len(data)} bytes on {socket_type} socket")
             except OSError as e:
                 self.logger.error(f"Failed to send data: {e}")
-                # Connection likely broken
                 self._connected = False
                 raise
+
+    @property
+    def send_lock(self) -> threading.Lock:
+        """The lock every write on the command socket holds while it writes."""
+        return self._send_lock
+
+    def send_command_bytes(
+        self, data: bytes, lock_wait: Optional[float] = None
+    ) -> bool:
+        """Write ``data`` (a frame, or a frame and its payload) on the command
+        socket, under :attr:`send_lock`, in one ``sendall``.
+
+        This is the one writer for the command socket: the services, the
+        settings exchange, the verification probe and the reader's
+        CommandClient all end up here or hold the same lock.
+
+        Args:
+            data: Bytes to write, whole.
+            lock_wait: None (default) waits for the lock. A number waits that
+                many seconds and then writes without it; only the stop
+                commands use this (services/safe_state.py), so that a stop is
+                never held up behind another thread's long send.
+
+        Returns:
+            True if the lock was held for the write.
+
+        Raises:
+            ConnectionError: No command socket.
+            OSError: The write failed (the connection is marked down).
+        """
+        sock = self._command_socket
+        if sock is None or not self._connected:
+            raise ConnectionError("Not connected to microscope")
+        if lock_wait is None:
+            locked = self._send_lock.acquire()
+        else:
+            locked = self._send_lock.acquire(timeout=lock_wait)
+            if not locked:
+                self.logger.warning(
+                    f"Another send held the command socket for {lock_wait} s; "
+                    f"sending anyway"
+                )
+        try:
+            sock.sendall(data)
+            self.logger.debug(f"Sent {len(data)} bytes on command socket")
+        except OSError as e:
+            self.logger.error(f"Failed to send data: {e}")
+            self._connected = False
+            raise
+        finally:
+            if locked:
+                self._send_lock.release()
+        return locked
 
     def receive_bytes(
         self, size: int, socket_type: str = "command", timeout: Optional[float] = None
@@ -527,7 +579,9 @@ class TCPConnection:
         from .socket_reader import CommandClient
 
         self._command_client = CommandClient(
-            self._command_socket, on_closed=self._on_reader_closed
+            self._command_socket,
+            on_closed=self._on_reader_closed,
+            send_lock=self._send_lock,
         )
         self._command_client.start()
         self.logger.info("Started async socket reader")

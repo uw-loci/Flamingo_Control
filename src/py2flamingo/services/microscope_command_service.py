@@ -42,6 +42,21 @@ class MicroscopeCommandService:
         self.connection = connection
         self.logger = logging.getLogger(self.__class__.__name__)
 
+    def _write(self, data: bytes) -> None:
+        """Write bytes on the command socket through the one locked writer.
+
+        A frame and the payload that follows it are written together, so no
+        other thread's frame can land between them.
+        """
+        send = getattr(self.connection, "send_raw_bytes", None)
+        if callable(send):
+            send(data)
+            return
+        command_socket = getattr(self.connection, "_command_socket", None)
+        if command_socket is None:
+            raise RuntimeError("Command socket not available")
+        command_socket.sendall(data)
+
     def _ensure_connected_for_command(self, command_name: str) -> bool:
         """Verify the command socket is alive; reconnect once if not.
 
@@ -194,7 +209,7 @@ class MicroscopeCommandService:
             if command_socket is None:
                 return {"success": False, "error": "Command socket not available"}
 
-            command_socket.sendall(cmd_bytes)
+            self._write(cmd_bytes)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
             ack_response = self._receive_full_bytes(command_socket, 128, timeout=3.0)
@@ -314,7 +329,7 @@ class MicroscopeCommandService:
             if command_socket is None:
                 return {"success": False, "error": "Command socket not available"}
 
-            command_socket.sendall(cmd_bytes)
+            self._write(cmd_bytes)
             self.logger.debug(f"Sent {command_name} (code {command_code:#06x})")
 
             # Fire-and-forget mode: don't wait for response
@@ -446,12 +461,10 @@ class MicroscopeCommandService:
                 additional_data_size=file_size,  # File size goes HERE!
             )
 
-            # Send header
-            command_socket.sendall(cmd_bytes)
-            self.logger.debug(f"Sent workflow header for {cmd_name}")
-
-            # Send workflow data
-            command_socket.sendall(workflow_data)
+            # Header and workflow text in one locked write, so no other
+            # thread's frame can land inside the payload the server is
+            # counting (addDataBytes = file_size).
+            self._write(cmd_bytes + workflow_data)
             self.logger.info(f"Workflow sent: {file_size} bytes to {cmd_name}")
 
             # No response expected - workflow commands are fire-and-forget
@@ -590,7 +603,7 @@ class MicroscopeCommandService:
             )
 
             # Send command
-            command_socket.sendall(cmd_bytes)
+            self._write(cmd_bytes)
             self.logger.debug(f"Sent {cmd_name}")
 
             # Wait for response
@@ -700,7 +713,7 @@ class MicroscopeCommandService:
                 command_socket = self.connection._command_socket
                 if command_socket is None:
                     return {"success": False, "error": "Command socket not available"}
-                command_socket.sendall(cmd_bytes)
+                self._write(cmd_bytes)
                 self.logger.debug(
                     f"{command_name} sent (fire-and-forget via async path)"
                 )
@@ -847,7 +860,7 @@ class MicroscopeCommandService:
                     return None
 
                 # Send command (fire-and-forget)
-                command_socket.sendall(cmd_bytes)
+                self._write(cmd_bytes)
                 self.logger.debug(f"Sent {cmd_name} (fire-and-forget)")
                 return None
 
