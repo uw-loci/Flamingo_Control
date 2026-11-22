@@ -216,11 +216,6 @@ class SlicePlaneViewer(QFrame):
             self._target_active = False
             self._update_display()
 
-    def clear_target_position(self):
-        """Clear the target marker."""
-        self._target_pos = None
-        self._update_display()
-
     def set_focal_plane_position(self, pos: float):
         """Set the focal plane indicator position.
 

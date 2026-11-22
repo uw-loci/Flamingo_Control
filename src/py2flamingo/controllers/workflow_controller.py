@@ -352,17 +352,6 @@ class WorkflowController(QObject):
             "execution_time": execution_time,
         }
 
-    def is_workflow_running(self) -> bool:
-        """
-        Check if workflow is currently executing.
-
-        Returns:
-            bool: True if workflow is running, False otherwise
-        """
-        if self._workflow_model:
-            return self._workflow_model.is_running()
-        return False
-
     def validate_workflow_file(self, path: str) -> Tuple[bool, List[str]]:
         """
         Validate workflow file before loading.

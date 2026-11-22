@@ -97,8 +97,8 @@ Data structures with minimal logic:
 UI components (PyQt5):
 - `ConnectionView` - Connection configuration UI
 - `WorkflowView` - Workflow management UI
-- `ViewerWidget` - Image display
-- Viewer abstractions (Napari, standalone)
+- `CameraLiveViewer` - Live camera image display
+- `SampleView` - 3D sample view (embedded napari viewer)
 
 #### Controllers (`controllers/`)
 Business logic that coordinates models and services:

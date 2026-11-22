@@ -1,7 +1,7 @@
 """
 Camera controller for managing live feed and image acquisition.
 
-Coordinates between CameraService (hardware interface) and LiveFeedView (UI),
+Coordinates between CameraService (hardware interface) and CameraLiveViewer (UI),
 managing state, buffering, and display parameters.
 """
 

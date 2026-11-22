@@ -315,7 +315,7 @@ Application (py2flamingo/__main__.py)
 ### Key Components
 
 - **Models:** `ConnectionModel`, `WorkflowModel`, `Position`, `Command`
-- **Views:** `ConnectionView`, `WorkflowView`, `ViewerWidget`
+- **Views:** `ConnectionView`, `WorkflowView`, `CameraLiveViewer`, `SampleView`
 - **Controllers:** `ConnectionController`, `WorkflowController`, `PositionController`
 - **Services:** `ConfigurationManager`, `MVCConnectionService`, `MVCWorkflowService`
 

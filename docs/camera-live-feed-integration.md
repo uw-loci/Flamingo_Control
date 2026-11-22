@@ -222,28 +222,7 @@ viewer = CameraLiveViewer(camera_controller)
 viewer.show()
 ```
 
-### 4. Integration with Existing LiveFeedView
-
-To integrate with the existing `LiveFeedView`, you can add the `CameraLiveViewer` as a new group or replace existing components:
-
-```python
-from py2flamingo.views.live_feed_view import LiveFeedView
-from py2flamingo.views.camera_live_viewer import CameraLiveViewer
-
-# In LiveFeedView.setup_ui() method, add:
-
-# Camera Live Feed section
-camera_live_group = QGroupBox("Camera Live Feed")
-camera_live_layout = QVBoxLayout()
-
-self.camera_live_viewer = CameraLiveViewer(self.camera_controller)
-camera_live_layout.addWidget(self.camera_live_viewer)
-
-camera_live_group.setLayout(camera_live_layout)
-right_layout.addWidget(camera_live_group)
-```
-
-### 5. Cleanup on Close
+### 4. Cleanup on Close
 
 Ensure proper cleanup when the application closes:
 

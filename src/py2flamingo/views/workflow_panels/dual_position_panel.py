@@ -153,7 +153,8 @@ class DualPositionPanel(QWidget):
         r_label = QLabel("R (deg):")
         grid.addWidget(r_label, 1, 2)
         r_spin = QDoubleSpinBox()
-        # Match the stage's own R limits (-720..720) — see position_panel.
+        # Match the stage's own R limits (-720..720): negative sample angles such
+        # as -147 are ordinary, and clamping to 0..360 silently rewrote them.
         r_spin.setRange(-720.0, 720.0)
         r_spin.setDecimals(1)
         r_spin.setSingleStep(1.0)
@@ -444,17 +445,6 @@ class DualPositionPanel(QWidget):
             Position A (start position)
         """
         return self.get_position_a()
-
-    def set_position(self, position: Position) -> None:
-        """
-        Set Position A (start position).
-
-        Compatibility method - same as set_position_a().
-
-        Args:
-            position: Position to set
-        """
-        self.set_position_a(position)
 
     @property
     def position_changed(self) -> pyqtSignal:

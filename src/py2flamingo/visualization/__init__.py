@@ -17,8 +17,6 @@ from .coordinate_transforms import (
 )
 from .dual_resolution_storage import DualResolutionConfig, DualResolutionVoxelStorage
 from .session_manager import SessionManager, SessionMetadata
-from .sparse_volume_renderer import SparseVolumeRenderer
-from .transform_workers import TransformManager
 
 # Optional GPU transforms (lazy initialization - no slow CUDA startup at import)
 try:
@@ -47,10 +45,8 @@ __all__ = [
     "CoordinateTransformer",
     "PhysicalToNapariMapper",
     "TransformQuality",
-    "SparseVolumeRenderer",
     "SessionManager",
     "SessionMetadata",
-    "TransformManager",
     # GPU functions
     "GPU_AVAILABLE",
     "affine_transform_auto",

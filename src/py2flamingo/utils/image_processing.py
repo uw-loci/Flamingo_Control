@@ -1,32 +1,10 @@
 # src/py2flamingo/utils/image_processing.py
 """
-Utility functions for image processing, conversion, and saving.
-
-Restored percentile scaling and 512×512 downsampling behavior
-from the pre-refactor implementation.
-
-NumPy 2.x Optimizations:
-- Combined percentile calls (single O(n) pass instead of two)
-- np.asarray() for zero-copy array views
-- Efficient dtype handling
+QImage helpers for the live and sample views.
 """
 
-import os
-import time
-
-import numpy as np
-from PIL import Image
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPainter, QPen
-
-# -------------------------
-# Image saving (PNG)
-# -------------------------
-
-
-# -------------------------
-# QImage conversion
-# -------------------------
 
 
 def draw_center_crosshair(qimage: QImage, size: int = 20, width: int = 2) -> QImage:
@@ -62,48 +40,3 @@ def draw_center_crosshair(qimage: QImage, size: int = 20, width: int = 2) -> QIm
     painter.end()
 
     return result
-
-
-def convert_to_qimage(image_data: np.ndarray) -> QImage:
-    """
-    Convert a 16-bit (or float) grayscale numpy array to a 512×512 8-bit QImage
-    using percentile windowing (1–99%) and bilinear resize.
-
-    NumPy 2.x optimized with combined percentile call.
-    """
-    t0 = time.time()
-
-    # Zero-copy view if already ndarray
-    img = np.asarray(image_data)
-
-    # Convert to PIL, force grayscale first (handles >8-bit nicely)
-    pil = Image.fromarray(img).convert("L")
-    pil_scaled = pil.resize((512, 512), resample=Image.BILINEAR)
-
-    # Convert back to numpy for percentile windowing
-    arr = np.asarray(pil_scaled, dtype=np.float32)
-
-    # Combined percentile call - single O(n) pass instead of two
-    # NumPy 2.x uses SIMD-optimized partitioning
-    lo, hi = np.percentile(arr, [1.0, 99.0])
-    if hi <= lo:
-        lo, hi = float(arr.min()), float(arr.max())
-        if hi <= lo:
-            hi = lo + 1.0
-
-    arr = np.clip(arr, lo, hi)
-    arr = (arr - lo) / (hi - lo + 1e-7)
-    arr_u8 = (arr * 255.0).astype(np.uint8, copy=False)
-
-    h, w = arr_u8.shape
-    bytes_per_line = w  # grayscale
-
-    # Important: ensure the array is C-contiguous so QImage can read it
-    if not arr_u8.flags["C_CONTIGUOUS"]:
-        arr_u8 = np.ascontiguousarray(arr_u8)
-
-    qimg = QImage(arr_u8.data, w, h, bytes_per_line, QImage.Format_Grayscale8).copy()
-    # ^ .copy() makes QImage own the data (safe once function returns)
-
-    # print(f"convert_to_qimage took {time.time() - t0:.3f}s")
-    return qimg
