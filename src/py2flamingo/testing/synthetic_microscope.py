@@ -748,8 +748,12 @@ class SyntheticMicroscope:
                 self.layout.codes["META_DATA_DOCUMENT"],
                 additional=doc.encode("utf-8"),
             )
-        # Stands in for the camera/stage/laser settings that follow.
-        self._reply(client, SystemCommands.STATE_GET)
+        # Stands in for the settings frames that follow. The server ends them
+        # with its current state under the state's OWN code (0xA002 idle,
+        # 0xA004 live view, 0xA005 workflow), never as a SYSTEM_STATE_GET
+        # reply: a stand-in coded 0xA007 with int32Data0 = 0 was taken for the
+        # answer to a state query sent just after the settings read.
+        self._reply(client, self._state_code())
 
     def _on_scope_settings_load(self, client, code, params, value, additional) -> None:
         text, _ = legacy_scope_settings_text(
