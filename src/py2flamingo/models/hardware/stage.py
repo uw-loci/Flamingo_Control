@@ -235,31 +235,6 @@ class Position(ValidatedModel):
         if self.stage_limits and not self.stage_limits.is_position_valid(self):
             raise ValidationError(f"Position {self} is outside stage limits")
 
-    def distance_to(self, other: "Position", include_rotation: bool = False) -> float:
-        """Calculate Euclidean distance to another position.
-
-        Args:
-            other: Target position
-            include_rotation: Whether to include rotation in distance
-
-        Returns:
-            Distance in millimeters
-        """
-        dx = self.x - other.x
-        dy = self.y - other.y
-        dz = self.z - other.z
-
-        if include_rotation:
-            # Normalize rotation difference to [-180, 180]
-            dr = (self.r - other.r) % 360
-            if dr > 180:
-                dr -= 360
-            # Convert rotation to approximate linear distance (arbitrary scale)
-            dr_mm = dr * 0.1  # 1 degree ~= 0.1mm for distance purposes
-            return math.sqrt(dx * dx + dy * dy + dz * dz + dr_mm * dr_mm)
-        else:
-            return math.sqrt(dx * dx + dy * dy + dz * dz)
-
     @classmethod
     def from_list(cls, coords: List[float], name: Optional[str] = None) -> "Position":
         """Create Position from list of coordinates.

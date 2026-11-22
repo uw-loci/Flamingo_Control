@@ -127,7 +127,7 @@ Quick scanning feature for sample orientation and tile selection:
 - Optional: Zarr for compressed 2D session save/load
 
 ### Configuration Files
-- `microscope_settings/FlamingoMetaData.txt` (or other config files)
+- `saved_configurations.json` (connection profiles; seeded from `saved_configurations.example.json`)
 - `workflows/*.txt` (workflow template files)
 
 </details>
@@ -221,16 +221,8 @@ python tests/mock_server.py
 
 ### Create Test Configuration
 
-```bash
-cat > microscope_settings/FlamingoMetaData_test.txt << 'EOF'
-<Instrument>
-  <Type>
-    Microscope name = Mock Server
-    Microscope address = 127.0.0.1 53717
-  </Type>
-</Instrument>
-EOF
-```
+In the Connection tab, add a profile for `127.0.0.1`, port `53717` (profiles are saved in
+`saved_configurations.json`).
 
 ### Run Application
 

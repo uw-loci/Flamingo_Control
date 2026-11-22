@@ -75,7 +75,7 @@ file.** `drive_mappings.json` likewise holds a dict of mappings.
 | `stitching_timing_cache.json` | Same, for stitching | 1 | no | Harmless |
 | `webcam_calibration.json` | Webcam↔stage affine per rotation angle | 1 | no | Webcam overview uncalibrated |
 | `ControlSettings.txt` | Read by the config-migration service | 1 | yes | Migration skips it |
-| `FlamingoMetaData_test.txt` | Fixture for `tests/test_utils_parsers.py` | 1 | yes | That test fails |
+| `FlamingoMetaData_test.txt` | No code reference: its parser (`utils/metadata_parser`) and tests were removed as unused | 1 | yes | — |
 | `LowResTSPIM.txt` | No code reference; likely a stored instrument profile | 1 | yes | — |
 | `localhost_settings.json` | A `{name}_settings.json` for a scope named `localhost` | N | yes | Only matters if you connect as `localhost` |
 

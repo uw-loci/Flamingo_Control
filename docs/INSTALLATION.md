@@ -400,9 +400,9 @@ dir microscope_settings\*.txt
 ls -l microscope_settings/*.txt
 ```
 
-You should see files like:
-- `FlamingoMetaData.txt` (main configuration)
-- `FlamingoMetaData_WID.txt`, etc. (additional microscopes)
+Connection profiles are not read from these files: they live in `saved_configurations.json`
+(seeded from `saved_configurations.example.json` when missing) and are
+edited in the Connection tab. See `docs/config_files_reference.md` for every file the program reads.
 
 ### 4. Run Application
 

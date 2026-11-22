@@ -1,22 +1,14 @@
 """
-Unit tests for utils layer parsers (metadata_parser and workflow_parser).
+Unit tests for utils/workflow_parser.
 
-Tests both parsers with real project files and edge cases.
+Tests the parser with real project files and edge cases.
 """
 
 import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import mock_open, patch
 
-from py2flamingo.models.connection import ConnectionConfig
-from py2flamingo.utils.metadata_parser import (
-    _find_microscope_address,
-    extract_connection_info,
-    parse_metadata_file,
-    validate_metadata_file,
-)
 from py2flamingo.utils.workflow_parser import (
     get_workflow_preview,
     get_workflow_summary,
@@ -24,193 +16,6 @@ from py2flamingo.utils.workflow_parser import (
     read_workflow_as_bytes,
     validate_workflow,
 )
-
-
-class TestMetadataParser(unittest.TestCase):
-    """Test metadata_parser module."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        # Use actual test file from project
-        self.test_metadata_path = Path("microscope_settings/FlamingoMetaData_test.txt")
-
-    def test_parse_metadata_file_with_real_file(self):
-        """Test parsing actual FlamingoMetaData_test.txt file."""
-        if not self.test_metadata_path.exists():
-            self.skipTest(f"Test file not found: {self.test_metadata_path}")
-
-        config = parse_metadata_file(self.test_metadata_path)
-
-        # Verify it returns a ConnectionConfig
-        self.assertIsInstance(config, ConnectionConfig)
-
-        # Verify expected values from test file (localhost:53717)
-        self.assertEqual(config.ip_address, "127.0.0.1")
-        self.assertEqual(config.port, 53717)
-        self.assertEqual(config.live_port, 53718)  # port + 1
-
-    def test_parse_metadata_file_nonexistent(self):
-        """Test that parsing non-existent file raises FileNotFoundError."""
-        with self.assertRaises(FileNotFoundError) as ctx:
-            parse_metadata_file("nonexistent_file.txt")
-
-        self.assertIn("not found", str(ctx.exception).lower())
-
-    def test_parse_metadata_file_malformed(self):
-        """Test that malformed file raises ValueError."""
-        # Create temporary malformed file
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
-            f.write("This is not a valid metadata file\n")
-            f.write("No microscope address here\n")
-            temp_path = f.name
-
-        try:
-            with self.assertRaises(ValueError) as ctx:
-                parse_metadata_file(temp_path)
-
-            self.assertIn("Microscope address", str(ctx.exception))
-        finally:
-            os.unlink(temp_path)
-
-    def test_parse_metadata_file_invalid_ip(self):
-        """Test that invalid IP address raises ValueError."""
-        # Create temporary file with invalid IP
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
-            f.write("<Instrument>\n")
-            f.write("Microscope address = 999.999.999.999 53717\n")
-            f.write("</Instrument>\n")
-            temp_path = f.name
-
-        try:
-            with self.assertRaises(ValueError) as ctx:
-                parse_metadata_file(temp_path)
-
-            # Should fail validation
-            self.assertTrue(
-                "Invalid" in str(ctx.exception)
-                or "validation" in str(ctx.exception).lower()
-            )
-        finally:
-            os.unlink(temp_path)
-
-    def test_parse_metadata_file_invalid_port(self):
-        """Test that invalid port raises ValueError."""
-        # Create temporary file with invalid port
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
-            f.write("<Instrument>\n")
-            f.write("Microscope address = 192.168.1.1 99999\n")  # Port > 65535
-            f.write("</Instrument>\n")
-            temp_path = f.name
-
-        try:
-            with self.assertRaises(ValueError) as ctx:
-                parse_metadata_file(temp_path)
-
-            self.assertIn("range", str(ctx.exception).lower())
-        finally:
-            os.unlink(temp_path)
-
-    def test_extract_connection_info_valid(self):
-        """Test extracting connection info from valid line."""
-        ip, port = extract_connection_info("192.168.1.1 53717")
-
-        self.assertEqual(ip, "192.168.1.1")
-        self.assertEqual(port, 53717)
-
-    def test_extract_connection_info_localhost(self):
-        """Test extracting connection info for localhost."""
-        ip, port = extract_connection_info("127.0.0.1 53717")
-
-        self.assertEqual(ip, "127.0.0.1")
-        self.assertEqual(port, 53717)
-
-    def test_extract_connection_info_empty_line(self):
-        """Test that empty line raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            extract_connection_info("")
-
-        self.assertIn("empty", str(ctx.exception).lower())
-
-    def test_extract_connection_info_invalid_format(self):
-        """Test that invalid format raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            extract_connection_info("192.168.1.1")  # Missing port
-
-        self.assertIn("format", str(ctx.exception).lower())
-
-    def test_extract_connection_info_invalid_ip_format(self):
-        """Test that invalid IP format raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            extract_connection_info("invalid.ip.address 53717")
-
-        self.assertIn("IP address", str(ctx.exception))
-
-    def test_extract_connection_info_invalid_port_format(self):
-        """Test that non-numeric port raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            extract_connection_info("192.168.1.1 notaport")
-
-        self.assertIn("port", str(ctx.exception).lower())
-
-    def test_extract_connection_info_port_out_of_range(self):
-        """Test that port out of range raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            extract_connection_info("192.168.1.1 0")  # Port 0
-
-        self.assertIn("range", str(ctx.exception).lower())
-
-        with self.assertRaises(ValueError) as ctx:
-            extract_connection_info("192.168.1.1 70000")  # Port > 65535
-
-        self.assertIn("range", str(ctx.exception).lower())
-
-    def test_validate_metadata_file_valid(self):
-        """Test validating a valid metadata file."""
-        if not self.test_metadata_path.exists():
-            self.skipTest(f"Test file not found: {self.test_metadata_path}")
-
-        valid, errors = validate_metadata_file(self.test_metadata_path)
-
-        self.assertTrue(valid)
-        self.assertEqual(errors, [])
-
-    def test_validate_metadata_file_nonexistent(self):
-        """Test validating non-existent file."""
-        valid, errors = validate_metadata_file("nonexistent.txt")
-
-        self.assertFalse(valid)
-        self.assertTrue(len(errors) > 0)
-        self.assertIn("not found", errors[0].lower())
-
-    def test_validate_metadata_file_malformed(self):
-        """Test validating malformed file."""
-        # Create temporary malformed file
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as f:
-            f.write("No valid content here\n")
-            temp_path = f.name
-
-        try:
-            valid, errors = validate_metadata_file(temp_path)
-
-            self.assertFalse(valid)
-            self.assertTrue(len(errors) > 0)
-        finally:
-            os.unlink(temp_path)
-
-    def test_find_microscope_address(self):
-        """Test the internal _find_microscope_address function."""
-        # Test nested structure
-        data = {"Instrument": {"Type": {"Microscope address": "192.168.1.1 53717"}}}
-
-        result = _find_microscope_address(data)
-        self.assertEqual(result, "192.168.1.1 53717")
-
-    def test_find_microscope_address_not_found(self):
-        """Test _find_microscope_address when key not present."""
-        data = {"Instrument": {"Type": {"Other field": "value"}}}
-
-        result = _find_microscope_address(data)
-        self.assertEqual(result, "")
 
 
 class TestWorkflowParser(unittest.TestCase):
@@ -396,45 +201,6 @@ class TestWorkflowParser(unittest.TestCase):
 
         # Should return empty or minimal dict
         self.assertIsInstance(summary, dict)
-
-
-class TestParserIntegration(unittest.TestCase):
-    """Integration tests for both parsers working together."""
-
-    def test_metadata_then_workflow(self):
-        """Test loading metadata and then workflow (typical usage pattern)."""
-        metadata_path = Path("microscope_settings/FlamingoMetaData_test.txt")
-        workflow_path = Path("workflows/Snapshot.txt")
-
-        if not metadata_path.exists() or not workflow_path.exists():
-            self.skipTest("Test files not found")
-
-        # Parse metadata
-        config = parse_metadata_file(metadata_path)
-        self.assertIsInstance(config, ConnectionConfig)
-
-        # Parse workflow
-        workflow = parse_workflow_file(workflow_path)
-        self.assertIsInstance(workflow, dict)
-
-        # Verify both succeeded
-        self.assertEqual(config.ip_address, "127.0.0.1")
-        self.assertTrue(len(workflow) > 0)
-
-    def test_validate_before_parse(self):
-        """Test validating files before parsing (defensive pattern)."""
-        metadata_path = Path("microscope_settings/FlamingoMetaData_test.txt")
-
-        if not metadata_path.exists():
-            self.skipTest("Test file not found")
-
-        # Validate first
-        valid, errors = validate_metadata_file(metadata_path)
-        self.assertTrue(valid, f"Validation failed: {errors}")
-
-        # Then parse
-        config = parse_metadata_file(metadata_path)
-        self.assertIsInstance(config, ConnectionConfig)
 
 
 if __name__ == "__main__":

@@ -233,22 +233,8 @@ Press Ctrl+C to stop
 
 #### Step 2: Create Test Configuration
 
-```bash
-# Create localhost configuration
-cat > microscope_settings/FlamingoMetaData_test.txt << 'EOF'
-<MetaData>
-  <Experiment>
-    Name = Test
-  </Experiment>
-</MetaData>
-<Instrument>
-  <Type>
-    Microscope name = Mock Server
-    Microscope address = 127.0.0.1 53717
-  </Type>
-</Instrument>
-EOF
-```
+In the Connection tab, add a profile for `127.0.0.1`, port `53717` (profiles are saved in
+`saved_configurations.json`).
 
 #### Step 3: Run Application
 
