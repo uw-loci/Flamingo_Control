@@ -9,6 +9,7 @@ Guide for developers and contributors to the Flamingo Microscope Control softwar
 - [Development Setup](#development-setup)
 - [Architecture Overview](#architecture-overview)
 - [Glossary and naming rules](glossary.md) (units, terms, class roles, names that must never change)
+- [Architecture: layers and paths](architecture.md) (which package may import which, the protocol, stage-move and safety paths, module-level state)
 - [Testing](#testing)
 - [Contributing](#contributing)
 - [Code Style](#code-style)
@@ -73,7 +74,8 @@ python -m py2flamingo --mode napari
 
 ### MVC Pattern
 
-The codebase follows Model-View-Controller architecture:
+The codebase follows Model-View-Controller architecture. The full layer order,
+enforced by `tests/test_layering.py`, is in [architecture.md](architecture.md).
 
 ```
 src/py2flamingo/
