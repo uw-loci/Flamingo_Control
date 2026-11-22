@@ -11,8 +11,8 @@ from typing import Dict, Optional
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
+from py2flamingo.pipeline.engine.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.context import ExecutionContext
-from py2flamingo.pipeline.engine.node_runners.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.scope_resolver import ScopeResolver
 from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 

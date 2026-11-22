@@ -28,8 +28,8 @@ The rules about what a body may contain, and the honest limits of them, live in
 
 import logging
 
+from py2flamingo.pipeline.engine.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.context import ExecutionContext
-from py2flamingo.pipeline.engine.node_runners.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode
 from py2flamingo.pipeline.models.port_types import PortType
 from py2flamingo.pipeline.models.python_function import NodeCodeError, run_code

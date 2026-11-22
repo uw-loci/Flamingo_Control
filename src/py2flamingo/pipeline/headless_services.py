@@ -25,9 +25,9 @@ from typing import Any, Dict, Iterable, Optional, Set
 
 import numpy as np
 
+from py2flamingo.pipeline.engine.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.context import ExecutionContext
 from py2flamingo.pipeline.engine.executor import PipelineExecutor
-from py2flamingo.pipeline.engine.node_runners.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.node_runners.conditional_runner import (
     ConditionalRunner,
 )

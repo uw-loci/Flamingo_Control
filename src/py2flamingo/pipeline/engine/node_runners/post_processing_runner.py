@@ -7,8 +7,8 @@ Exposes key parameters through the node's config dict.
 import logging
 from pathlib import Path
 
+from py2flamingo.pipeline.engine.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.context import ExecutionContext
-from py2flamingo.pipeline.engine.node_runners.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode
 from py2flamingo.pipeline.models.port_types import PortType
 

@@ -15,8 +15,8 @@ from typing import Dict
 
 import numpy as np
 
+from py2flamingo.pipeline.engine.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.context import ExecutionContext
-from py2flamingo.pipeline.engine.node_runners.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.models.pipeline import Pipeline, PipelineNode
 from py2flamingo.pipeline.models.port_types import PortType
 
