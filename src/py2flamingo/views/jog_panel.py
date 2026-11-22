@@ -43,7 +43,7 @@ from PyQt5.QtWidgets import (
 
 from py2flamingo.services.window_geometry_manager import PersistentWidget
 from py2flamingo.utils.stage_limits import clamp_to_limits
-from py2flamingo.views.colors import (
+from py2flamingo.views.widgets.colors import (
     ERROR_COLOR,
     NEGATIVE_JOG_COLOR,
     NEUTRAL_COLOR,

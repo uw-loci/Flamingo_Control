@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
+from py2flamingo.views.widgets.colors import ERROR_COLOR, SUCCESS_COLOR
 
 
 class SampleInfoView(QWidget):

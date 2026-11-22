@@ -146,7 +146,7 @@ tool. Keep the name and, if it is misleading, document it where it is defined.
 - Queue keys in `core/queue_manager.py`: `image`, `command`, `command_data`, `z_plane`,
   `intensity`, `visualize`, `stage_location`, `other_data`.
 - `WorkflowState` values (`"idle"`, ..., `"cancelled"`, `"error"`).
-- The color alias `"grey"` in `views/colors.py`.
+- The color alias `"grey"` in `views/widgets/colors.py`.
 - Verification record and fact keys (`travelled_mm`, `mm_per_pixel`, ...): they are
   written into saved verification reports.
 - The flamingo-stitcher queue status `"cancelled"`.

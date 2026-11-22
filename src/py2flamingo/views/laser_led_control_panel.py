@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.controllers.laser_led_controller import LaserLEDController
-from py2flamingo.views.colors import ERROR_BG, SUCCESS_BG, WARNING_BG
+from py2flamingo.views.widgets.colors import ERROR_BG, SUCCESS_BG, WARNING_BG
 
 
 class LaserLEDControlPanel(QWidget):

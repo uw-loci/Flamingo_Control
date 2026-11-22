@@ -33,7 +33,7 @@ from PyQt5.QtWidgets import (
 
 from py2flamingo.controllers.camera_controller import CameraController, CameraState
 from py2flamingo.services.camera_service import ImageHeader
-from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
+from py2flamingo.views.widgets.colors import ERROR_COLOR, SUCCESS_COLOR
 
 if TYPE_CHECKING:
     from py2flamingo.services.window_geometry_manager import WindowGeometryManager

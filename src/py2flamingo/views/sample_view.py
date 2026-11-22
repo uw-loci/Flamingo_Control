@@ -65,9 +65,9 @@ from superqt import QRangeSlider
 from py2flamingo.controllers.camera_controller import CameraState
 from py2flamingo.services.position_preset_service import PositionPresetService
 from py2flamingo.views.chamber_visualization_manager import ChamberVisualizationManager
-from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR, WARNING_BG
 from py2flamingo.views.dialogs.viewer_controls_dialog import ViewerControlsDialog
 from py2flamingo.views.laser_led_control_panel import LaserLEDControlPanel
+from py2flamingo.views.widgets.colors import ERROR_COLOR, SUCCESS_COLOR, WARNING_BG
 from py2flamingo.views.widgets.slice_plane_viewer import AXIS_COLORS, SlicePlaneViewer
 
 

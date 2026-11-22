@@ -18,7 +18,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 
 from py2flamingo.views import ConnectionView, WorkflowView
-from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
+from py2flamingo.views.widgets.colors import ERROR_COLOR, SUCCESS_COLOR
 
 # Fixtures
 

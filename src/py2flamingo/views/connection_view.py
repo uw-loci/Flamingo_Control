@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
 )
 
 from py2flamingo.resources import get_app_icon
-from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_COLOR
+from py2flamingo.views.widgets.colors import ERROR_COLOR, SUCCESS_COLOR
 
 
 class ConnectionView(QWidget):

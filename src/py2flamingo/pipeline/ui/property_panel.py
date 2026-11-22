@@ -35,7 +35,7 @@ from py2flamingo.pipeline.models.python_function import (
     RESULT_KEYS,
     validate_code,
 )
-from py2flamingo.views.colors import ERROR_COLOR
+from py2flamingo.views.widgets.colors import ERROR_COLOR
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,7 @@ Color Palette Sources:
 - Paul Tol's palettes: https://personal.sron.nl/~pault/
 
 Usage:
-    from py2flamingo.views.colors import (
+    from py2flamingo.views.widgets.colors import (
         SUCCESS_COLOR, ERROR_COLOR, WARNING_COLOR,
         POSITIVE_JOG_COLOR, NEGATIVE_JOG_COLOR
     )

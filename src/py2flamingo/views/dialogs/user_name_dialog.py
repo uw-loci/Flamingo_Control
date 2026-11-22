@@ -31,7 +31,7 @@ from py2flamingo.models.user_name import (
     describe_folder_effect,
     normalize_stored_name,
 )
-from py2flamingo.views.colors import NEUTRAL_BG
+from py2flamingo.views.widgets.colors import NEUTRAL_BG
 
 logger = logging.getLogger(__name__)
 

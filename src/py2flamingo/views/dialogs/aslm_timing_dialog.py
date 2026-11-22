@@ -43,7 +43,7 @@ from py2flamingo.models.aslm_timing import (
     evaluate,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.views.colors import SUCCESS_BG, WARNING_BG
+from py2flamingo.views.widgets.colors import SUCCESS_BG, WARNING_BG
 
 logger = logging.getLogger(__name__)
 

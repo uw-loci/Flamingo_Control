@@ -40,7 +40,7 @@ from PyQt5.QtWidgets import (
 from py2flamingo.controllers.movement_controller import MovementController
 from py2flamingo.models.microscope import Position
 from py2flamingo.services.window_geometry_manager import PersistentDialog
-from py2flamingo.views.colors import (
+from py2flamingo.views.widgets.colors import (
     ERROR_BG,
     ERROR_COLOR,
     NEGATIVE_JOG_COLOR,

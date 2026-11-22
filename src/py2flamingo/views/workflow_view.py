@@ -56,7 +56,12 @@ from py2flamingo.utils.workflow_parser import (
     parse_workflow_file,
 )
 from py2flamingo.utils.workflow_serialization import build_workflow_section_dict
-from py2flamingo.views.colors import ERROR_COLOR, SUCCESS_BG, SUCCESS_COLOR, WARNING_BG
+from py2flamingo.views.widgets.colors import (
+    ERROR_COLOR,
+    SUCCESS_BG,
+    SUCCESS_COLOR,
+    WARNING_BG,
+)
 from py2flamingo.views.workflow_panels import (
     CameraPanel,
     IlluminationPanel,

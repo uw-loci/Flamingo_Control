@@ -34,7 +34,7 @@ from py2flamingo.services.progress_estimator import (
     TimingCache,
 )
 from py2flamingo.utils.tile_geometry import OVERLAP_PERCENT_MAX, OVERLAP_PERCENT_MIN
-from py2flamingo.views.colors import ERROR_COLOR, WARNING_COLOR
+from py2flamingo.views.widgets.colors import ERROR_COLOR, WARNING_COLOR
 
 logger = logging.getLogger(__name__)
 
@@ -1424,7 +1424,7 @@ class LED2DOverviewDialog(PersistentDialog):
 
         Uses subtle border to indicate incomplete sections without being overwhelming.
         """
-        from py2flamingo.views.colors import WARNING_COLOR
+        from py2flamingo.views.widgets.colors import WARNING_COLOR
 
         # Check bounding points - validate coordinates AND bounding box
         bbox = self._get_bounding_box()

@@ -10,7 +10,7 @@ from PyQt5.QtGui import QColor, QPalette
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from py2flamingo.services.status_indicator_service import GlobalStatus
-from py2flamingo.views.colors import (
+from py2flamingo.views.widgets.colors import (
     ERROR_COLOR,
     NEUTRAL_COLOR,
     SUCCESS_COLOR,
