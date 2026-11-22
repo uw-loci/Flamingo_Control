@@ -47,6 +47,7 @@ from py2flamingo.services.tiff_size_validator import (
     validate_workflow_params,
 )
 from py2flamingo.services.window_geometry_manager import PersistentDialog
+from py2flamingo.utils.fov import effective_pixel_size_um
 from py2flamingo.utils.limited_acquisition import (
     ArmSelection,
     choose_illumination_arms,
@@ -549,21 +550,6 @@ class TileCollectionDialog(PersistentDialog):
     # Acquisition tiling -- the acquisition grid is not the overview grid
     # ------------------------------------------------------------------ #
 
-    def _effective_pixel_size_um(self) -> Optional[float]:
-        """Sample-plane pixel size, mm-per-pixel * 1000, or None if unknown.
-
-        One source only. Two pixel sizes means the grid previewed here and the
-        grid the stage walks can disagree with nothing to say which is lying.
-        """
-        try:
-            from py2flamingo.configs.config_loader import get_hardware_config
-
-            value = float(get_hardware_config().effective_pixel_size_um)
-        except Exception:
-            logger.debug("Effective pixel size unavailable", exc_info=True)
-            return None
-        return value if value > 0 else None
-
     def _overview_fov_mm_resolved(self) -> Optional[Tuple[float, float]]:
         """(x, y) field the overview tiles were imaged at, in mm.
 
@@ -601,7 +587,7 @@ class TileCollectionDialog(PersistentDialog):
         only honest basis for the acquisition grid.
         """
         panel = getattr(self, "_camera_panel", None)
-        pixel_um = self._effective_pixel_size_um()
+        pixel_um = effective_pixel_size_um()
         if panel is None or pixel_um is None:
             return None
         try:
@@ -764,7 +750,7 @@ class TileCollectionDialog(PersistentDialog):
 
         acq_fov = self._acquisition_fov_mm()
         overview_fov = self._overview_fov_mm_resolved()
-        pixel_um = self._effective_pixel_size_um()
+        pixel_um = effective_pixel_size_um()
 
         if acq_fov is None or overview_fov is None:
             label.setStyleSheet("color: #c0392b; font-size: 11px;")

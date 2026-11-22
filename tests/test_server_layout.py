@@ -304,7 +304,7 @@ class TestAgainstTheSyntheticScope(LayoutTestCase):
         sent = scope.received(0x1002)[0]
         self.assertTrue(sent.additional_data.startswith(b"Flamingo_Control - "))
 
-        _, settings = service.get_microscope_settings()
+        settings = service.get_microscope_settings()
         self.assertEqual(settings["Type"]["Microscope name"], "synthetic")
         self.assertEqual(settings["Stage limits"]["Soft limit max x-axis"], "12.310")
         self.assertTrue(Path("microscope_settings/SystemMetaData.txt").exists())
@@ -319,7 +319,7 @@ class TestAgainstTheSyntheticScope(LayoutTestCase):
     def test_a_2026_11_13_server_is_identified_and_its_camera_still_answers(self):
         scope, service = self._connect(sl.LAYOUT_2026_11_13)
         self.assertIs(sl.active(), sl.LAYOUT_2026_11_13)
-        _, settings = service.get_microscope_settings()
+        settings = service.get_microscope_settings()
         self.assertEqual(settings["Type"]["Microscope name"], "synthetic")
         self.assertEqual(service.query_available_drives(), ["/media/synthetic/drive1"])
         self.assertTrue(scope.received(0x100F))
@@ -349,7 +349,7 @@ class TestAgainstTheSyntheticScope(LayoutTestCase):
     def test_a_3_0_0_server_is_read_exactly_as_before(self):
         scope, service = self._connect(sl.REFERENCE)
         self.assertIs(sl.active(), sl.REFERENCE)
-        _, settings = service.get_microscope_settings()
+        settings = service.get_microscope_settings()
         self.assertEqual(settings["Type"]["Microscope name"], "synthetic")
         self.assertTrue(scope.received(0x1009))
         self.assertEqual(service.query_available_drives(), ["/media/synthetic/drive1"])

@@ -529,13 +529,7 @@ class ConnectionController:
 
             if hasattr(self._service, "get_microscope_settings"):
                 self._logger.debug("Calling service.get_microscope_settings()")
-                pixel_size, settings_dict = self._service.get_microscope_settings()
-
-                # Add pixel size to settings if available
-                if pixel_size and settings_dict:
-                    if "Camera" not in settings_dict:
-                        settings_dict["Camera"] = {}
-                    settings_dict["Camera"]["Pixel size (mm)"] = pixel_size
+                settings_dict = self._service.get_microscope_settings()
 
                 self._logger.info(
                     f"Retrieved settings with {len(settings_dict)} sections"

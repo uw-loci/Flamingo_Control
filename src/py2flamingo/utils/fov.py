@@ -133,6 +133,23 @@ def _log_once(log, key: str, message: str) -> None:
     log.info(message)
 
 
+def effective_pixel_size_um() -> Optional[float]:
+    """Sample-plane pixel size in um from the hardware config, or None.
+
+    The calibration-aware value (measured calibration > ScopeSettings.txt >
+    YAML), with no firmware fallback and no guess: callers size tile grids and
+    stage moves with it, so an unknown pixel size must stay unknown.
+    """
+    try:
+        from py2flamingo.configs.config_loader import get_hardware_config
+
+        value = float(get_hardware_config().effective_pixel_size_um)
+    except Exception:  # noqa: BLE001
+        logger.debug("Effective pixel size unavailable", exc_info=True)
+        return None
+    return value if value > 0 else None
+
+
 def compare_pixel_size_sources(app) -> PixelSizeComparison:
     """Read both pixel-size sources so the Connection tab can report them.
 

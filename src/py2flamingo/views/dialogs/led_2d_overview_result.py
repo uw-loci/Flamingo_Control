@@ -38,6 +38,7 @@ from py2flamingo.utils.saved_data_version import LED_2D_SESSION
 
 logger = logging.getLogger(__name__)
 
+from py2flamingo.utils.fov import effective_pixel_size_um
 from py2flamingo.views.widgets.zoomable_image_label import ZoomableImageLabel
 from py2flamingo.visualization.zarr_2d_session import (
     ZARR_AVAILABLE,
@@ -1782,7 +1783,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         overview_fov = self._overview_fov_mm()
         if overview_fov is None:
             return None
-        pixel_um = self._effective_pixel_size_um()
+        pixel_um = effective_pixel_size_um()
         if pixel_um is None:
             return None
         from py2flamingo.utils.tile_geometry import plan_acquisition_from_overview
@@ -1807,16 +1808,6 @@ class LED2DOverviewResultWindow(PersistentWidget):
             logger.error("Could not plan the acquisition grid", exc_info=True)
             return None
 
-    def _effective_pixel_size_um(self):
-        try:
-            from py2flamingo.configs.config_loader import get_hardware_config
-
-            value = float(get_hardware_config().effective_pixel_size_um)
-        except Exception:
-            logger.debug("Effective pixel size unavailable", exc_info=True)
-            return None
-        return value if value > 0 else None
-
     def _stage_limits(self):
         """Hard stage limits, or None when this microscope is not configured.
 
@@ -1838,7 +1829,7 @@ class LED2DOverviewResultWindow(PersistentWidget):
         label = getattr(self, "_tiling_plan_label", None)
         if label is None:
             return
-        pixel_um = self._effective_pixel_size_um()
+        pixel_um = effective_pixel_size_um()
         aoi_w, aoi_h = self._acquisition_aoi_px()
         if pixel_um is None:
             label.setStyleSheet("color: #c0392b; font-size: 11px;")

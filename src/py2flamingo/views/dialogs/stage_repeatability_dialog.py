@@ -248,19 +248,14 @@ class StageRepeatabilityDialog(PersistentDialog):
             raise RuntimeError("Movement controller unavailable")
         mc.move_relative(axis, delta_mm, verify=True)  # verify blocks until settled
 
-    def _pixel_size_um(self) -> float:
-        try:
-            from py2flamingo.configs.config_loader import get_hardware_config
+    def _update_pixel_label(self) -> Optional[float]:
+        """Show the pixel size the run will use; None (shown as unknown) when
+        the hardware config cannot say."""
+        from py2flamingo.utils.fov import effective_pixel_size_um
 
-            px = get_hardware_config().effective_pixel_size_um
-            if px and px > 0:
-                return float(px)
-        except Exception:  # noqa: BLE001
-            pass
-        return 0.406
-
-    def _update_pixel_label(self):
-        self._pixel_label.setText(f"{self._pixel_size_um():.4f}")
+        px = effective_pixel_size_um()
+        self._pixel_label.setText(f"{px:.4f}" if px else "unknown")
+        return px
 
     # ----------------------------------------------------------- live frame
     def _on_new_image(self, image: np.ndarray, header=None):
@@ -301,13 +296,26 @@ class StageRepeatabilityDialog(PersistentDialog):
             )
             return
 
-        self._update_pixel_label()
+        pixel_size_um = self._update_pixel_label()
+        if not pixel_size_um:
+            # It turns every measured shift from pixels into micrometers; a
+            # guessed one (this used to be 0.406, the 16x objective's) reports
+            # a wrong repeatability with nothing to say it is wrong.
+            QMessageBox.warning(
+                self,
+                "Pixel size unknown",
+                "The sample-plane pixel size is unknown (no microscope settings "
+                "or calibration loaded), so shifts cannot be converted to "
+                "micrometers. Connect to the microscope or run the XY Pixel "
+                "Calibrator first.",
+            )
+            return
         params = {
             "axes": axes,
             "distance_mm": self._distance_spin.value(),
             "repetitions": self._reps_spin.value(),
             "settle_s": self._settle_spin.value(),
-            "pixel_size_um": self._pixel_size_um(),
+            "pixel_size_um": pixel_size_um,
         }
         self._cancel_requested = False
         self._table.setRowCount(0)

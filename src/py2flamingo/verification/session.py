@@ -92,7 +92,7 @@ def prepare(
     source = ""
     try:
         if read_settings:
-            _, settings = connection.get_microscope_settings()
+            settings = connection.get_microscope_settings()
             source = "read from the server at the start of this run"
         else:
             from py2flamingo.utils.file_handlers import text_to_dict

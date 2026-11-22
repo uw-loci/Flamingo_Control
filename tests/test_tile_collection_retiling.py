@@ -211,17 +211,21 @@ class TestTheLabelIsHonestAboutWhatItKnows(_Base):
         assert "measured by the overview" in self._retile()._retile_label.text()
 
     def test_an_unknown_pixel_size_disables_retiling_rather_than_guessing(self):
+        from unittest.mock import patch
+
         dlg = self._dlg
-        original = dlg._effective_pixel_size_um
-        dlg._effective_pixel_size_um = lambda: None
         try:
-            dlg._apply_retiling()
-            assert not dlg._retile_checkbox.isEnabled()
-            assert "Cannot size the acquisition field" in dlg._retile_label.text()
-            # And it falls back to collecting what was selected, not nothing.
-            assert dlg._left_tiles == dlg._overview_left_tiles
+            with patch(
+                "py2flamingo.views.dialogs.tile_collection_dialog"
+                ".effective_pixel_size_um",
+                lambda: None,
+            ):
+                dlg._apply_retiling()
+                assert not dlg._retile_checkbox.isEnabled()
+                assert "Cannot size the acquisition field" in dlg._retile_label.text()
+                # And it falls back to collecting what was selected, not nothing.
+                assert dlg._left_tiles == dlg._overview_left_tiles
         finally:
-            dlg._effective_pixel_size_um = original
             dlg._apply_retiling()
 
 

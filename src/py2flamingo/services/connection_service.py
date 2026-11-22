@@ -1046,22 +1046,21 @@ class MVCConnectionService:
             return b""
         return _receive_full_bytes(self._command_socket, size, timeout=5.0)
 
-    def get_microscope_settings(self) -> Tuple[float, Dict[str, Any]]:
+    def get_microscope_settings(self) -> Dict[str, Any]:
         """
-        Retrieve comprehensive microscope settings and image pixel size.
+        Retrieve the microscope settings (ScopeSettings.txt, or its legacy
+        form built from the 2026-10-06+ metadata document).
 
-        This method queries the microscope for its current configuration including
-        stage limits, laser configurations, optical parameters, and calculates
-        the image pixel size based on the optical system.
+        The pixel size is not computed here: utils/fov and
+        configs/config_loader.get_hardware_config are its one source, and
+        they read the ScopeSettings.txt this writes.
 
         Returns:
-            Tuple[float, Dict[str, Any]]:
-                - Image pixel size in millimeters
-                - Dictionary containing microscope settings with sections like:
-                  - 'Type': Optical parameters (tube lens, objective, etc.)
-                  - 'Stage limits': Min/max positions and home positions
-                  - 'Illumination': Available lasers and LED configs
-                  - Other microscope-specific sections
+            Dict[str, Any]: the settings by section, e.g.
+                - 'Type': Optical parameters (tube lens, objective, etc.)
+                - 'Stage limits': Min/max positions and home positions
+                - 'Illumination': Available lasers and LED configs
+                - Other microscope-specific sections
 
         Raises:
             RuntimeError: If not connected to microscope
@@ -1069,8 +1068,7 @@ class MVCConnectionService:
             ConnectionError: If communication fails
 
         Example:
-            >>> pixel_size, settings = service.get_microscope_settings()
-            >>> print(f"Pixel size: {pixel_size} mm")
+            >>> settings = service.get_microscope_settings()
             >>> print(f"Objective: {settings['Type']['Objective lens magnification']}x")
         """
         import time
@@ -1132,66 +1130,6 @@ class MVCConnectionService:
             scope_settings = text_to_dict(str(settings_path))
             self.logger.info(f"Loaded {len(scope_settings)} setting sections")
 
-            # Step 3: Get pixel size from microscope
-            from py2flamingo.core.command_codes import CameraCommands
-
-            COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET = (
-                CameraCommands.PIXEL_FIELD_OF_VIEW_GET
-            )
-            cmd_pixel = Command(code=COMMAND_CODES_CAMERA_PIXEL_FIELD_OF_VIEW_GET)
-
-            self.logger.debug("Sending PIXEL_FIELD_OF_VIEW_GET command")
-            self.send_command(cmd_pixel)
-
-            # Wait for response
-            time.sleep(0.2)
-
-            # Try to get pixel size from queue
-            image_pixel_size = None
-            if self.queue_manager:
-                try:
-                    image_pixel_size = self.queue_manager.get_nowait("other_data")
-                    self.logger.debug(f"Got pixel size from queue: {image_pixel_size}")
-                except:
-                    pass
-
-            # If not in queue, calculate from settings
-            if not image_pixel_size:
-                self.logger.debug("Calculating pixel size from optical parameters")
-                try:
-                    tube = float(
-                        scope_settings["Type"]["Tube lens design focal length (mm)"]
-                    )
-                    obj = float(scope_settings["Type"]["Objective lens magnification"])
-                    # Get camera pixel size from settings, or use hardware config
-                    try:
-                        from py2flamingo.configs.config_loader import (
-                            get_hardware_config,
-                        )
-
-                        _hw = get_hardware_config()
-                        _hw_default_cam = _hw.sensor_pixel_size_um
-                        _ref_tube = _hw.reference_tube_lens_mm
-                    except Exception:
-                        _hw_default_cam = 6.5
-                        _ref_tube = 200.0
-                    cam_um = float(
-                        scope_settings.get("Camera", {}).get(
-                            "Physical pixel size (\u00b5m)", _hw_default_cam
-                        )
-                    )
-                    image_pixel_size = (
-                        cam_um / (obj * (tube / _ref_tube))
-                    ) / 1000.0  # Convert to mm
-                    self.logger.info(
-                        f"Calculated pixel size: {image_pixel_size:.6f} mm "
-                        f"(cam={cam_um}µm, obj={obj}x, tube={tube}mm)"
-                    )
-                except (KeyError, ValueError, TypeError) as e:
-                    self.logger.error(f"Could not calculate pixel size: {e}")
-                    # Do not use fallback - return None to indicate unknown
-                    image_pixel_size = None
-
             # Every stage move from here on stays inside the server's own soft
             # limits as well as the settings json (services/server_stage_limits).
             from py2flamingo.services import server_stage_limits
@@ -1199,7 +1137,7 @@ class MVCConnectionService:
             server_stage_limits.set_from_settings(scope_settings)
 
             self.logger.info("Successfully retrieved microscope settings")
-            return image_pixel_size, scope_settings
+            return scope_settings
 
         except FileNotFoundError:
             raise

@@ -71,7 +71,7 @@ class TestWorkflowStopAck(OneReaderCase):
 class TestSettingsRead(OneReaderCase):
     def test_the_settings_can_be_read_again_and_again(self):
         for _ in range(3):
-            _, settings = self.connection.get_microscope_settings()
+            settings = self.connection.get_microscope_settings()
             self.assertEqual(settings["Type"]["Microscope name"], "synthetic")
         self.assert_nobody_else_read()
 
