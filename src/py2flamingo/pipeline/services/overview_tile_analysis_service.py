@@ -12,6 +12,15 @@ from typing import Dict, Set, Tuple
 
 import numpy as np
 
+from py2flamingo.utils.tile_metrics import (
+    calculate_tile_dog_variance,
+    calculate_tile_edges,
+    calculate_tile_entropy,
+    calculate_tile_gradient_anisotropy,
+    calculate_tile_intensity,
+    calculate_tile_variance,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,15 +102,6 @@ class OverviewTileAnalysisService:
         Returns:
             TileAnalysisResult with selected tiles and metrics
         """
-        from py2flamingo.views.dialogs.overview_thresholder_dialog import (
-            calculate_tile_dog_variance,
-            calculate_tile_edges,
-            calculate_tile_entropy,
-            calculate_tile_gradient_anisotropy,
-            calculate_tile_intensity,
-            calculate_tile_variance,
-        )
-
         tiles_x = settings.tiles_x
         tiles_y = settings.tiles_y
         method = settings.method
