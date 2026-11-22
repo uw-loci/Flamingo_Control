@@ -366,9 +366,9 @@ class TestRealWorldScenarios(unittest.TestCase):
 
         # GUI gets structured data
         gui_data = formatter.format_for_gui(error)
-        self.assertEqual(
-            gui_data["severity"], "error"
-        )  # Timeout errors have 'error' severity
+        # CONNECTION_TIMEOUT is a connection error (1002); connection errors
+        # are critical. (A second definition, 8003, used to win silently.)
+        self.assertEqual(gui_data["severity"], "critical")
         self.assertEqual(len(gui_data["suggestions"]), 3)
 
     def test_command_chain_error_scenario(self):

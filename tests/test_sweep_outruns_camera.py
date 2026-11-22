@@ -381,7 +381,7 @@ class TestTheVelocityFloorDoesNotBlockTheFix:
         """
         import pytest as _pytest
 
-        from py2flamingo.models.base import ValidationError
+        from py2flamingo.core.errors import ValidationError
         from py2flamingo.models.data.workflow import StackSettings
 
         with _pytest.raises(ValidationError):

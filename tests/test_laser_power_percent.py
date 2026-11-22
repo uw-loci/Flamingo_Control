@@ -11,7 +11,7 @@ checked against 0-100 %.
 import unittest
 from types import SimpleNamespace
 
-from py2flamingo.models.base import ValidationError
+from py2flamingo.core.errors import ValidationError
 from py2flamingo.models.data.workflow import IlluminationSettings, Workflow
 from py2flamingo.utils.workflow_serialization import build_tile_illumination_source
 from py2flamingo.workflows.workflow_validator import WorkflowValidator

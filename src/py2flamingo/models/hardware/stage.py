@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     from py2flamingo.models.microscope import Position
 
-from ..base import ValidatedModel, ValidationError, validate_range
+from py2flamingo.core.errors import ValidationError
+
+from ..base import ValidatedModel, validate_range
 
 
 class StageAxis(Enum):

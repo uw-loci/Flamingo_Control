@@ -191,13 +191,29 @@ class ValidationError(FlamingoError):
 
     DEFAULT_CODE = 7001
 
-    def __init__(self, message: str, field_name: Optional[str] = None, **kwargs):
+    def __init__(
+        self,
+        message: str,
+        field_name: Optional[str] = None,
+        value: Any = None,
+        **kwargs,
+    ):
         if "context" not in kwargs:
             kwargs["context"] = {}
         kwargs["context"]["category"] = "VALIDATION"
         if field_name:
             kwargs["context"]["field"] = field_name
+        if value is not None:
+            kwargs["context"]["value"] = value
         super().__init__(message, **kwargs)
+        self.field_name = field_name
+        self.value = value
+
+
+class WorkflowValidationError(ValidationError):
+    """A workflow failed validation against the hardware constraints."""
+
+    DEFAULT_CODE = 5002
 
 
 class TimeoutError(FlamingoError):
@@ -281,7 +297,6 @@ class ErrorCodes:
     # Timeout errors (8000-8999)
     OPERATION_TIMEOUT = 8001
     RESPONSE_TIMEOUT = 8002
-    CONNECTION_TIMEOUT = 8003
 
     # System errors (9000-9999)
     UNKNOWN_ERROR = 9000

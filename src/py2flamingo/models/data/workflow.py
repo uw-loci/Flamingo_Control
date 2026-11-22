@@ -10,7 +10,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from ..base import ValidatedModel, ValidationError
+from py2flamingo.core.errors import ValidationError
+
+from ..base import ValidatedModel
 from ..microscope import Position
 
 

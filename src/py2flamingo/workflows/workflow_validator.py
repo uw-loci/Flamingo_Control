@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..core.errors import FlamingoError, ValidationError
+from ..core.errors import FlamingoError, ValidationError, WorkflowValidationError
 from ..models.data.workflow import (
     ExperimentSettings,
     IlluminationSettings,
@@ -93,12 +93,6 @@ class HardwareConstraints:
     # 3.5x were both delivered at 109 ms, so readout predicted one of them
     # within 6% and the other 17x wrong.
     camera_frame_period_us: Optional[float] = None
-
-
-class WorkflowValidationError(ValidationError):
-    """Raised when workflow validation fails."""
-
-    pass
 
 
 class WorkflowValidator:

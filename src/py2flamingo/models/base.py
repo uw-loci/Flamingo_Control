@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional, Type, TypeVar
 
+from py2flamingo.core.errors import ValidationError
+
 T = TypeVar("T", bound="BaseModel")
 
 
@@ -155,29 +157,6 @@ class ImmutableModel(BaseModel):
         )
 
 
-class ValidationError(Exception):
-    """Custom exception for model validation failures."""
-
-    def __init__(self, message: str, field: Optional[str] = None, value: Any = None):
-        """Initialize validation error.
-
-        Args:
-            message: Error message
-            field: Field that failed validation
-            value: Invalid value that caused the error
-        """
-        super().__init__(message)
-        self.field = field
-        self.value = value
-        self.message = message
-
-    def __str__(self) -> str:
-        """String representation of validation error."""
-        if self.field:
-            return f"Validation failed for field '{self.field}': {self.message}"
-        return f"Validation failed: {self.message}"
-
-
 def validate_range(
     value: float,
     min_val: Optional[float] = None,
@@ -197,10 +176,14 @@ def validate_range(
     """
     if min_val is not None and value < min_val:
         raise ValidationError(
-            f"Value {value} is below minimum {min_val}", field=field_name, value=value
+            f"Value {value} is below minimum {min_val}",
+            field_name=field_name,
+            value=value,
         )
 
     if max_val is not None and value > max_val:
         raise ValidationError(
-            f"Value {value} is above maximum {max_val}", field=field_name, value=value
+            f"Value {value} is above maximum {max_val}",
+            field_name=field_name,
+            value=value,
         )
