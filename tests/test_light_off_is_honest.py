@@ -118,7 +118,8 @@ class TestEveryLineIsTurnedOff(SyntheticScopeCase):
     def test_a_line_in_a_second_engine_goes_off(self):
         self.scope.lasers_on = {5}
         self.assertTrue(self.service.disable_all_lasers())
-        self.assertTrue(_wait_until(lambda: not self.scope.lasers_on))
+        self.assertTrue(_wait_until(lambda: len(self.scope.received(0x2007)) >= 6))
+        self.assertFalse(self.scope.lasers_on)
         named = [c.params[3] for c in self.scope.received(0x2007)]
         self.assertEqual(sorted(named), [1, 2, 3, 4, 5, 6])
 
@@ -129,7 +130,8 @@ class TestUnknownLinesFallBackToSeven(SyntheticScopeCase):
     def test_without_control_settings_lines_1_to_7_are_named(self):
         self.scope.lasers_on = {6}
         self.assertTrue(self.service.disable_all_lasers())
-        self.assertTrue(_wait_until(lambda: not self.scope.lasers_on))
+        self.assertTrue(_wait_until(lambda: len(self.scope.received(0x2007)) >= 7))
+        self.assertFalse(self.scope.lasers_on)
         named = [c.params[3] for c in self.scope.received(0x2007)]
         self.assertEqual(sorted(named), [1, 2, 3, 4, 5, 6, 7])
 
