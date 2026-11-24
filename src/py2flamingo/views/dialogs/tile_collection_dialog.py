@@ -3092,13 +3092,24 @@ class TileCollectionDialog(PersistentDialog):
 
             progress.close()  # Close the progress dialog
             # Use None as parent since tile collection dialog is closed
+            title = "Execution Cancelled"
             cancel_msg = "Workflow queue was canceled."
+            if stop_reasons:
+                # The queue stopped itself (emergency stop latched, limits
+                # unknown, a timed-out workflow the server did not stop).
+                title = "Execution Stopped"
+                cancel_msg = stop_reasons[-1]
             if reorg.moved:
                 cancel_msg += (
                     f"\n\n{reorg.moved} completed folder(s) were still "
                     "reorganized into the nested layout."
                 )
-            QMessageBox.warning(None, "Execution Cancelled", cancel_msg)
+            QMessageBox.warning(None, title, cancel_msg)
+
+        stop_reasons: List[str] = []
+
+        def on_queue_failed(message):
+            stop_reasons.append(message)
 
         def on_error(message):
             self._queue_error = message
@@ -3112,6 +3123,7 @@ class TileCollectionDialog(PersistentDialog):
         queue_service.workflow_completed.connect(on_workflow_completed)
         queue_service.queue_completed.connect(on_queue_completed)
         queue_service.queue_cancelled.connect(on_queue_cancelled)
+        queue_service.queue_failed.connect(on_queue_failed)
         queue_service.error_occurred.connect(on_error)
 
         # Cancel is handled by the progress dialog's Cancel button
@@ -3186,6 +3198,7 @@ class TileCollectionDialog(PersistentDialog):
                     queue_service.workflow_completed.disconnect(on_workflow_completed)
                     queue_service.queue_completed.disconnect(on_queue_completed)
                     queue_service.queue_cancelled.disconnect(on_queue_cancelled)
+                    queue_service.queue_failed.disconnect(on_queue_failed)
                     queue_service.error_occurred.disconnect(on_error)
                 except Exception:
                     pass  # Signals may already be disconnected

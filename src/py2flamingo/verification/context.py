@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from py2flamingo.core import server_layout
+from py2flamingo.core.errors import WorkflowStartRefusedError
 from py2flamingo.core.frames import parse_frame
 from py2flamingo.verification import codes
 from py2flamingo.verification.model import Aborted, Failed, Skipped
@@ -408,6 +409,10 @@ class RunContext:
             send(packet)
         except ConnectionError as e:
             raise Failed(f"command socket not available ({e})")
+        except WorkflowStartRefusedError as e:
+            # The app's emergency-stop latch (or unknown limits) refuses a
+            # server workflow on every path, this one included.
+            raise Failed(e.message)
         if want is None:
             return None
         reply_msg = self.tap.wait_for(want, mark, timeout, self.abort)

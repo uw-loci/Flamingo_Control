@@ -85,6 +85,9 @@ class MicroscopeCommandService:
         command_socket = getattr(self.connection, "_command_socket", None)
         if command_socket is None:
             raise RuntimeError("Command socket not available")
+        from py2flamingo.services import stage_motion_gate
+
+        stage_motion_gate.refuse_workflow_start_in(data)
         command_socket.sendall(data)
 
     def _ensure_connected_for_command(self, command_name: str) -> bool:
@@ -480,8 +483,16 @@ class MicroscopeCommandService:
             Empty bytes (no response expected)
 
         Raises:
+            WorkflowStartRefusedError: emergency stop latched or limits unknown
             RuntimeError: If not connected or send fails
         """
+
+        # A server workflow moves the stage: refused while the emergency stop
+        # is latched or the limits are unknown. The writer checks again
+        # (MVCConnectionService.send_raw_bytes), for any other route.
+        from py2flamingo.services import stage_motion_gate
+
+        stage_motion_gate.ensure_workflow_start_allowed()
 
         if not self.connection.is_connected():
             raise RuntimeError("Not connected to microscope")

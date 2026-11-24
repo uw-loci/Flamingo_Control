@@ -172,6 +172,18 @@ class WorkflowError(FlamingoError):
         super().__init__(message, **kwargs)
 
 
+class WorkflowStartRefusedError(WorkflowError):
+    """A server workflow was not started because the stage must not move.
+
+    Raised before any byte of WORKFLOW_START leaves the computer: while the
+    emergency stop is latched, or while stage motion is blocked because the
+    instrument's limits are unknown (``services/stage_motion_gate``). A server
+    workflow drives the stage, so it is refused for the same reasons a move is.
+    """
+
+    DEFAULT_CODE = 5006
+
+
 class ConfigurationError(FlamingoError):
     """Errors related to application configuration and settings."""
 
@@ -281,6 +293,7 @@ class ErrorCodes:
     WORKFLOW_FAILED = 5003
     STATE_ERROR = 5004
     SEQUENCE_ERROR = 5005
+    WORKFLOW_START_REFUSED = 5006  # e-stop latched or stage limits unknown
 
     # Configuration errors (6000-6999)
     CONFIG_NOT_FOUND = 6001

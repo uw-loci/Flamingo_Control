@@ -120,11 +120,13 @@ class TestStopHooks(unittest.TestCase):
         self.assertIn(("bad", "boom"), result.cancelled)
 
     def test_queue_registers_while_running(self):
+        import threading
         from unittest.mock import patch
 
         from py2flamingo.services.workflow_queue_service import WorkflowQueueService
 
         queue = WorkflowQueueService.__new__(WorkflowQueueService)
+        queue._submit_lock = threading.RLock()
         queue._is_running = False
         queue._queue = [object()]
         with patch("py2flamingo.services.workflow_queue_service.threading.Thread"):

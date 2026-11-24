@@ -160,12 +160,24 @@ for a reply. Each send reports whether its bytes left the computer.
   stop hooks (a running scan cancels itself), and reports "HALT NOT SENT" when
   the HALT bytes could not be written. The latch stays until an operator clears it
   (`stage_motion_gate.clear_emergency_stop`).
+- **Server workflows obey the same latch.** A workflow drives the stage on
+  the server, so WORKFLOW_START (0x3004) is refused while the emergency stop
+  is latched or the limits are unknown
+  (`stage_motion_gate.ensure_workflow_start_allowed`, raising
+  `core.errors.WorkflowStartRefusedError`). The check sits in the one writer,
+  `MVCConnectionService.send_raw_bytes` (and `send_command_async`), which
+  reads the code of every frame in the write (`core.frames.command_codes_in`),
+  so no route sends one: the Workflow tab, the workflow queue (Tile
+  Collection), a pipeline WORKFLOW node and the verification's T4 checks. The
+  Workflow-tab controller and the queue ask first, to report the reason; a
+  queue that is refused stops instead of skipping to its next item, and does
+  not return the stage to its start.
 - The verification runner has its own copy of the stop sequence
   (`verification/runner.py`) that resolves codes by name for the server build
   under test.
 
 Tests: `tests/test_safe_state.py`, `tests/test_emergency_stop*.py`,
-`tests/test_light_off*.py`.
+`tests/test_light_off*.py`, `tests/test_workflow_start_gate.py`.
 
 ## Module-level state
 

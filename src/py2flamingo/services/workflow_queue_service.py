@@ -220,6 +220,19 @@ class WorkflowQueueService(QObject):
         # items, and never on cancel (the stage may still be settling). Best-effort.
         self._return_to_origin_after_queue = True
         self._origin_position: Optional[tuple] = None
+        # Per-run overrides set by start(); None = the defaults above.
+        self._run_return_to_origin: Optional[bool] = None
+        self._run_start_callback = True
+
+        # Why the last run stopped itself (queue_failed's message), or None.
+        self._failure_message: Optional[str] = None
+        # Set when the last item was not started because the stage must not
+        # move (emergency stop latched, limits unknown): the queue stops.
+        self._last_start_refused = False
+
+        # enqueue + start as one step, so two callers cannot interleave their
+        # items (run_single_and_wait from a pipeline thread vs. the GUI).
+        self._submit_lock = threading.RLock()
 
         logger.info(
             "WorkflowQueueService initialized (callback-based completion detection)"
@@ -250,10 +263,17 @@ class WorkflowQueueService(QObject):
             workflow_files: List of workflow file paths
             metadata_list: Optional list of metadata dicts for each workflow
         """
-        if self._is_running:
-            logger.warning("Cannot enqueue while queue is running")
-            return
+        with self._submit_lock:
+            if self._is_running:
+                logger.warning("Cannot enqueue while queue is running")
+                return
+            self._fill_queue(workflow_files, metadata_list)
 
+    def _fill_queue(
+        self,
+        workflow_files: List[Path],
+        metadata_list: Optional[List[Dict[str, Any]]],
+    ) -> None:
         self._queue.clear()
 
         for i, file_path in enumerate(workflow_files):
@@ -266,36 +286,50 @@ class WorkflowQueueService(QObject):
         self._current_index = 0
         logger.info(f"Enqueued {len(self._queue)} workflows")
 
-    def start(self) -> bool:
+    def start(
+        self,
+        return_to_origin: Optional[bool] = None,
+        notify_start_callback: bool = True,
+    ) -> bool:
         """
         Start executing the queue.
+
+        Args:
+            return_to_origin: drive the stage back to where it was once the
+                whole run succeeded. None keeps the service's default (on).
+            notify_start_callback: call the workflow-start callback (Tile
+                Collection's Sample View hook) before each item.
 
         Returns:
             True if started successfully, False if already running or queue empty
         """
-        if self._is_running:
-            logger.warning("Queue is already running")
-            return False
+        with self._submit_lock:
+            if self._is_running:
+                logger.warning("Queue is already running")
+                return False
 
-        if not self._queue:
-            logger.warning("Queue is empty")
-            return False
+            if not self._queue:
+                logger.warning("Queue is empty")
+                return False
 
-        self._is_running = True
-        self._cancel_requested = False
+            self._is_running = True
+            self._cancel_requested = False
+            self._failure_message = None
+            self._run_return_to_origin = return_to_origin
+            self._run_start_callback = notify_start_callback
 
-        # The emergency stop cancels the queue while it runs.
-        from py2flamingo.services import stage_motion_gate
+            # The emergency stop cancels the queue while it runs.
+            from py2flamingo.services import stage_motion_gate
 
-        stage_motion_gate.register_stop_hook("workflow queue", self.cancel)
+            stage_motion_gate.register_stop_hook("workflow queue", self.cancel)
 
-        # Start execution in background thread
-        self._execution_thread = threading.Thread(
-            target=self._execute_queue, name="WorkflowQueueExecution", daemon=True
-        )
-        self._execution_thread.start()
+            # Start execution in background thread
+            self._execution_thread = threading.Thread(
+                target=self._execute_queue, name="WorkflowQueueExecution", daemon=True
+            )
+            self._execution_thread.start()
 
-        return True
+            return True
 
     def cancel(self) -> None:
         """Request cancellation of the queue execution."""
@@ -498,7 +532,7 @@ class WorkflowQueueService(QObject):
             f"acquired={message.int32_data0}, "
             f"expected={message.int32_data1}, "
             f"errors={message.int32_data2}, "
-            f"time={message.double_data:.1f}us"
+            f"time={message.value:.1f}us"
         )
 
         # Stack complete confirms workflow ran
@@ -511,7 +545,7 @@ class WorkflowQueueService(QObject):
             "images_acquired": message.int32_data0,
             "images_expected": message.int32_data1,
             "error_count": message.int32_data2,
-            "acquisition_time_us": message.double_data,
+            "acquisition_time_us": message.value,
         }
 
         # Note: Do NOT set _completion_event here - wait for SYSTEM_STATE_IDLE
@@ -789,9 +823,14 @@ class WorkflowQueueService(QObject):
             # Register callbacks for completion detection
             self._register_callbacks()
 
+            return_to_origin = (
+                self._return_to_origin_after_queue
+                if self._run_return_to_origin is None
+                else self._run_return_to_origin
+            )
             # Remember the stage position before any workflow runs so we can
             # return it here once the whole batch is done (system is idle now).
-            if self._return_to_origin_after_queue:
+            if return_to_origin:
                 self._capture_origin_position()
 
             total = len(self._queue)
@@ -818,7 +857,7 @@ class WorkflowQueueService(QObject):
                 self.workflow_started.emit(i, total, str(item.file_path))
 
                 # Call start callback for Sample View integration
-                if self._on_workflow_start_callback:
+                if self._on_workflow_start_callback and self._run_start_callback:
                     try:
                         self._on_workflow_start_callback(item.file_path, item.metadata)
                     except Exception as e:
@@ -836,6 +875,28 @@ class WorkflowQueueService(QObject):
                     logger.error(f"Workflow {i + 1}/{total} FAILED: {error}")
                     self.error_occurred.emit(f"Workflow {item.file_path.name}: {error}")
 
+                    # Not started because the stage must not move (emergency
+                    # stop latched, limits unknown): every later item would be
+                    # refused too, and skipping on would hide it. Stop here,
+                    # without the return to origin (that is a move too).
+                    if self._last_start_refused:
+                        rest = (
+                            f" Workflows {i + 2}-{total} were not sent."
+                            if i + 1 < total
+                            else ""
+                        )
+                        abort_msg = (
+                            f"Workflow {item.file_path.name} was not started: "
+                            f"{error}\n\nThe queue was stopped.{rest} The stage "
+                            f"was not returned to its start position."
+                        )
+                        logger.error(f"[QUEUE] {abort_msg}")
+                        aborted = True
+                        self._failure_message = abort_msg
+                        self.queue_failed.emit(abort_msg)
+                        self.queue_cancelled.emit()
+                        break
+
                     # A timed-out workflow may still be acquiring. Stop it and
                     # see the server idle before anything else is sent; if
                     # idle is not seen, the queue stops here (no next
@@ -852,6 +913,7 @@ class WorkflowQueueService(QObject):
                             )
                             logger.error(f"[QUEUE] {abort_msg}")
                             aborted = True
+                            self._failure_message = abort_msg
                             self.error_occurred.emit(abort_msg)
                             self.queue_failed.emit(abort_msg)
                             self.queue_cancelled.emit()
@@ -908,7 +970,7 @@ class WorkflowQueueService(QObject):
             if not self._cancel_requested and not aborted:
                 # Firmware is idle now (last workflow reached SYSTEM_STATE_IDLE),
                 # so it is safe to drive the stage back to where it started.
-                if self._return_to_origin_after_queue:
+                if return_to_origin:
                     self._return_to_origin()
                 failed = self.failed_count
                 self.queue_summary.emit(total - failed, failed)
@@ -922,6 +984,8 @@ class WorkflowQueueService(QObject):
             self.error_occurred.emit(f"Queue execution error: {e}")
 
         finally:
+            self._run_return_to_origin = None
+            self._run_start_callback = True
             self._is_running = False
             self._unregister_callbacks()
             from py2flamingo.services import stage_motion_gate
@@ -981,6 +1045,19 @@ class WorkflowQueueService(QObject):
         """
         file_path = item.file_path
         self._last_wait_timed_out = False
+        self._last_start_refused = False
+
+        # A server workflow moves the stage: not while the emergency stop is
+        # latched or the limits are unknown. The send path refuses it too
+        # (stage_motion_gate); asking first keeps the reason exact.
+        from py2flamingo.services import stage_motion_gate
+
+        refusal = stage_motion_gate.workflow_start_refusal()
+        if refusal:
+            self._last_start_refused = True
+            logger.error(f"[QUEUE] Not started: {refusal}")
+            return (False, refusal)
+
         logger.info(f"[QUEUE] Loading workflow: {file_path.name}")
 
         # Load the workflow
@@ -1003,6 +1080,9 @@ class WorkflowQueueService(QObject):
         success, msg = self._workflow_controller.start_workflow()
         if not success:
             logger.error(f"[QUEUE] Start failed: {msg}")
+            # Latched while this item was being loaded: the start was refused.
+            if stage_motion_gate.workflow_start_refusal():
+                self._last_start_refused = True
             return (False, f"Start failed: {msg}")
 
         logger.info(f"[QUEUE] Started workflow: {file_path.name}")

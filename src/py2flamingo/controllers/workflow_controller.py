@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
+from ..core.errors import WorkflowStartRefusedError
 from ..models import ConnectionModel, ConnectionState
 from ..models.data.workflow import WorkflowModel
+from ..services import stage_motion_gate
 from ..utils.workflow_keys import number, whole_number
 from ..utils.workflow_parser import WorkflowTextFormatter
 
@@ -237,8 +239,16 @@ class WorkflowController(QObject):
                 - (True, "Workflow started successfully") on success
                 - (False, "Not connected to server") if not connected and reconnect fails
                 - (False, "No workflow loaded") if no workflow loaded
+                - (False, refusal) while the emergency stop is latched or the
+                  stage limits are unknown (nothing is sent)
                 - (False, error message) on other errors
         """
+        # A server workflow moves the stage (stage_motion_gate).
+        refusal = stage_motion_gate.workflow_start_refusal()
+        if refusal:
+            self._logger.error(f"Workflow not started: {refusal}")
+            return (False, refusal)
+
         # Check connection, attempt reconnect if needed
         if not self._is_connected():
             reconnect_success, reconnect_msg = self._ensure_connected()
@@ -265,6 +275,10 @@ class WorkflowController(QObject):
                 return (True, f"Workflow started: {self._current_workflow_path.name}")
             else:
                 return (False, "Failed to start workflow")
+
+        except WorkflowStartRefusedError as e:
+            self._logger.error(f"Workflow not started: {e.message}")
+            return (False, e.message)
 
         except RuntimeError as e:
             self._logger.error(f"Not connected when starting workflow: {e}")
@@ -470,8 +484,16 @@ class WorkflowController(QObject):
             save_to_disk: Whether to save workflow file to disk before sending
 
         Returns:
-            Tuple of (success, message)
+            Tuple of (success, message); (False, refusal) while the emergency
+            stop is latched or the stage limits are unknown (nothing is sent,
+            the camera AOI is not changed and no file is written).
         """
+        # A server workflow moves the stage (stage_motion_gate).
+        refusal = stage_motion_gate.workflow_start_refusal()
+        if refusal:
+            self._logger.error(f"Workflow not started: {refusal}")
+            return (False, refusal)
+
         # Check connection, attempt reconnect if needed
         if not self._is_connected():
             reconnect_success, reconnect_msg = self._ensure_connected()
@@ -527,6 +549,10 @@ class WorkflowController(QObject):
                 return (True, f"Workflow started: {workflow_name}")
             else:
                 return (False, "Failed to start workflow")
+
+        except WorkflowStartRefusedError as e:
+            self._logger.error(f"Workflow not started: {e.message}")
+            return (False, e.message)
 
         except RuntimeError as e:
             self._logger.error(f"Not connected when starting workflow: {e}")

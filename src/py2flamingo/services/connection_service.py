@@ -17,7 +17,7 @@ from py2flamingo import _version
 from py2flamingo.core import server_layout
 from py2flamingo.core.command_codes import StageCommands
 from py2flamingo.core.queue_manager import QueueManager
-from py2flamingo.services import stage_command_dedup
+from py2flamingo.services import stage_command_dedup, stage_motion_gate
 
 
 def _receive_full_bytes(
@@ -890,6 +890,9 @@ class MVCConnectionService:
         """
         if self.tcp_connection is None:
             raise ConnectionError("Not connected to microscope")
+        # A server workflow moves the stage: refused here, in the one writer,
+        # while the emergency stop is latched or the limits are unknown.
+        stage_motion_gate.refuse_workflow_start_in(data)
         return self.tcp_connection.send_command_bytes(data, lock_wait=lock_wait)
 
     def send_command_async(
@@ -903,6 +906,7 @@ class MVCConnectionService:
         (delegates to tcp_connection). ``expected_response_code`` may be one
         code or several; ``predicate`` is an optional extra test on the reply.
         """
+        stage_motion_gate.refuse_workflow_start_in(command_bytes)
         if self.tcp_connection and hasattr(self.tcp_connection, "send_command_async"):
             return self.tcp_connection.send_command_async(
                 command_bytes, expected_response_code, timeout, predicate

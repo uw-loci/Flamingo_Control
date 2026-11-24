@@ -40,6 +40,13 @@ calls.
 
 Long-running client operations (the workflow queue, the LED 2D overview)
 register a stop hook while they run; the emergency stop calls every hook.
+
+A server workflow moves the stage too, so WORKFLOW_START is refused for the
+same two reasons (:func:`ensure_workflow_start_allowed`). The check sits in
+the one writer every command goes through, ``MVCConnectionService.
+send_raw_bytes`` (:func:`refuse_workflow_start_in`), so the Workflow tab, the
+workflow queue, Tile Collection, a pipeline WORKFLOW node and the
+verification's T4 checks are all refused before a byte is sent.
 """
 
 from __future__ import annotations
@@ -71,6 +78,10 @@ class EmergencyStopActiveError(RuntimeError):
 
 EMERGENCY_STOP_MESSAGE = (
     "Movement blocked - emergency stop active. Clear the emergency stop first."
+)
+WORKFLOW_ESTOP_MESSAGE = (
+    "Workflow not started - emergency stop active. A server workflow moves "
+    "the stage, so nothing was sent. Clear the emergency stop first."
 )
 
 _estop_lock = threading.Lock()
@@ -196,3 +207,55 @@ def build_block_reason(microscope_name: Optional[str]) -> str:
         f"  3. Reconnect. Motion is enabled as soon as that file loads.\n\n"
         f"Full details: {SETUP_DOCS_PATH}\n{SETUP_DOCS_URL}"
     )
+
+
+def workflow_start_refusal() -> Optional[str]:
+    """Why a server workflow must not be started now, or None when it may.
+
+    A workflow drives the stage on the server, so it is refused while the
+    emergency stop is latched and while the instrument's limits are unknown,
+    exactly as a move is.
+    """
+    if _estop_active:
+        return WORKFLOW_ESTOP_MESSAGE
+    if _block_reason is not None:
+        return (
+            "Workflow not started - a server workflow moves the stage, and "
+            "stage motion is blocked. Nothing was sent.\n\n" + _block_reason
+        )
+    return None
+
+
+def ensure_workflow_start_allowed() -> None:
+    """Raise :class:`~py2flamingo.core.errors.WorkflowStartRefusedError` when
+    a server workflow must not be started (see :func:`workflow_start_refusal`).
+    """
+    reason = workflow_start_refusal()
+    if reason is None:
+        return
+    from py2flamingo.core.errors import ErrorCodes, WorkflowStartRefusedError
+
+    raise WorkflowStartRefusedError(
+        reason,
+        error_code=ErrorCodes.WORKFLOW_START_REFUSED,
+        context={
+            "emergency_stop": _estop_active,
+            "motion_blocked": _block_reason is not None,
+        },
+    )
+
+
+def refuse_workflow_start_in(data: bytes) -> None:
+    """Raise before ``data`` is written when it holds a WORKFLOW_START frame
+    that must not be sent. Called by the one command-socket writer."""
+    if is_motion_allowed():
+        return  # the common case: nothing to look at
+    from py2flamingo.core.command_codes import CameraCommands
+    from py2flamingo.core.frames import command_codes_in
+
+    if CameraCommands.WORKFLOW_START in command_codes_in(data):
+        logger.error(
+            "WORKFLOW_START refused before sending: %s",
+            "emergency stop latched" if _estop_active else "stage motion blocked",
+        )
+        ensure_workflow_start_allowed()

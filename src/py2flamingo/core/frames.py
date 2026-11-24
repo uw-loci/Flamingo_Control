@@ -132,6 +132,27 @@ def parse_frame(data: bytes) -> ParsedMessage:
     )
 
 
+def command_codes_in(data: bytes) -> List[int]:
+    """The command code of every frame in ``data``, in order.
+
+    ``data`` is what a writer is about to put on the command socket: one or
+    more frames, each followed by its ``additionalDataBytes`` of payload. The
+    walk stops at the first chunk that does not start with the start marker
+    (a payload is never read as a frame); a write that does not start with a
+    frame yields no codes.
+    """
+    codes: List[int] = []
+    offset = 0
+    while offset + FRAME_SIZE <= len(data):
+        start, code = struct.unpack_from("<II", data, offset)
+        if start != START_MARKER:
+            break
+        codes.append(code)
+        (extra,) = struct.unpack_from("<I", data, offset + 48)
+        offset += FRAME_SIZE + extra
+    return codes
+
+
 def frame_fields(msg: ParsedMessage) -> Dict[str, Any]:
     """A parsed frame as the dict the command services pass around.
 
