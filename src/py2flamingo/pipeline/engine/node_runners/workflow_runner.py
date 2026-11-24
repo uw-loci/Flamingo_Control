@@ -22,19 +22,36 @@ The facade (``workflow_facade`` service) works on workflow text:
 ``load_workflow(path) -> bytes`` and ``start_workflow(bytes) -> bool``, as
 ``services.workflow_service.MVCWorkflowService`` does. The overrides edit that
 text (``pipeline/engine/workflow_overrides.py``) and every Start/End position
-is checked against the stage limits before anything is sent. A facade must
-also say it can report when the workflow has finished
-(``reports_workflow_completion``); the live one cannot yet, so the node
-refuses to start a workflow on the microscope rather than wait 30 minutes and
-then stop it.
+is checked against the stage limits before anything is sent.
+
+How the edited text is run:
+
+* **In the app** the context holds the ``workflow_queue_service``
+  (``services.workflow_queue_service.WorkflowQueueService``). The text goes to
+  the queue as a one-item run (``run_single_and_wait``) and this pipeline
+  thread blocks until the queue reports the item succeeded or failed. The
+  queue confirms the start (the server goes busy) and the end
+  (SYSTEM_STATE_IDLE, or the state poll), sends WORKFLOW_STOP after its
+  timeout, and the emergency stop cancels it. A pipeline cancel cancels the
+  queue. The stage is not driven back to where it was afterwards (the next
+  node's workflow drives it to its own start). The ``acquisition_lock``
+  service, when present, is held around the run, as the LED overview holds
+  it. A queue that is already running something fails the node.
+* **Without a queue** (headless runs) the facade itself must say it can
+  report when a workflow has finished (``reports_workflow_completion``); the
+  live service cannot, so with only a live facade the node refuses to start a
+  workflow rather than wait 30 minutes and then stop it.
 """
 
 import logging
 import math
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
 
+from py2flamingo.core.errors import WorkflowError
 from py2flamingo.pipeline.engine.base_runner import AbstractNodeRunner
 from py2flamingo.pipeline.engine.context import ExecutionContext
 from py2flamingo.pipeline.engine.workflow_overrides import (
@@ -94,22 +111,31 @@ class WorkflowRunner(AbstractNodeRunner):
         except WorkflowOverrideError as e:
             raise RuntimeError(f"Workflow '{node.name}': {e}") from e
 
+        queue = context.get_service("workflow_queue_service")
+        if queue is not None:
+            self._run_through_queue(node, context, queue, data)
+            self._set_completed_outputs(node, context, None)
+            return
+
         if not getattr(workflow_facade, "reports_workflow_completion", False):
             raise RuntimeError(
-                f"Workflow '{node.name}' was not started: the workflow service "
-                "cannot report when a server workflow has finished, so the "
-                f"pipeline would wait {self.TIMEOUT_SECONDS // 60} minutes and then "
-                "stop the acquisition. Nothing was sent. Run the template from "
-                "the Workflow tab instead (see docs/pipeline_json_format.md, "
+                f"Workflow '{node.name}' was not started: there is no workflow "
+                "queue in this run and the workflow service cannot report when "
+                "a server workflow has finished, so the pipeline would wait "
+                f"{self.TIMEOUT_SECONDS // 60} minutes and then stop the "
+                "acquisition. Nothing was sent. Run the pipeline from the "
+                "application's Pipeline Editor (see docs/pipeline_json_format.md, "
                 "WORKFLOW)."
             )
 
         if getattr(workflow_facade, "drives_stage", True):
             # A workflow moves the stage on the server: the emergency stop and
             # an unconfigured scope refuse it as they refuse every move.
-            from py2flamingo.services.stage_motion_gate import ensure_motion_allowed
+            from py2flamingo.services.stage_motion_gate import (
+                ensure_workflow_start_allowed,
+            )
 
-            ensure_motion_allowed()
+            ensure_workflow_start_allowed()
 
         # Execute workflow
         logger.info(f"Starting workflow: {node.name}")
@@ -144,8 +170,69 @@ class WorkflowRunner(AbstractNodeRunner):
             time.sleep(self.POLL_INTERVAL)
 
         logger.info(f"Workflow completed: {node.name}")
+        self._set_completed_outputs(node, context, workflow_facade)
 
-        # Set outputs
+    def _run_through_queue(
+        self, node: PipelineNode, context: ExecutionContext, queue: Any, data: bytes
+    ) -> None:
+        """Run ``data`` as a one-item queue run and wait for its result.
+
+        Raises (having sent nothing) when the stage must not move, when
+        another acquisition holds the lock, or when the queue is busy; raises
+        with the queue's message when the workflow fails, times out or is
+        canceled.
+        """
+        from py2flamingo.services.stage_motion_gate import (
+            ensure_workflow_start_allowed,
+        )
+
+        # Before the lock and the temporary file, so the reason is exact. The
+        # queue and the writer refuse it again if the latch is set meanwhile.
+        ensure_workflow_start_allowed()
+
+        lock = context.get_service("acquisition_lock")
+        lock_name = f"Pipeline workflow '{node.name}'"
+        if lock is not None and not lock.acquire(lock_name):
+            raise WorkflowError(
+                f"Workflow '{node.name}' was not started: another acquisition "
+                "is running (or the optics check refused it). Nothing was sent.",
+                workflow_name=node.name,
+            )
+        path = None
+        try:
+            # The queue runs workflow FILES (WorkflowController.load_workflow).
+            fd, path = tempfile.mkstemp(prefix="pipeline_workflow_", suffix=".txt")
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            logger.info(f"Starting workflow through the workflow queue: {node.name}")
+            ok, why = queue.run_single_and_wait(
+                Path(path),
+                cancel_requested=context.check_cancelled,
+                metadata={"pipeline_node": node.name},
+            )
+        finally:
+            if lock is not None:
+                lock.release(lock_name)
+            if path is not None:
+                try:
+                    os.unlink(path)
+                except OSError as e:
+                    logger.debug(f"Could not remove {path}: {e}")
+
+        if not ok:
+            if context.check_cancelled():
+                raise RuntimeError(
+                    f"Pipeline canceled during workflow '{node.name}' ({why})"
+                )
+            raise WorkflowError(
+                f"Workflow '{node.name}' failed: {why}", workflow_name=node.name
+            )
+        logger.info(f"Workflow completed: {node.name}")
+
+    def _set_completed_outputs(
+        self, node: PipelineNode, context: ExecutionContext, workflow_facade: Any
+    ) -> None:
+        """The node's outputs once its workflow has finished."""
         self._set_output(node, context, "completed", PortType.TRIGGER, True)
 
         # Try to get output file path

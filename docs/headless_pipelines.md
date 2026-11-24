@@ -250,6 +250,12 @@ print(run.succeeded, run.node_states)
     facade, so position override, auto Z-range and auto-tiling all compute for
     real and log what they decided. Nothing reaches the microscope. This is the
     useful mode for testing acquisition geometry.
+  - **In the application** (Pipeline Editor) the node runs its workflow
+    through the workflow queue and waits for the server to finish it. A
+    headless run has no queue, so it never takes that path; if you pass the
+    live `MVCWorkflowService` as `workflow_facade` without a
+    `workflow_queue_service`, the node refuses to start the workflow, because
+    that service cannot tell when a workflow has finished.
 - **`PYTHON_FUNCTION` runs for real** — its body has no hardware dependency.
   A body with no terminating condition will hang a headless run exactly as it
   would a GUI one; there is no timeout.

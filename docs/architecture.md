@@ -52,6 +52,11 @@ lower layer never imports it.
   `PipelineEditorDialog`.
 - **A Protocol in the lower module.** `workflow_queue_service.WorkflowRunner`
   describes the six members the queue calls on `WorkflowController`.
+- **A service object in the run's context.** The pipeline controller puts the
+  application's `WorkflowQueueService` and a `GuiThreadAcquisitionLock`
+  (which calls `start_acquisition`/`stop_acquisition` on the GUI thread) into
+  the `ExecutionContext`; the WORKFLOW node runner uses them by name, and a
+  headless run, which has neither, keeps its stub path.
 - **A registration hook.** `stage_motion_gate.register_stop_hook(name, hook)`:
   scans register what the emergency stop must cancel.
   `safe_state.set_activity_probe(probe)`: the application registers what is

@@ -310,7 +310,7 @@ Every node MUST include exactly these ports with exactly these names, types, and
 | `auto_tiling` | bool | `false` | — | If true, auto-compute tiling from object XY extent vs. camera FOV. Single-FOV objects stay 1x1; larger objects get NxM grid with buffer; the node refuses to run without an object |
 | `buffer_percent` | float | `25.0` | >= 0 | Extra buffer around bounding box (%) for Z-range and XY tiling |
 
-Every Start and End position the node would send is checked against the stage limits, and the node refuses to run outside them or when they are unknown. The node does not start a workflow on the microscope yet (the workflow service cannot report when it finished); it runs headless and in tests. See `docs/pipeline_json_format.md`, WORKFLOW.
+Every Start and End position the node would send is checked against the stage limits, and the node refuses to run outside them or when they are unknown. In the application the node runs its workflow through the workflow queue and waits until the server has finished it; a failed, timed-out or refused workflow fails the node, stopping the pipeline stops the workflow, and the stage is not moved between nodes. While another acquisition or a Tile Collection is running, or the emergency stop is latched, the node fails and nothing is sent. See `docs/pipeline_json_format.md`, WORKFLOW.
 
 ### THRESHOLD Config
 

@@ -218,6 +218,9 @@ class WorkflowQueueService(QObject):
         # during each workflow, so we only ever move it at queue_completed (after
         # SYSTEM_STATE_IDLE confirmed the last workflow finished) — never between
         # items, and never on cancel (the stage may still be settling). Best-effort.
+        # A pipeline node's one-item run (run_single_and_wait) turns it off: the
+        # stage stays where the workflow left it, and the next node's workflow
+        # drives it to its own start.
         self._return_to_origin_after_queue = True
         self._origin_position: Optional[tuple] = None
         # Per-run overrides set by start(); None = the defaults above.
@@ -330,6 +333,75 @@ class WorkflowQueueService(QObject):
             self._execution_thread.start()
 
             return True
+
+    def run_single_and_wait(
+        self,
+        file_path: Path,
+        cancel_requested: Callable[[], bool] = lambda: False,
+        metadata: Optional[Dict[str, Any]] = None,
+        poll_interval_s: float = 0.2,
+    ) -> Tuple[bool, str]:
+        """Run one workflow file as a one-item queue run and block until the
+        queue has finished with it. For callers on their own thread (a
+        pipeline WORKFLOW node); never call it on the GUI thread.
+
+        The run is the queue's ordinary path: the start is confirmed by the
+        server going busy, completion by SYSTEM_STATE_IDLE (or the state
+        poll), a timeout sends WORKFLOW_STOP and waits for idle, the
+        emergency stop cancels it. Two things differ from a Tile Collection
+        run: the stage is NOT returned to where it was afterwards (the caller
+        decides where it goes next), and the workflow-start callback is not
+        called.
+
+        ``cancel_requested`` is polled while waiting; when it turns true the
+        queue is canceled (WORKFLOW_STOP is sent).
+
+        Returns ``(True, "")`` when the workflow completed, else
+        ``(False, why)``: the queue (or a direct Workflow-tab run) was already
+        busy, so nothing was sent; the start was refused or failed; the
+        workflow timed out; or the run was canceled.
+        """
+        with self._submit_lock:
+            if self._is_running:
+                return (
+                    False,
+                    "the workflow queue is already running another acquisition "
+                    f"({len(self._queue)} workflow(s), e.g. a Tile Collection). "
+                    "Nothing was sent; run it again when the queue is idle.",
+                )
+            if self._direct_run_active:
+                return (
+                    False,
+                    "a workflow started from the Workflow tab is still running. "
+                    "Nothing was sent; run it again when it has finished.",
+                )
+            self._fill_queue([Path(file_path)], [metadata or {}])
+            item = self._queue[0]
+            if not self.start(return_to_origin=False, notify_start_callback=False):
+                return (False, "the workflow queue could not be started")
+            thread = self._execution_thread
+
+        canceled = False
+        while thread is not None and thread.is_alive():
+            thread.join(timeout=poll_interval_s)
+            if not canceled and thread.is_alive() and cancel_requested():
+                logger.info("[QUEUE] Single run canceled by its caller")
+                canceled = True
+                self.cancel()
+
+        if canceled:
+            return (False, "canceled; WORKFLOW_STOP was sent")
+        if item.completed:
+            return (True, "")
+        if self._failure_message:
+            return (False, self._failure_message)
+        if self._cancel_requested:
+            return (
+                False,
+                "the workflow queue was canceled (emergency stop or Cancel) "
+                "before the workflow finished",
+            )
+        return (False, item.error or "the workflow did not complete")
 
     def cancel(self) -> None:
         """Request cancellation of the queue execution."""

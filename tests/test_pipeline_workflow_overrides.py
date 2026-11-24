@@ -8,9 +8,10 @@ went to the server unchanged. Now the overrides edit the workflow text in
 place, every Start/End position is checked against the stage limits, and
 these tests read what the synthetic microscope received.
 
-The live facade cannot yet report when a server workflow has finished
-(``get_workflow_status`` does not decode the state), so the node refuses to
-start a workflow through it; the end-to-end tests here use the real send path
+The live facade cannot report when a server workflow has finished
+(``get_workflow_status`` does not decode the state), so without a workflow
+queue the node refuses to start a workflow through it (the queue path is in
+tests/test_pipeline_workflow_queue.py); the tests here use the real send path
 with a status read from the synthetic scope.
 """
 
@@ -188,8 +189,8 @@ class TestOverridesReachTheServer(SyntheticScopeCase):
 
     # ---------------------------------------------------------- refusals
 
-    def _refused(self, pattern, **kwargs):
-        with self.assertRaisesRegex(RuntimeError, pattern):
+    def _refused(self, pattern, error=RuntimeError, **kwargs):
+        with self.assertRaisesRegex(error, pattern):
             self._run(**kwargs)
         time.sleep(0.2)
         self.assertEqual(
@@ -245,8 +246,11 @@ class TestOverridesReachTheServer(SyntheticScopeCase):
     def test_the_emergency_stop_refuses_it(self):
         stage_motion_gate.latch_emergency_stop()
         self.addCleanup(stage_motion_gate.clear_emergency_stop)
+        from py2flamingo.core.errors import WorkflowStartRefusedError
+
         self._refused(
             "emergency stop active",
+            error=WorkflowStartRefusedError,
             config={"use_input_position": True},
             position=(6.5, 13.0, 20.0),
         )
@@ -254,7 +258,7 @@ class TestOverridesReachTheServer(SyntheticScopeCase):
     def test_the_live_service_is_refused_before_anything_is_sent(self):
         # MVCWorkflowService cannot tell when the workflow has finished.
         self._refused(
-            "cannot report when a server workflow has finished",
+            "no workflow queue in this run",
             config={"use_input_position": True},
             position=(6.5, 13.0, 20.0),
             facade=MVCWorkflowService(self.connection, EventManager()),

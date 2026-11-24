@@ -8,7 +8,7 @@ wires signals between executor and editor dialog, and manages lifecycle.
 import logging
 from typing import Any, Callable, Dict, Optional
 
-from PyQt5.QtCore import QObject
+from PyQt5.QtCore import QObject, Qt, QThread, pyqtSignal
 
 from py2flamingo.pipeline.engine.context import ExecutionContext
 from py2flamingo.pipeline.engine.executor import PipelineExecutor
@@ -38,6 +38,50 @@ from py2flamingo.pipeline.models.pipeline import NodeType, Pipeline
 from py2flamingo.pipeline.services.pipeline_service import PipelineService
 
 logger = logging.getLogger(__name__)
+
+
+class GuiThreadAcquisitionLock(QObject):
+    """The application's acquisition lock, for a node on the pipeline thread.
+
+    ``FlamingoApplication.start_acquisition`` emits the signals that disable
+    the stage controls and may open the optics-mismatch dialog, so it must run
+    on the GUI thread. ``acquire``/``release`` run it there and wait for the
+    answer. Made on the GUI thread (by the controller).
+    """
+
+    _call = pyqtSignal(object)
+
+    def __init__(self, app):
+        super().__init__()
+        self._app = app
+        self._call.connect(self._run, Qt.BlockingQueuedConnection)
+
+    @staticmethod
+    def _run(job: Callable[[], None]) -> None:
+        job()
+
+    def _on_gui_thread(self, fn: Callable[[], Any]) -> Any:
+        if QThread.currentThread() == self.thread():
+            return fn()
+        box: Dict[str, Any] = {}
+
+        def job():
+            try:
+                box["result"] = fn()
+            except Exception as e:  # noqa: BLE001 - re-raised on the caller
+                box["error"] = e
+
+        self._call.emit(job)
+        if "error" in box:
+            raise box["error"]
+        return box.get("result")
+
+    def acquire(self, name: str) -> bool:
+        """True when the lock was free and is now held under ``name``."""
+        return bool(self._on_gui_thread(lambda: self._app.start_acquisition(name)))
+
+    def release(self, name: str) -> None:
+        self._on_gui_thread(lambda: self._app.stop_acquisition(name))
 
 
 class PipelineController(QObject):
@@ -122,8 +166,13 @@ class PipelineController(QObject):
                 if facade:
                     services["workflow_facade"] = facade
 
+            # A WORKFLOW node runs its workflow through the queue, which
+            # reports when it has finished (workflow_runner.py).
             if hasattr(self._app, "workflow_queue_service"):
                 services["workflow_queue_service"] = self._app.workflow_queue_service
+
+            if callable(getattr(self._app, "start_acquisition", None)):
+                services["acquisition_lock"] = GuiThreadAcquisitionLock(self._app)
 
             if hasattr(self._app, "voxel_storage"):
                 services["voxel_storage"] = self._app.voxel_storage

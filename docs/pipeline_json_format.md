@@ -144,12 +144,36 @@ How the node changes the workflow and when it refuses (since 2026-11-22):
   (the settings json narrowed to the server's soft limits) before anything is
   sent, overridden or not: a template's placeholder origin is refused like any
   other position outside the limits. Unknown limits refuse the run.
-- **The emergency stop refuses it**, as it refuses every stage move.
-- **The node does not run on the microscope yet.** The workflow service cannot
-  report when a server workflow has finished, so the node would wait 30
-  minutes and then stop the acquisition; it refuses before sending anything.
-  Headless runs (the stub facade) and tests run it. Run the template from the
-  Workflow tab until the node waits through the workflow queue.
+- **The emergency stop refuses it**, as it refuses every stage move, and so
+  does a microscope whose stage limits are unknown. Nothing is sent.
+
+How it runs on the microscope (since 2026-11-24):
+
+- **Through the workflow queue.** In the application the node hands its
+  edited workflow to the same queue Tile Collection uses, as a one-item run,
+  and waits there until the queue reports that the workflow finished: the
+  server going busy confirms the start, its return to idle the end. The next
+  node starts only after that.
+- **A failure fails the node with the queue's message**: the start was
+  refused, the server never went busy within 30 s, or the workflow ran past the
+  queue's 30-minute limit. On a timeout the queue sends WORKFLOW_STOP and waits
+  for the server to report idle before the node fails.
+- **Stopping the pipeline stops the workflow** (WORKFLOW_STOP). The emergency
+  stop cancels it too.
+- **The stage stays where the workflow left it.** A Tile Collection run drives
+  the stage back to where it started; a pipeline node does not, so nothing
+  moves between nodes. The next WORKFLOW node's own Start Position decides
+  where the stage goes next.
+- **One acquisition at a time.** The node holds the application's acquisition
+  lock while its workflow runs (the stage controls are disabled, as during an
+  LED overview). If another acquisition holds it, the workflow queue is busy
+  (a Tile Collection is running), or a workflow started from the Workflow tab
+  is still running, the node fails at once and nothing is sent.
+- **Headless runs** (`py2flamingo-pipeline`, `run_pipeline_headless`) have no
+  queue: the node runs against the stub facade and nothing reaches a
+  microscope (see `docs/headless_pipelines.md`). A run given only the live
+  workflow service and no queue refuses the node, because that service cannot
+  tell when a workflow has finished.
 
 ### THRESHOLD
 
